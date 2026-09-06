@@ -10,16 +10,18 @@
 
 #include "base/containers/adapters.h"
 #include "base/memory/ptr_util.h"
+#include "components/split_tabs/split_tab_id.h"
+#include "components/split_tabs/split_tab_visual_data.h"
 #include "components/tabs/public/pinned_tab_collection.h"
 #include "components/tabs/public/split_tab_collection.h"
-#include "components/tabs/public/split_tab_id.h"
-#include "components/tabs/public/split_tab_visual_data.h"
 #include "components/tabs/public/tab_collection.h"
 #include "components/tabs/public/tab_collection_observer.h"
 #include "components/tabs/public/tab_collection_storage.h"
+#include "components/tabs/public/tab_collection_types.h"
 #include "components/tabs/public/tab_group_tab_collection.h"
 #include "components/tabs/public/tab_interface.h"
 #include "components/tabs/public/unpinned_tab_collection.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
 
 namespace {
 tabs::TabCollection* GetCommonAncestor(tabs::TabCollection* collection_a,
@@ -29,7 +31,7 @@ tabs::TabCollection* GetCommonAncestor(tabs::TabCollection* collection_a,
   }
 
   // Use a set to store all ancestors of the first collection.
-  std::set<tabs::TabCollection*> ancestors;
+  absl::flat_hash_set<tabs::TabCollection*> ancestors;
 
   // 1. Trace the path from collection_a to the root and store it.
   tabs::TabCollection* current_a = collection_a;
@@ -73,7 +75,7 @@ size_t TabStripCollection::IndexOfFirstNonPinnedTab() const {
 }
 
 void TabStripCollection::AddTabRecursive(
-    std::unique_ptr<TabInterface> tab,
+    ScopedTab tab,
     size_t index,
     std::optional<tab_groups::TabGroupId> new_group_id,
     bool new_pinned_state) {
@@ -104,7 +106,7 @@ void TabStripCollection::MoveTabRecursive(
 
   const std::vector<int> tab_indices = {static_cast<int>(initial_index)};
 
-  std::set<tabs::TabCollection::Type> retain_collection_types;
+  TabCollection::TypeEnumSet retain_collection_types;
 
   if (old_group.has_value() && old_group == new_group_id) {
     TabGroupTabCollection* old_group_collection =
@@ -112,8 +114,8 @@ void TabStripCollection::MoveTabRecursive(
 
     // If we are moving the only tab in a group then treat this as a group move.
     if (old_group_collection->TabCountRecursive() == 1) {
-      retain_collection_types.insert(
-          {tabs::TabCollection::Type::SPLIT, tabs::TabCollection::Type::GROUP});
+      retain_collection_types = {tabs::TabCollection::Type::SPLIT,
+                                 tabs::TabCollection::Type::GROUP};
       new_group_id = std::nullopt;
     }
   }
@@ -127,7 +129,7 @@ void TabStripCollection::MoveTabsRecursive(
     size_t destination_index,
     std::optional<tab_groups::TabGroupId> new_group_id,
     bool new_pinned_state,
-    const std::set<TabCollection::Type>& retain_collection_types) {
+    const TabCollection::TypeEnumSet retain_collection_types) {
   CHECK(destination_index >= 0);
   ChildrenPtrs tab_or_collections =
       GetTabsAndCollectionsForMove(tab_indices, retain_collection_types);
@@ -149,13 +151,15 @@ void TabStripCollection::MoveTabsRecursive(
 
   for (auto& tab_or_collection : tab_or_collections) {
     TabCollection* src_parent_collection = nullptr;
-    if (std::holds_alternative<TabInterface*>(tab_or_collection)) {
-      TabInterface* tab_ptr = std::get<TabInterface*>(tab_or_collection);
+    if (std::holds_alternative<DanglingUntriagedTabInterface>(
+            tab_or_collection)) {
+      TabInterface* tab_ptr =
+          std::get<DanglingUntriagedTabInterface>(tab_or_collection);
       src_parent_collection = tab_ptr->GetParentCollection(GetPassKey());
       MoveTabImpl(tab_ptr, move_position);
     } else {
       TabCollection* collection_ptr =
-          std::get<TabCollection*>(tab_or_collection);
+          std::get<DanglingUntriagedTabCollection>(tab_or_collection);
       src_parent_collection = collection_ptr->GetParentCollection();
       MoveCollectionImpl(collection_ptr, move_position);
     }
@@ -194,11 +198,13 @@ TabCollection::Position TabStripCollection::GetMovePosition(
   std::set<tabs::TabInterface*> tabs_moved;
   std::set<tabs::TabCollection*> collections_moved;
   for (const auto& tab_or_collection : tab_or_collections) {
-    if (std::holds_alternative<TabInterface*>(tab_or_collection)) {
-      tabs_moved.insert(std::get<TabInterface*>(tab_or_collection));
+    if (std::holds_alternative<DanglingUntriagedTabInterface>(
+            tab_or_collection)) {
+      tabs_moved.insert(
+          std::get<DanglingUntriagedTabInterface>(tab_or_collection));
     } else {
       TabCollection* collection_ptr =
-          std::get<TabCollection*>(tab_or_collection);
+          std::get<DanglingUntriagedTabCollection>(tab_or_collection);
       collections_moved.insert(collection_ptr);
     }
   }
@@ -215,8 +221,9 @@ TabCollection::Position TabStripCollection::GetMovePosition(
 
 ChildrenPtrs TabStripCollection::GetTabsAndCollectionsForMove(
     const std::vector<int>& tab_indices,
-    const std::set<TabCollection::Type>& retain_collection_types) {
-  std::set<const TabInterface*> selected_tabs;
+    const TabCollection::TypeEnumSet retain_collection_types) {
+  absl::flat_hash_set<const TabInterface*> selected_tabs;
+  selected_tabs.reserve(tab_indices.size());
   for (int index : tab_indices) {
     selected_tabs.insert(GetTabAtIndexRecursive(index));
   }
@@ -224,9 +231,9 @@ ChildrenPtrs TabStripCollection::GetTabsAndCollectionsForMove(
   // Contains set of all the collections fully covered by `tab_indices`. This
   // does not include `pinned_collection_` or `unpinned_collection_` as they
   // cannot be moved.
-  std::set<const TabCollection*> selected_collections;
+  absl::flat_hash_set<const TabCollection*> selected_collections;
 
-  if (retain_collection_types.contains(TabCollection::Type::GROUP)) {
+  if (retain_collection_types.Has(TabCollection::Type::GROUP)) {
     for (const auto& [group_id_, group_collection] : group_mapping_) {
       bool fully_selected = true;
       for (const TabInterface* tab : *group_collection) {
@@ -242,7 +249,7 @@ ChildrenPtrs TabStripCollection::GetTabsAndCollectionsForMove(
     }
   }
 
-  if (retain_collection_types.contains(TabCollection::Type::SPLIT)) {
+  if (retain_collection_types.Has(TabCollection::Type::SPLIT)) {
     for (const auto& [split_id, split_collection] : split_mapping_) {
       bool fully_selected = true;
       for (const TabInterface* tab : *split_collection) {
@@ -306,8 +313,7 @@ ChildrenPtrs TabStripCollection::GetTabsAndCollectionsForMove(
   return move_datas;
 }
 
-std::unique_ptr<TabInterface> TabStripCollection::RemoveTabAtIndexRecursive(
-    size_t index) {
+ScopedTab TabStripCollection::RemoveTabAtIndexRecursive(size_t index) {
   TabInterface* tab_to_be_removed = GetTabAtIndexRecursive(index);
   TabCollection* parent_collection =
       tab_to_be_removed->GetParentCollection(GetPassKey());
@@ -324,8 +330,7 @@ std::unique_ptr<TabInterface> TabStripCollection::RemoveTabAtIndexRecursive(
   }
 }
 
-std::unique_ptr<TabInterface> TabStripCollection::MaybeRemoveTab(
-    TabInterface* tab) {
+ScopedTab TabStripCollection::MaybeRemoveTab(TabInterface* tab) {
   CHECK(tab);
   return nullptr;
 }
@@ -488,10 +493,10 @@ std::set<split_tabs::SplitTabId> TabStripCollection::ListSplits() const {
 
 void TabStripCollection::ValidateData() const {
   for (const auto& [_, group] : group_mapping_) {
-    CHECK(group->ChildCount() > 0);
+    CHECK_GT(group->ChildCount(), 0UL);
   }
   for (const auto& [_, split] : split_mapping_) {
-    CHECK(split->ChildCount() >= 2);
+    CHECK_GE(split->ChildCount(), 2UL);
     for (auto child : split->GetTabsRecursive()) {
       CHECK(split->GetSplitTabId() == child->GetSplit().value());
     }
@@ -573,7 +578,7 @@ void TabStripCollection::RemoveCollectionMapping(
   }
 }
 
-void TabStripCollection::AddTabImpl(std::unique_ptr<TabInterface> tab,
+void TabStripCollection::AddTabImpl(ScopedTab tab,
                                     const TabCollection::Position& position) {
   auto [tab_collection_handle, insert_index] = position;
   TabCollection* tab_collection_ptr = tab_collection_handle.Get();
@@ -609,8 +614,7 @@ void TabStripCollection::AddTabCollectionImpl(
       collection_ptr->TabCountRecursive() > 0);
 }
 
-std::unique_ptr<TabInterface> TabStripCollection::RemoveTabImpl(
-    TabInterface* tab) {
+ScopedTab TabStripCollection::RemoveTabImpl(TabInterface* tab) {
   CHECK(tab);
 
   TabCollection* parent_collection = tab->GetParentCollection(GetPassKey());
@@ -618,8 +622,7 @@ std::unique_ptr<TabInterface> TabStripCollection::RemoveTabImpl(
       parent_collection->GetHandle(),
       parent_collection->GetIndexOfTab(tab).value()};
 
-  std::unique_ptr<TabInterface> removed_tab =
-      parent_collection->MaybeRemoveTab(tab);
+  ScopedTab removed_tab = parent_collection->MaybeRemoveTab(tab);
 
   CHECK(removed_tab);
 
@@ -676,8 +679,7 @@ void TabStripCollection::MoveTabImpl(TabInterface* tab_ptr,
     position.index -= 1;
   }
 
-  std::unique_ptr<TabInterface> removed_tab =
-      src_parent_collection->MaybeRemoveTab(tab_ptr);
+  ScopedTab removed_tab = src_parent_collection->MaybeRemoveTab(tab_ptr);
 
   dst_parent_collection->AddTab(std::move(removed_tab), position.index);
 
@@ -774,15 +776,18 @@ TabCollection::Position TabStripCollection::GetInsertionDetails(
 TabCollection::Position TabStripCollection::GetNodePosition(
     ChildPtr tab_or_collection) {
   TabCollection::Position node_position;
-  if (std::holds_alternative<TabInterface*>(tab_or_collection)) {
-    TabInterface* tab_ptr = std::get<TabInterface*>(tab_or_collection);
+  if (std::holds_alternative<DanglingUntriagedTabInterface>(
+          tab_or_collection)) {
+    TabInterface* tab_ptr =
+        std::get<DanglingUntriagedTabInterface>(tab_or_collection);
     TabCollection* src_parent_collection =
         tab_ptr->GetParentCollection(GetPassKey());
     return TabCollection::Position{
         src_parent_collection->GetHandle(),
         src_parent_collection->GetIndexOfTab(tab_ptr).value()};
   } else {
-    TabCollection* collection_ptr = std::get<TabCollection*>(tab_or_collection);
+    TabCollection* collection_ptr =
+        std::get<DanglingUntriagedTabCollection>(tab_or_collection);
     TabCollection* src_parent_collection =
         collection_ptr->GetParentCollection();
     return TabCollection::Position{

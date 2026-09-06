@@ -7,12 +7,12 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <memory>
 #include <utility>
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -41,6 +41,7 @@
 
 #if BUILDFLAG(IS_WIN)
 #include "base/test/test_reg_util_win.h"
+#include "base/win/win_util.h"
 #endif  // BUILDFLAG(IS_WIN)
 
 namespace {
@@ -60,8 +61,8 @@ class RegistryVerifier : public PrefStore::Observer {
 
   // PrefStore::Observer implementation
   void OnPrefValueChanged(std::string_view key) override {
-    EXPECT_TRUE(base::Contains(*pref_registry_, key,
-                               &PrefValueMap::Map::value_type::first))
+    EXPECT_TRUE(std::ranges::contains(*pref_registry_, key,
+                                      &PrefValueMap::Map::value_type::first))
         << "Unregistered key " << key << " was changed.";
   }
 
@@ -320,6 +321,11 @@ class ProfilePrefStoreManagerTest : public testing::Test,
   // any registry changes by this test don't affect other parts of the registry
   // on the machine running the test, and are cleaned up.
   registry_util::RegistryOverrideManager registry_override_;
+
+  // These tests require the machine not to be domain joined. This makes the
+  // tests pass on Dev machines, which are domain joined.
+  base::win::ScopedDomainStateForTesting scoped_domain_state_{false};
+  base::win::ScopedAzureADJoinStateForTesting scoped_aad_state_{std::nullopt};
 #endif  // BUILDFLAG(IS_WIN)
   std::vector<prefs::mojom::TrackedPreferenceMetadataPtr> configuration_;
   base::ScopedTempDir profile_dir_;
@@ -385,7 +391,7 @@ TEST_F(ProfilePrefStoreManagerTest, ProtectValues) {
 }
 
 TEST_F(ProfilePrefStoreManagerTest, InitializePrefsFromMasterPrefs) {
-  base::Value::Dict master_prefs;
+  base::DictValue master_prefs;
   master_prefs.Set(kTrackedAtomic, kFoobar);
   master_prefs.Set(kProtectedAtomic, kHelloWorld);
   EXPECT_TRUE(manager_->InitializePrefsFromMasterPrefs(

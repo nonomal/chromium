@@ -6,15 +6,11 @@ package org.chromium.chrome.browser.compositor.overlays.strip.reorder;
 
 import static org.chromium.build.NullUtil.assertNonNull;
 import static org.chromium.build.NullUtil.assumeNonNull;
-import static org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutUtils.isTabPinningFromStripEnabled;
 
 import android.app.Activity;
 import android.content.ClipDescription;
 import android.content.Context;
 import android.content.res.Resources;
-import android.graphics.BlurMaskFilter;
-import android.graphics.Canvas;
-import android.graphics.Paint;
 import android.graphics.Point;
 import android.graphics.PointF;
 import android.os.Handler;
@@ -23,15 +19,12 @@ import android.view.DragEvent;
 import android.view.View;
 import android.view.View.DragShadowBuilder;
 import android.view.ViewGroup;
-import android.widget.ImageView;
-
-import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.DeviceInfo;
 import org.chromium.base.Log;
 import org.chromium.base.Token;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
@@ -46,6 +39,7 @@ import org.chromium.chrome.browser.multiwindow.MultiInstanceManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab_ui.TabContentManager;
 import org.chromium.chrome.browser.tabmodel.TabGroupMetadata;
+import org.chromium.chrome.browser.tabmodel.TabList;
 import org.chromium.chrome.browser.tasks.tab_management.MultiThumbnailCardProvider;
 import org.chromium.chrome.browser.tasks.tab_management.TabDragHandlerBase;
 import org.chromium.ui.base.MimeTypeUtils;
@@ -72,8 +66,8 @@ public class TabStripDragHandler extends TabDragHandlerBase {
 
     private final Supplier<StripLayoutHelper> mStripLayoutHelperSupplier;
     private final Supplier<Boolean> mStripLayoutVisibilitySupplier;
-    private final ObservableSupplier<TabContentManager> mTabContentManagerSupplier;
-    private final ObservableSupplier<LayerTitleCache> mLayerTitleCacheSupplier;
+    private final MonotonicObservableSupplier<TabContentManager> mTabContentManagerSupplier;
+    private final MonotonicObservableSupplier<LayerTitleCache> mLayerTitleCacheSupplier;
     private final BrowserControlsStateProvider mBrowserControlStateProvider;
     private final float mPxToDp;
     private final Supplier<Integer> mTabStripHeightSupplier;
@@ -82,6 +76,7 @@ public class TabStripDragHandler extends TabDragHandlerBase {
     private final Handler mHandler = new Handler(Looper.getMainLooper());
 
     private final Runnable mOnDragExitRunnable = this::onDragExit;
+    private final Runnable mOnDragEndRunnable = this::stopReorderModeOnDragEnd;
 
     /** Drag shadow properties */
     @Nullable private StripDragShadowView mShadowView;
@@ -96,6 +91,8 @@ public class TabStripDragHandler extends TabDragHandlerBase {
     // Tracks whether the current drag has ever left the source strip.
     private boolean mDragEverLeftStrip;
 
+    private boolean mWasCancelled;
+
     /**
      * Prepares the toolbar view to listen to the drag events and data drop after the drag is
      * initiated.
@@ -103,7 +100,7 @@ public class TabStripDragHandler extends TabDragHandlerBase {
      * @param context Context to get resources.
      * @param stripLayoutHelperSupplier Supplier for StripLayoutHelper to perform strip actions.
      * @param stripLayoutVisibilitySupplier Supplier for if the given tab strip is visible.
-     * @param tabContentManagerSupplier Supplier for the TabContentManager.
+     * @param tabContentManagerSupplier Supplier of the manager providing tab thumbnail snapshots.
      * @param layerTitleCacheSupplier Supplier for the LayerTitleCache.
      * @param multiInstanceManager MultiInstanceManager to perform move action when drop completes.
      * @param dragAndDropDelegate DragAndDropDelegate to initiate tab drag and drop.
@@ -111,25 +108,19 @@ public class TabStripDragHandler extends TabDragHandlerBase {
      *     dimens.
      * @param activitySupplier Supplier for the current activity.
      * @param tabStripHeightSupplier Supplier of the tab strip height.
-     * @param isAppInDesktopWindowSupplier Supplier for the current window desktop state.
      */
     public TabStripDragHandler(
             Context context,
             Supplier<StripLayoutHelper> stripLayoutHelperSupplier,
             Supplier<Boolean> stripLayoutVisibilitySupplier,
-            ObservableSupplier<TabContentManager> tabContentManagerSupplier,
-            ObservableSupplier<LayerTitleCache> layerTitleCacheSupplier,
+            MonotonicObservableSupplier<TabContentManager> tabContentManagerSupplier,
+            MonotonicObservableSupplier<LayerTitleCache> layerTitleCacheSupplier,
             MultiInstanceManager multiInstanceManager,
             DragAndDropDelegate dragAndDropDelegate,
             BrowserControlsStateProvider browserControlStateProvider,
             Supplier<@Nullable Activity> activitySupplier,
-            Supplier<Integer> tabStripHeightSupplier,
-            Supplier<Boolean> isAppInDesktopWindowSupplier) {
-        super(
-                activitySupplier,
-                multiInstanceManager,
-                dragAndDropDelegate,
-                isAppInDesktopWindowSupplier);
+            Supplier<Integer> tabStripHeightSupplier) {
+        super(activitySupplier, multiInstanceManager, dragAndDropDelegate);
         mPxToDp = 1.f / context.getResources().getDisplayMetrics().density;
         mTabStripHeightSupplier = tabStripHeightSupplier;
         mStripLayoutHelperSupplier = stripLayoutHelperSupplier;
@@ -231,7 +222,7 @@ public class TabStripDragHandler extends TabDragHandlerBase {
         // Initialize drag shadow.
         initShadowView(dragSourceView);
         if (mShadowView != null) {
-            Tab firstTabInGroup = getCurrentTabGroupModelFilter().getTabsInGroup(tabGroupId).get(0);
+            Tab firstTabInGroup = getCurrentModel().getTabsInGroup(tabGroupId).get(0);
             mShadowView.prepareForGroupDrag(firstTabInGroup, (int) (widthDp / mPxToDp));
         }
         return startDragInternal(dropData, startPoint, positionX, dragSourceView);
@@ -258,7 +249,7 @@ public class TabStripDragHandler extends TabDragHandlerBase {
                         getActivity(),
                         mBrowserControlStateProvider,
                         tabContentManager,
-                        getCurrentTabGroupModelFilterSupplier());
+                        getCurrentTabModelSupplier());
         mMultiThumbnailCardProvider.initWithNative(
                 assumeNonNull(getTabModelSelector().getModel(/* incognito= */ false).getProfile()));
 
@@ -276,69 +267,43 @@ public class TabStripDragHandler extends TabDragHandlerBase {
                 mLayerTitleCacheSupplier,
                 getTabModelSelector(),
                 () -> {
-                    TabDragShadowBuilder builder =
-                            (TabDragShadowBuilder) DragDropGlobalState.getDragShadowBuilder();
-                    // We register callbacks (e.g. to update the thumbnail) that may attempt to
-                    // update the shadow after the drop has already ended. No-op in that case.
-                    if (builder != null) {
-                        showDragShadow(builder.mShowDragShadow);
+                    DragShadowBuilder shadowBuilder = DragDropGlobalState.getDragShadowBuilder();
+                    if (shadowBuilder instanceof TabDragShadowBuilder builder) {
+                        // We register callbacks (e.g. to update the thumbnail) that may attempt to
+                        // update the shadow after the drop has already ended. No-op in that case.
+                        showDragShadow(builder.getShowDragShadow());
                     }
                 });
     }
 
     @Override
     public boolean onDrag(View view, DragEvent dragEvent) {
-        boolean res = false;
         switch (dragEvent.getAction()) {
             case DragEvent.ACTION_DRAG_STARTED:
-                res = onDragStart(dragEvent.getX(), dragEvent.getClipDescription());
-                break;
+                return onDragStart(dragEvent.getX(), dragEvent.getClipDescription());
             case DragEvent.ACTION_DRAG_ENDED:
-                res = onDragEnd(dragEvent.getResult());
-                break;
+                return onDragEnd(dragEvent.getResult());
             case DragEvent.ACTION_DRAG_ENTERED:
                 // We'll trigger #onDragEnter when handling the following ACTION_DRAG_LOCATION so we
                 // have position data available (and can check if we've entered the tab strip).
-                res = false;
-                break;
+                return false;
             case DragEvent.ACTION_DRAG_EXITED:
-                if (mHoveringInStrip) res = onDragExit();
-                break;
+                // When leaving from the non-strip region (i.e. the toolbar region), the #onDragExit
+                // will already have been processed, so skip triggering it here.
+                if (mHoveringInStrip) return onDragExit();
+                return false;
             case DragEvent.ACTION_DRAG_LOCATION:
-                boolean isCurrYInTabStrip = didOccurInTabStrip(dragEvent.getY());
-                if (isCurrYInTabStrip) {
-                    if (!mHoveringInStrip) {
-                        // dragged onto strip from outside controls OR from toolbar.
-                        res = onDragEnter(dragEvent.getX());
-                    } else {
-                        // drag moved within strip.
-                        res = onDragLocation(dragEvent.getX(), dragEvent.getY());
-                    }
-                    mLastXDp = dragEvent.getX() * mPxToDp;
-                } else if (mHoveringInStrip) {
-                    // drag moved from within to outside strip.
-                    res = onDragExit();
-                }
-                break;
+                return onDragLocation(dragEvent.getX(), dragEvent.getY());
             case DragEvent.ACTION_DROP:
-                if (didOccurInTabStrip(dragEvent.getY())) {
-                    res = onDrop(dragEvent);
-                } else {
-                    DragDropMetricUtils.recordDragDropResult(
-                            DragDropResult.IGNORED_TOOLBAR,
-                            mIsAppInDesktopWindowSupplier.get(),
-                            isTabGroupDrop(),
-                            isMultiTabDrop());
-                    res = false;
-                }
-                break;
+                return onDrop(dragEvent);
         }
-        return res;
+        return false;
     }
 
     /** Cleans up internal state. */
     @Override
     public void destroy() {
+        super.destroy();
         if (mMultiThumbnailCardProvider != null) {
             mMultiThumbnailCardProvider.destroy();
             mMultiThumbnailCardProvider = null;
@@ -361,6 +326,12 @@ public class TabStripDragHandler extends TabDragHandlerBase {
             return Boolean.TRUE.equals(mStripLayoutVisibilitySupplier.get());
         }
 
+        // This callback ends reorder mode. If a new drag is starting, we should cancel the runnable
+        // so it does not unexpectedly end the new drag.
+        if (mHandler.hasCallbacks(mOnDragEndRunnable)) {
+            mHandler.removeCallbacks(mOnDragEndRunnable);
+        }
+
         // If the tab is quickly dragged off the source strip on drag start with a mouse, the source
         // strip may not receive an enter/exit event, preventing the drag shadow from being made
         // visible. Post an #onDragExit here that will be cancelled if the source strip gets that
@@ -369,6 +340,7 @@ public class TabStripDragHandler extends TabDragHandlerBase {
         mHandler.postDelayed(mOnDragExitRunnable, /* delayMillis= */ 50L);
 
         mLastXDp = xPx * mPxToDp;
+        mWasCancelled = false;
         return true;
     }
 
@@ -385,7 +357,34 @@ public class TabStripDragHandler extends TabDragHandlerBase {
         return true;
     }
 
+    /**
+     * The Android view we register this handler to is larger than the tab strip itself, so we need
+     * to fake enter/location/exit events based on the true position of the event.
+     *
+     * @param xPx The x-position in px.
+     * @param yPx The y-position in px.
+     * @return Whether or not the drag event was handled.
+     */
     private boolean onDragLocation(float xPx, float yPx) {
+        boolean res = false;
+        boolean isCurrYInTabStrip = didOccurInTabStrip(yPx);
+        if (isCurrYInTabStrip) {
+            if (!mHoveringInStrip) {
+                // dragged onto strip from outside controls OR from toolbar.
+                res = onDragEnter(xPx);
+            } else {
+                // drag moved within strip.
+                res = onDragLocationInStrip(xPx, yPx);
+            }
+            mLastXDp = xPx * mPxToDp;
+        } else if (mHoveringInStrip) {
+            // drag moved from within to outside strip.
+            res = onDragExit();
+        }
+        return res;
+    }
+
+    private boolean onDragLocationInStrip(float xPx, float yPx) {
         float xDp = xPx * mPxToDp;
         float yDp = yPx * mPxToDp;
         mStripLayoutHelperSupplier
@@ -394,9 +393,29 @@ public class TabStripDragHandler extends TabDragHandlerBase {
         return true;
     }
 
+    /**
+     * The Android view we register this handler to is larger than the tab strip itself, so we need
+     * to check the drop location before processing it.
+     *
+     * @param dropEvent The {@link DragEvent} representing the drop event.
+     * @return Whether or not the drag event was handled.
+     */
     private boolean onDrop(DragEvent dropEvent) {
+        boolean res;
+        if (didOccurInTabStrip(dropEvent.getY())) {
+            res = onDropInStrip(dropEvent);
+        } else {
+            DragDropMetricUtils.recordDragDropResult(
+                    DragDropResult.IGNORED_TOOLBAR, isTabGroupDrop(), isMultiTabDrop());
+            res = false;
+        }
+        if (res) DragDropGlobalState.notifyChromeHandledDrop(dropEvent);
+        return res;
+    }
+
+    private boolean onDropInStrip(DragEvent dropEvent) {
         StripLayoutHelper helper = mStripLayoutHelperSupplier.get();
-        helper.stopReorderMode();
+        helper.stopReorderMode(false);
         if (isDragSource()) {
             DragDropMetricUtils.recordReorderStripWithDragDrop(
                     mDragEverLeftStrip, isTabGroupDrop(), isMultiTabDrop());
@@ -435,22 +454,29 @@ public class TabStripDragHandler extends TabDragHandlerBase {
         recordTabRemovedFromGroupUserAction();
 
         // Move tab to another window.
+        int destWindowId = mMultiInstanceManager.getCurrentInstanceId();
         if (!tabDraggedBelongToCurrentModel) {
             // Reject cross-model drops if incognito is opened as a new window.
             if (IncognitoUtils.shouldOpenIncognitoAsWindow()) return false;
 
-            mMultiInstanceManager.moveTabsToWindow(
-                    getActivity(),
+            mMultiInstanceOrchestrator.moveTabsToWindowByIdChecked(
+                    destWindowId,
                     Collections.singletonList(tabBeingDragged),
-                    getTabModelSelector().getModel(tabBeingDragged.isIncognito()).getCount());
+                    getTabModelSelector().getModel(tabBeingDragged.isIncognito()).getCount(),
+                    /* destGroupTabId= */ TabList.INVALID_TAB_INDEX,
+                    /* bringToFront= */ true);
             showDroppedDifferentModelToast(getActivity());
         } else {
             // Reparent tab at drop index and merge to group on destination if needed.
             int tabIndex =
                     helper.getTabIndexForTabDrop(
                             dropEvent.getX() * mPxToDp, tabBeingDragged.getIsPinned());
-            mMultiInstanceManager.moveTabsToWindow(
-                    getActivity(), Collections.singletonList(tabBeingDragged), tabIndex);
+            mMultiInstanceOrchestrator.moveTabsToWindowByIdChecked(
+                    destWindowId,
+                    Collections.singletonList(tabBeingDragged),
+                    tabIndex,
+                    /* destGroupTabId= */ TabList.INVALID_TAB_INDEX,
+                    /* bringToFront= */ true);
             helper.maybeMergeToGroupOnDrop(
                     Collections.singletonList(tabBeingDragged.getId()),
                     tabIndex,
@@ -458,13 +484,11 @@ public class TabStripDragHandler extends TabDragHandlerBase {
         }
         DragDropMetricUtils.recordDragDropType(
                 DragDropType.TAB_STRIP_TO_TAB_STRIP,
-                mIsAppInDesktopWindowSupplier.get(),
                 /* isTabGroup= */ false,
                 /* isMultiTab= */ false);
         return true;
     }
 
-    // TODO(crbug.com/437417213): Handle pinned tab.
     private boolean handleMultiTabDrop(DragEvent dropEvent, StripLayoutHelper helper) {
         DragDropGlobalState globalState = getDragDropGlobalState(dropEvent);
         assertNonNull(globalState);
@@ -475,23 +499,31 @@ public class TabStripDragHandler extends TabDragHandlerBase {
         boolean tabsDraggedBelongToCurrentModel =
                 doesBelongToCurrentModel(tabsBeingDragged.get(0).isIncognitoBranded());
         // Move tabs to another window.
+        int destWindowId = mMultiInstanceManager.getCurrentInstanceId();
         if (!tabsDraggedBelongToCurrentModel) {
             // Reject cross-model drops if incognito is opened as a new window.
             if (IncognitoUtils.shouldOpenIncognitoAsWindow()) return false;
 
-            mMultiInstanceManager.moveTabsToWindow(
-                    getActivity(),
+            mMultiInstanceOrchestrator.moveTabsToWindowByIdChecked(
+                    destWindowId,
                     tabsBeingDragged,
                     getTabModelSelector()
                             .getModel(tabsBeingDragged.get(0).isIncognito())
-                            .getCount());
+                            .getCount(),
+                    /* destGroupTabId= */ TabList.INVALID_TAB_INDEX,
+                    /* bringToFront= */ true);
             showDroppedDifferentModelToast(getActivity());
         } else {
             // Reparent tabs at drop index.
             int tabIndex =
                     helper.getTabIndexForTabDrop(
                             dropEvent.getX() * mPxToDp, isDraggingPinnedItem());
-            mMultiInstanceManager.moveTabsToWindow(getActivity(), tabsBeingDragged, tabIndex);
+            mMultiInstanceOrchestrator.moveTabsToWindowByIdChecked(
+                    destWindowId,
+                    tabsBeingDragged,
+                    tabIndex,
+                    /* destGroupTabId= */ TabList.INVALID_TAB_INDEX,
+                    /* bringToFront= */ true);
             List<Integer> tabsBeingDraggedIds = new ArrayList<>();
             for (Tab tab : tabsBeingDragged) {
                 tabsBeingDraggedIds.add(tab.getId());
@@ -500,7 +532,6 @@ public class TabStripDragHandler extends TabDragHandlerBase {
         }
         DragDropMetricUtils.recordDragDropType(
                 DragDropType.TAB_STRIP_TO_TAB_STRIP,
-                mIsAppInDesktopWindowSupplier.get(),
                 /* isTabGroup= */ false,
                 /* isMultiTab= */ true);
         return true;
@@ -523,24 +554,26 @@ public class TabStripDragHandler extends TabDragHandlerBase {
                 doesBelongToCurrentModel(tabGroupMetadata.isIncognito);
 
         // Move tab group to another window.
+        int windowId = mMultiInstanceManager.getCurrentInstanceId();
         if (!tabGroupDraggedBelongToCurrentModel) {
             // Reject cross-model drops if incognito is opened as a new window.
             if (IncognitoUtils.shouldOpenIncognitoAsWindow()) return false;
 
-            mMultiInstanceManager.moveTabGroupToWindow(
-                    getActivity(),
+            mMultiInstanceOrchestrator.moveTabGroupToWindowByIdChecked(
+                    windowId,
                     tabGroupMetadata,
-                    getTabModelSelector().getModel(tabGroupMetadata.isIncognito).getCount());
+                    getTabModelSelector().getModel(tabGroupMetadata.isIncognito).getCount(),
+                    /* bringToFront= */ true);
             showDroppedDifferentModelToast(getActivity());
         } else {
             // Reparent tab group at drop index.
             int tabIndex =
                     helper.getTabIndexForTabDrop(dropEvent.getX() * mPxToDp, /* isPinned= */ false);
-            mMultiInstanceManager.moveTabGroupToWindow(getActivity(), tabGroupMetadata, tabIndex);
+            mMultiInstanceOrchestrator.moveTabGroupToWindowByIdChecked(
+                    windowId, tabGroupMetadata, tabIndex, /* bringToFront= */ true);
         }
         DragDropMetricUtils.recordDragDropType(
                 DragDropType.TAB_STRIP_TO_TAB_STRIP,
-                mIsAppInDesktopWindowSupplier.get(),
                 /* isTabGroup= */ true,
                 /* isMultiTab= */ false);
         return true;
@@ -554,7 +587,27 @@ public class TabStripDragHandler extends TabDragHandlerBase {
             return false;
         }
 
-        mStripLayoutHelperSupplier.get().stopReorderMode();
+        if (dropHandled && !DragDropGlobalState.didChromeHandleDrop()) {
+            // If browser content is dragged off the strip, then dropped to create a new window,
+            // there's no strong signal that a reparent is expected. The PendingIntent to create the
+            // new window is sent asynchronously, so it's not guaranteed to be received before this
+            // #onDragEnd. dropHandled could be true for drops that don't result in a reparent, such
+            // as pasting the tab title into a text field.
+            //
+            // This is not an issue when dropping to an existing window, since the reparent is
+            // handled in #onDrop, which is guaranteed to happen before #onDragEnd.
+            //
+            // This causes the dragged content (and most noticeably the previously selected tab) to
+            // flash in its source window before being reparented to the newly created window. To
+            // mitigate this, we'll post the #stopReorderMode event sent to the source tab strip to
+            // hopefully prevent the flashing. This does unnecessarily delay the expected behavior
+            // for non-reparenting drops, but those are expected to be a less common user journey.
+            // See crbug.com/440597875 for more context.
+            mHandler.postDelayed(mOnDragEndRunnable, /* delayMillis= */ 1000L);
+        } else {
+            mStripLayoutHelperSupplier.get().stopReorderMode(mWasCancelled);
+        }
+
         mHandler.removeCallbacks(mOnDragExitRunnable);
         if (mShadowView != null) {
             mShadowView.clear();
@@ -563,6 +616,10 @@ public class TabStripDragHandler extends TabDragHandlerBase {
         finishDrag(dropHandled);
 
         return true;
+    }
+
+    private void stopReorderModeOnDragEnd() {
+        mStripLayoutHelperSupplier.get().stopReorderMode(mWasCancelled);
     }
 
     private void recordTabRemovedFromGroupUserAction() {
@@ -578,15 +635,16 @@ public class TabStripDragHandler extends TabDragHandlerBase {
         mHoveringInStrip = false;
         mDragEverLeftStrip = true;
         if (DeviceInfo.isXr()) {
-            showDragShadow(true);
+            showDragShadow(/* show= */ true);
         }
         boolean isDragSource = isDragSource();
         if (isDragSource) {
-            TabDragShadowBuilder builder =
-                    (TabDragShadowBuilder) DragDropGlobalState.getDragShadowBuilder();
-            if (builder != null && mShadowView != null) {
-                builder.mShowDragShadow = true;
-                mShadowView.expand();
+            DragShadowBuilder shadowBuilder = DragDropGlobalState.getDragShadowBuilder();
+            if (shadowBuilder instanceof TabDragShadowBuilder builder) {
+                if (mShadowView != null) {
+                    builder.setShowDragShadow(/* show= */ true);
+                    mShadowView.expand();
+                }
             }
         }
         mStripLayoutHelperSupplier.get().handleDragExit(isDragSource, isDraggedItemIncognito());
@@ -599,10 +657,10 @@ public class TabStripDragHandler extends TabDragHandlerBase {
             return;
         }
 
-        TabDragShadowBuilder builder =
-                (TabDragShadowBuilder) DragDropGlobalState.getDragShadowBuilder();
-        if (builder == null) return;
-        builder.update(show);
+        DragShadowBuilder shadowBuilder = DragDropGlobalState.getDragShadowBuilder();
+        if (shadowBuilder instanceof TabDragShadowBuilder builder) {
+            builder.update(show);
+        }
     }
 
     public static boolean isDraggingUnpinnedTab() {
@@ -618,7 +676,7 @@ public class TabStripDragHandler extends TabDragHandlerBase {
 
     public static boolean isDraggingPinnedItem() {
         DragDropGlobalState globalState = getDragDropGlobalState(/* dragEvent= */ null);
-        if (!isTabPinningFromStripEnabled() || globalState == null) return false;
+        if (globalState == null) return false;
 
         Tab tab = ChromeDragDropUtils.getTabFromGlobalState(globalState);
         if (tab != null && tab.getIsPinned()) return true;
@@ -656,92 +714,14 @@ public class TabStripDragHandler extends TabDragHandlerBase {
         String text = context.getString(R.string.tab_cannot_be_moved, tabTitle);
         Toast.makeText(context, text, Toast.LENGTH_LONG).show();
         DragDropMetricUtils.recordDragDropResult(
-                DragDropResult.IGNORED_MHTML_TAB,
-                mIsAppInDesktopWindowSupplier.get(),
-                /* isTabGroup= */ true,
-                /* isMultiTab= */ false);
+                DragDropResult.IGNORED_MHTML_TAB, /* isTabGroup= */ true, /* isMultiTab= */ false);
         return true;
     }
 
-    @VisibleForTesting
-    static class TabDragShadowBuilder extends View.DragShadowBuilder {
-        // Touch offset for drag shadow view.
-        private final Point mDragShadowOffset;
-        // Source initiating drag - to call updateDragShadow().
-        private final View mDragSourceView;
-        // Whether drag shadow should be shown.
-        private boolean mShowDragShadow;
-        // Paint for the shadow.
-        private final Paint mShadowPaint;
-        private final float mCornerRadius;
-
-        public TabDragShadowBuilder(View dragSourceView, View shadowView, Point dragShadowOffset) {
-            // Store the View parameter.
-            super(shadowView);
-            mDragShadowOffset = dragShadowOffset;
-            mDragSourceView = dragSourceView;
-
-            // Set up the shadow paint.
-            Context context = shadowView.getContext();
-            Resources resources = shadowView.getResources();
-            mShadowPaint = new Paint();
-            mShadowPaint.setAntiAlias(true);
-            mShadowPaint.setColor(context.getColor(R.color.tab_strip_reorder_shadow_color));
-            float blurThickness =
-                    resources.getDimension(R.dimen.tab_strip_dragged_tab_shadow_thickness);
-            mShadowPaint.setMaskFilter(
-                    new BlurMaskFilter(blurThickness, BlurMaskFilter.Blur.OUTER));
-            mCornerRadius = resources.getDimension(R.dimen.tab_grid_card_bg_radius);
-        }
-
-        public void update(boolean show) {
-            mShowDragShadow = show;
-            mDragSourceView.updateDragShadow(this);
-        }
-
-        @Override
-        public void onDrawShadow(Canvas canvas) {
-            View shadowView = getView();
-            if (mShowDragShadow) {
-                View cardView = shadowView.findViewById(R.id.card_view);
-                if (cardView == null) {
-                    shadowView.draw(canvas); // Fallback
-                    return;
-                }
-                // Draw the shadow.
-                canvas.drawRoundRect(
-                        cardView.getLeft(),
-                        cardView.getTop(),
-                        cardView.getRight(),
-                        cardView.getBottom(),
-                        mCornerRadius,
-                        mCornerRadius,
-                        mShadowPaint);
-
-                // Draw the view on top of the shadow.
-                shadowView.draw(canvas);
-            } else {
-                // When drag shadow should hide, replace with empty ImageView.
-                ImageView imageView = new ImageView(shadowView.getContext());
-                imageView.layout(0, 0, shadowView.getWidth(), shadowView.getHeight());
-                imageView.draw(canvas);
-            }
-        }
-
-        // Defines a callback that sends the drag shadow dimensions and touch point
-        // back to the system.
-        @Override
-        public void onProvideShadowMetrics(Point size, Point touch) {
-            // Set the size parameter's width and height values. These get back to the system
-            // through the size parameter.
-            size.set(getView().getWidth(), getView().getHeight());
-            touch.set(mDragShadowOffset.x, mDragShadowOffset.y);
-            Log.d(TAG, "DnD onProvideShadowMetrics: " + mDragShadowOffset);
-        }
-
-        boolean getShadowShownForTesting() {
-            return mShowDragShadow;
-        }
+    @Override
+    protected @BackPressResult int cancelDrag() {
+        mWasCancelled = true;
+        return super.cancelDrag();
     }
 
     DragShadowBuilder createDragShadowBuilder(
@@ -771,5 +751,9 @@ public class TabStripDragHandler extends TabDragHandlerBase {
 
     Runnable getOnDragExitRunnableForTesting() {
         return mOnDragExitRunnable;
+    }
+
+    Runnable getOnDragEndRunnableForTesting() {
+        return mOnDragEndRunnable;
     }
 }

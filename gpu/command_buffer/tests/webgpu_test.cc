@@ -18,6 +18,7 @@
 #include "gpu/command_buffer/client/webgpu_implementation.h"
 #include "gpu/command_buffer/service/service_utils.h"
 #include "gpu/command_buffer/service/webgpu_decoder.h"
+#include "gpu/config/gpu_switches.h"
 #include "gpu/config/gpu_test_config.h"
 #include "gpu/ipc/in_process_command_buffer.h"
 #include "gpu/ipc/webgpu_in_process_context.h"
@@ -41,8 +42,12 @@ void CountCallback(int* count) {
 
 WebGPUTest::Options::Options() = default;
 
-std::map<std::pair<WGPUDevice, wgpu::ErrorType>, /* matched */ bool>
+// static
+std::map<std::pair<WGPUDevice, wgpu::ErrorType>, bool>
     WebGPUTest::s_expected_errors = {};
+
+// static
+std::map<WGPUDevice, bool> WebGPUTest::s_expected_devices_lost = {};
 
 WebGPUTest::WebGPUTest() = default;
 WebGPUTest::~WebGPUTest() = default;
@@ -102,6 +107,8 @@ void WebGPUTest::Initialize(const Options& options) {
           base::CommandLine::ForCurrentProcess());
   if (options.use_skia_graphite) {
     gpu_preferences.gr_context_type = gpu::GrContextType::kGraphiteDawn;
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kEnableSkiaGraphite);
   } else {
 #if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) && BUILDFLAG(USE_DAWN)
     gpu_preferences.use_vulkan = gpu::VulkanImplementationName::kNative;
@@ -195,6 +202,13 @@ void WebGPUTest::WaitForCompletion(wgpu::Device device) {
       wgpu::CallbackMode::WaitAnyOnly,
       [](wgpu::QueueWorkDoneStatus, wgpu::StringView) {})};
 
+  WaitForFutureCompletion(device, wait_info);
+}
+
+void WebGPUTest::WaitForFutureCompletion(wgpu::Device device,
+                                         wgpu::FutureWaitInfo wait_info) {
+  // Perform a busy loop acting as an event loop checking for the Future to be
+  // completed.
   while (!wait_info.completed) {
     instance_.WaitAny(1, &wait_info, 0);
     webgpu()->FlushCommands();
@@ -233,8 +247,13 @@ wgpu::Device WebGPUTest::GetNewDevice(
 
   device_desc.SetDeviceLostCallback(
       wgpu::CallbackMode::AllowSpontaneous,
-      [](const wgpu::Device&, wgpu::DeviceLostReason reason,
+      [](const wgpu::Device& device, wgpu::DeviceLostReason reason,
          wgpu::StringView message) {
+        auto it = s_expected_devices_lost.find(device.Get());
+        if (it != s_expected_devices_lost.end() && !it->second) {
+          it->second = true;
+          return;
+        }
         if (reason == wgpu::DeviceLostReason::Destroyed) {
           return;
         }

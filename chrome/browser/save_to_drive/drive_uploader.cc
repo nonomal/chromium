@@ -102,7 +102,7 @@ std::optional<DriveUploader::Item> ParseClientFolderResponse(
       endpoint_response->http_status_code != net::HTTP_OK) {
     return std::nullopt;
   }
-  std::optional<base::Value::Dict> dict = base::JSONReader::ReadDict(
+  std::optional<base::DictValue> dict = base::JSONReader::ReadDict(
       endpoint_response->response, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
   if (!dict) {
     return std::nullopt;
@@ -130,7 +130,7 @@ SaveToDriveProgress CreateSuccessProgress(
   if (endpoint_response.response.empty()) {
     return progress;
   }
-  std::optional<base::Value::Dict> dict = base::JSONReader::ReadDict(
+  std::optional<base::DictValue> dict = base::JSONReader::ReadDict(
       endpoint_response.response, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
   if (!dict) {
     return progress;
@@ -200,13 +200,13 @@ DriveUploader::~DriveUploader() = default;
 void DriveUploader::Start() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!identity_manager_->HasAccountWithRefreshToken(
-          account_info_.account_id)) {
+          account_info_.GetAccountId())) {
     NotifyError(SaveToDriveErrorType::kOauthError);
     return;
   }
   scoped_identity_manager_observation_.Observe(identity_manager_);
   access_token_fetcher_ = identity_manager_->CreateAccessTokenFetcherForAccount(
-      account_info_.account_id, signin::OAuthConsumerId::kSaveToDrive,
+      account_info_.GetAccountId(), signin::OAuthConsumerId::kSaveToDrive,
       base::BindOnce(&DriveUploader::OnFetchAccessToken,
                      weak_ptr_factory_.GetWeakPtr()),
       signin::AccessTokenFetcher::Mode::kImmediate);
@@ -237,7 +237,7 @@ void DriveUploader::FetchParentFolder() {
   GURL url = GURL(kParentFolderUrl);
   url = net::AppendOrReplaceQueryParameter(url, "create_as_client_folder",
                                            "true");
-  base::Value::Dict metadata;
+  base::DictValue metadata;
   metadata.Set("name",
                l10n_util::GetStringUTF16(IDS_SAVE_TO_DRIVE_FOLDER_NAME));
   metadata.Set("mimeType", drive::util::kDriveFolderMimeType);
@@ -343,7 +343,7 @@ void DriveUploader::NotifyError(SaveToDriveErrorType error_type) {
 
 void DriveUploader::OnRefreshTokenRemovedForAccount(
     const CoreAccountId& account_id) {
-  if (account_info_.account_id == account_id) {
+  if (account_info_.GetAccountId() == account_id) {
     NotifyError(SaveToDriveErrorType::kOauthError);
   }
 }

@@ -5,10 +5,14 @@
 #include "components/autofill/core/browser/payments/payments_requests/get_details_for_create_card_request.h"
 
 #include "base/functional/callback_helpers.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/values_test_util.h"
 #include "components/autofill/core/browser/payments/client_behavior_constants.h"
 #include "components/autofill/core/browser/payments/payments_request_details.h"
 #include "components/autofill/core/browser/payments/payments_requests/get_details_for_create_card_request_test_api.h"
+#include "components/autofill/core/browser/payments/payments_requests/payments_request_test_api.h"
+#include "components/autofill/core/common/autofill_payments_features.h"
+#include "components/version_info/version_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace autofill::payments {
@@ -29,24 +33,34 @@ std::unique_ptr<GetDetailsForCreateCardRequest> CreateRequest() {
 
 TEST(GetDetailsForCreateCardRequestTest,
      GetRequestContent_ContainsExpectedData) {
+  base::test::ScopedFeatureList feature_list(
+      autofill::features::kAutofillAddChromeUserContextFields);
+
   std::unique_ptr<GetDetailsForCreateCardRequest> request = CreateRequest();
-  base::Value::Dict expected_request_content =
-      base::Value::Dict()
+  base::DictValue expected_request_content =
+      base::DictValue()
           .Set("context",
-               base::Value::Dict()
+               base::DictValue()
                    .Set("billable_service",
-                        payments::kUploadPaymentMethodBillableServiceNumber)
+                        kUploadPaymentMethodBillableServiceNumber)
                    .Set("customer_context",
                         PaymentsRequest::BuildCustomerContextDictionary(
                             kBillingCustomerNumber))
                    .Set("language_code", "en"))
-          .Set("chrome_user_context",
-               base::Value::Dict().Set(
-                   "client_behavior_signals",
-                   base::Value::List().Append(static_cast<int>(
-                       ClientBehaviorConstants::kOfferingToSaveCvc))))
+          .Set(
+              "chrome_user_context",
+              base::DictValue()
+                  .Set("client_behavior_signals",
+                       base::ListValue().Append(static_cast<int>(
+                           ClientBehaviorConstants::kOfferingToSaveCvc)))
+                  .Set("full_sync_enabled", false)
+                  .Set("chrome_major_version",
+                       version_info::GetMajorVersionNumberAsInt())
+                  .Set("client_type",
+                       static_cast<int>(test_api(request.get())
+                                            .GetChromeUserContextClientType())))
           .Set("card_info",
-               base::Value::Dict()
+               base::DictValue()
                    .Set("unique_country_code", "US")
                    .Set("upload_card_source", "UPSTREAM_SAVE_AND_FILL"));
 
@@ -56,14 +70,14 @@ TEST(GetDetailsForCreateCardRequestTest,
 
 TEST(GetDetailsForCreateCardRequestTest, ParseResponse_ResponseIsComplete) {
   std::unique_ptr<GetDetailsForCreateCardRequest> request = CreateRequest();
-  base::Value::Dict response =
-      base::Value::Dict()
+  base::DictValue response =
+      base::DictValue()
           .Set("context_token", u"some token")
           .Set("legal_message",
-               base::Value::Dict().Set("terms_of_service", "Terms of Service"))
+               base::DictValue().Set("terms_of_service", "Terms of Service"))
           .Set("card_details",
-               base::Value::Dict().Set("supported_card_bin_ranges_string",
-                                       "1234,30000-55555,765"));
+               base::DictValue().Set("supported_card_bin_ranges_string",
+                                     "1234,30000-55555,765"));
 
   request->ParseResponse(response);
 
@@ -75,13 +89,13 @@ TEST(GetDetailsForCreateCardRequestTest, ParseResponse_ResponseIsComplete) {
 
 TEST(GetDetailsForCreateCardRequestTest, ParseResponse_MissingContextToken) {
   std::unique_ptr<GetDetailsForCreateCardRequest> request = CreateRequest();
-  base::Value::Dict response =
-      base::Value::Dict()
+  base::DictValue response =
+      base::DictValue()
           .Set("legal_message",
-               base::Value::Dict().Set("terms_of_service", "Terms of Service"))
+               base::DictValue().Set("terms_of_service", "Terms of Service"))
           .Set("card_details",
-               base::Value::Dict().Set("supported_card_bin_ranges_string",
-                                       "1234,30000-55555,765"));
+               base::DictValue().Set("supported_card_bin_ranges_string",
+                                     "1234,30000-55555,765"));
 
   request->ParseResponse(response);
 
@@ -90,12 +104,12 @@ TEST(GetDetailsForCreateCardRequestTest, ParseResponse_MissingContextToken) {
 
 TEST(GetDetailsForCreateCardRequestTest, ParseResponse_MissingLegalMessage) {
   std::unique_ptr<GetDetailsForCreateCardRequest> request = CreateRequest();
-  base::Value::Dict response =
-      base::Value::Dict()
+  base::DictValue response =
+      base::DictValue()
           .Set("context_token", u"some token")
           .Set("card_details",
-               base::Value::Dict().Set("supported_card_bin_ranges_string",
-                                       "1234,30000-55555,765"));
+               base::DictValue().Set("supported_card_bin_ranges_string",
+                                     "1234,30000-55555,765"));
 
   request->ParseResponse(response);
 
@@ -105,11 +119,11 @@ TEST(GetDetailsForCreateCardRequestTest, ParseResponse_MissingLegalMessage) {
 TEST(GetDetailsForCreateCardRequestTest,
      ParseResponse_MissingSupportedCardBinRanges) {
   std::unique_ptr<GetDetailsForCreateCardRequest> request = CreateRequest();
-  base::Value::Dict response =
-      base::Value::Dict()
+  base::DictValue response =
+      base::DictValue()
           .Set("context_token", u"some token")
           .Set("legal_message",
-               base::Value::Dict().Set("terms_of_service", "Terms of Service"));
+               base::DictValue().Set("terms_of_service", "Terms of Service"));
 
   request->ParseResponse(response);
 
@@ -117,5 +131,4 @@ TEST(GetDetailsForCreateCardRequestTest,
 }
 
 }  // namespace
-
 }  // namespace autofill::payments

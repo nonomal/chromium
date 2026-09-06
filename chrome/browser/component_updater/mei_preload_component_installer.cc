@@ -4,6 +4,7 @@
 
 #include "chrome/browser/component_updater/mei_preload_component_installer.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -65,7 +66,7 @@ bool MediaEngagementPreloadComponentInstallerPolicy::RequiresNetworkEncryption()
 
 update_client::CrxInstaller::Result
 MediaEngagementPreloadComponentInstallerPolicy::OnCustomInstall(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) {
   return update_client::CrxInstaller::Result(0);  // Nothing custom here.
 }
@@ -80,7 +81,7 @@ base::FilePath MediaEngagementPreloadComponentInstallerPolicy::GetInstalledPath(
 void MediaEngagementPreloadComponentInstallerPolicy::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
-    base::Value::Dict manifest) {
+    base::DictValue manifest) {
   static constexpr base::TaskTraits kTaskTraits = {
       base::MayBlock(), base::TaskPriority::BEST_EFFORT,
       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN};
@@ -97,7 +98,7 @@ void MediaEngagementPreloadComponentInstallerPolicy::ComponentReady(
 
 // Called during startup and installation before ComponentReady().
 bool MediaEngagementPreloadComponentInstallerPolicy::VerifyInstallation(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) const {
   // No need to actually validate the proto here, since we'll do the checking
   // in LoadFromFile().
@@ -111,8 +112,7 @@ MediaEngagementPreloadComponentInstallerPolicy::GetRelativeInstallDir() const {
 
 void MediaEngagementPreloadComponentInstallerPolicy::GetHash(
     std::vector<uint8_t>* hash) const {
-  hash->assign(std::begin(kMeiPreloadPublicKeySHA256),
-               std::end(kMeiPreloadPublicKeySHA256));
+  hash->assign_range(kMeiPreloadPublicKeySHA256);
 }
 
 std::string MediaEngagementPreloadComponentInstallerPolicy::GetName() const {

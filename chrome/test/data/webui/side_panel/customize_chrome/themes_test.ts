@@ -25,7 +25,7 @@ function createTestCollection(name: string): BackgroundCollection {
   const testCollection: BackgroundCollection = {
     id: `${name}_id`,
     label: name,
-    previewImageUrl: {url: `https://collection-${name}.jpg`},
+    previewImageUrl: `https://collection-${name}.jpg`,
     imageVerified: false,
   };
   return testCollection;
@@ -37,9 +37,9 @@ function createTestImages(length: number): CollectionImage[] {
     testImages.push({
       attribution1: `attribution1_${i}`,
       attribution2: `attribution2_${i}`,
-      attributionUrl: {url: `https://attribution_${i}.jpg`},
-      imageUrl: {url: `https://image_${i}.jpg`},
-      previewImageUrl: {url: `https://preview_${i}.jpg`},
+      attributionUrl: `https://attribution_${i}.jpg`,
+      imageUrl: `https://image_${i}.jpg`,
+      previewImageUrl: `https://preview_${i}.jpg`,
       collectionId: `collectionId_${i}`,
       imageVerified: false,
     });
@@ -337,6 +337,22 @@ suite('ThemesTest', () => {
         metrics.count(
             'NewTabPage.CustomizeChromeSidePanelAction',
             CustomizeChromeAction.FIRST_PARTY_COLLECTION_THEME_SELECTED));
+  });
+
+  test('focusing theme tile shows tooltip and blur hides it', async () => {
+    await setCollection('test', 2);
+
+    const tile = themesElement.shadowRoot.querySelector<HTMLElement>('.theme');
+    const tooltip = themesElement.$.themeTooltip;
+    assertTrue(!!tile);
+    assertTrue(!!tooltip);
+    assertTrue(tooltip.$.tooltip.hidden);
+
+    tile.dispatchEvent(new Event('focus'));
+    assertFalse(tooltip.$.tooltip.hidden);
+
+    tile.dispatchEvent(new Event('blur'));
+    assertTrue(tooltip.$.tooltip.hidden);
   });
 
   [true, false].forEach((errorDetectionEnabled) => {

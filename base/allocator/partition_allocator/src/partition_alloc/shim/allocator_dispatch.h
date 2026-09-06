@@ -7,20 +7,45 @@
 
 #include <cstddef>
 
+#include "partition_alloc/partition_alloc_base/types/strong_alias.h"
 #include "partition_alloc/partition_alloc_check.h"
 
 namespace allocator_shim {
 
+using AllocToken =
+    partition_alloc::internal::base::StrongAlias<class AllocTokenTag, size_t>;
+
+inline constexpr AllocToken kDefaultAllocToken = AllocToken(0);
+
 struct AllocatorDispatch {
-  using AllocFn = void*(size_t size, void* context);
-  using AllocUncheckedFn = void*(size_t size, void* context);
-  using AllocZeroInitializedFn = void*(size_t n, size_t size, void* context);
+  using AllocFn = void*(size_t size, AllocToken alloc_token, void* context);
+  using AllocUncheckedFn = void*(size_t size,
+                                 AllocToken alloc_token,
+                                 void* context);
+  using AllocZeroInitializedFn = void*(size_t n,
+                                       size_t size,
+                                       AllocToken alloc_token,
+                                       void* context);
   using AllocZeroInitializedUncheckedFn = void*(size_t n,
                                                 size_t size,
+                                                AllocToken alloc_token,
                                                 void* context);
-  using AllocAlignedFn = void*(size_t alignment, size_t size, void* context);
-  using ReallocFn = void*(void* address, size_t size, void* context);
-  using ReallocUncheckedFn = void*(void* ptr, size_t size, void* context);
+  using AllocAlignedFn = void*(size_t alignment,
+                               size_t size,
+                               AllocToken alloc_token,
+                               void* context);
+  using AllocAlignedUncheckedFn = void*(size_t alignment,
+                                        size_t size,
+                                        AllocToken alloc_token,
+                                        void* context);
+  using ReallocFn = void*(void* address,
+                          size_t size,
+                          AllocToken alloc_token,
+                          void* context);
+  using ReallocUncheckedFn = void*(void* ptr,
+                                   size_t size,
+                                   AllocToken alloc_token,
+                                   void* context);
   using FreeFn = void(void* address, void* context);
   // Returns the allocated size of user data (not including heap overhead).
   // Can be larger than the requested size.
@@ -41,17 +66,23 @@ struct AllocatorDispatch {
                                           size_t alignment,
                                           void* context);
   using TryFreeDefaultFn = void(void* ptr, void* context);
-  using AlignedMallocFn = void*(size_t size, size_t alignment, void* context);
+  using AlignedMallocFn = void*(size_t size,
+                                size_t alignment,
+                                AllocToken alloc_token,
+                                void* context);
   using AlignedMallocUncheckedFn = void*(size_t size,
                                          size_t alignment,
+                                         AllocToken alloc_token,
                                          void* context);
   using AlignedReallocFn = void*(void* address,
                                  size_t size,
                                  size_t alignment,
+                                 AllocToken alloc_token,
                                  void* context);
   using AlignedReallocUncheckedFn = void*(void* address,
                                           size_t size,
                                           size_t alignment,
+                                          AllocToken alloc_token,
                                           void* context);
   using AlignedFreeFn = void(void* address, void* context);
 
@@ -60,6 +91,7 @@ struct AllocatorDispatch {
   AllocZeroInitializedFn* alloc_zero_initialized_function;
   AllocZeroInitializedUncheckedFn* alloc_zero_initialized_unchecked_function;
   AllocAlignedFn* alloc_aligned_function;
+  AllocAlignedUncheckedFn* alloc_aligned_unchecked_function;
   ReallocFn* realloc_function;
   ReallocUncheckedFn* realloc_unchecked_function;
   FreeFn* free_function;
@@ -134,6 +166,7 @@ struct AllocatorDispatch {
     COPY_IF_NULLPTR(alloc_zero_initialized_function);
     COPY_IF_NULLPTR(alloc_zero_initialized_unchecked_function);
     COPY_IF_NULLPTR(alloc_aligned_function);
+    COPY_IF_NULLPTR(alloc_aligned_unchecked_function);
     COPY_IF_NULLPTR(realloc_function);
     COPY_IF_NULLPTR(realloc_unchecked_function);
     COPY_IF_NULLPTR(free_function);

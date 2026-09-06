@@ -148,7 +148,10 @@ ci.builder(
             target_platform = builder_config.target_platform.LINUX,
         ),
         clusterfuzz_archive = builder_config.clusterfuzz_archive(
+            # TODO(https://crbug.com/527836546): Flip `use_archive_path` to True
+            # then remove `archive_name_prefix`.
             archive_name_prefix = "cfi",
+            archive_path = "linux-release/cfi-linux-release",
             gs_acl = "public-read",
             gs_bucket = "chromium-browser-cfi",
         ),
@@ -168,7 +171,7 @@ ci.builder(
     ),
     targets = targets.bundle(
         additional_compile_targets = [
-            "chromium_builder_asan",
+            "blackbox_fuzzing_targets",
         ],
     ),
     console_view_entry = consoles.console_view_entry(
@@ -257,7 +260,7 @@ ci.builder(
             "clang_tot_gtests",
         ],
         additional_compile_targets = [
-            "chromium_builder_asan",
+            "blackbox_fuzzing_targets",
         ],
         mixins = [
             "x86-64",
@@ -307,7 +310,7 @@ ci.builder(
             "clang_tot_gtests",
         ],
         additional_compile_targets = [
-            "chromium_builder_asan",
+            "blackbox_fuzzing_targets",
         ],
         mixins = [
             "x86-64",
@@ -412,7 +415,6 @@ ci.builder(
             "android_with_static_analysis",
             "clang_tot_gn",
             "no_treat_warnings_as_errors",
-            "shared",
             "debug",
             "arm",
             "remoteexec",
@@ -456,7 +458,6 @@ ci.builder(
             "android_with_static_analysis",
             "clang_tot_gn",
             "no_treat_warnings_as_errors",
-            "shared",
             "release",
             "x64",
             "dcheck_always_on",
@@ -512,7 +513,6 @@ ci.builder(
             "android_with_static_analysis",
             "clang_tot_gn",
             "no_treat_warnings_as_errors",
-            "shared",
             "release",
             "x86",
             "dcheck_always_on",
@@ -557,7 +557,6 @@ ci.builder(
             "android_with_static_analysis",
             "clang_tot_gn",
             "no_treat_warnings_as_errors",
-            "shared",
             "release",
             "x86",
             "dcheck_always_on",
@@ -609,9 +608,6 @@ ci.builder(
         ],
     ),
     targets = targets.bundle(
-        targets = [
-            "chrome_sizes_android",
-        ],
         additional_compile_targets = [
             "all",
         ],
@@ -657,9 +653,6 @@ ci.builder(
         ],
     ),
     targets = targets.bundle(
-        targets = [
-            "chrome_sizes_android",
-        ],
         additional_compile_targets = [
             "all",
         ],
@@ -1027,6 +1020,7 @@ clang_tot_linux_builder(
             "linux-jammy",
         ],
     ),
+    free_space = builders.free_space.high,
     short_name = "asn",
 )
 
@@ -1100,7 +1094,10 @@ clang_tot_linux_builder(
     builder_spec = builder_config.builder_spec(
         gclient_config = builder_config.gclient_config(
             config = "chromium",
-            apply_configs = ["clang_tot"],
+            apply_configs = [
+                "clang_tot",
+                "checkout_instrumented_libraries",
+            ],
         ),
         chromium_config = builder_config.chromium_config(
             config = "clang_tot_linux",
@@ -1286,7 +1283,7 @@ ci.builder(
     targets = targets.bundle(
         targets = [
             "clang_tot_gtests",
-            "win_specific_isolated_scripts_and_sizes",
+            "win_specific_isolated_scripts",
         ],
         additional_compile_targets = [
             "all",
@@ -1388,7 +1385,7 @@ ci.builder(
     targets = targets.bundle(
         targets = [
             "clang_tot_gtests",
-            "win_specific_isolated_scripts_and_sizes",
+            "win_specific_isolated_scripts",
         ],
         additional_compile_targets = [
             "all",
@@ -1435,7 +1432,7 @@ ci.builder(
     targets = targets.bundle(
         targets = [
             "clang_tot_gtests",
-            "win_specific_isolated_scripts_and_sizes",
+            "win_specific_isolated_scripts",
         ],
         additional_compile_targets = [
             "all",
@@ -1483,7 +1480,7 @@ ci.builder(
     targets = targets.bundle(
         targets = [
             "clang_tot_gtests",
-            "win_specific_isolated_scripts_and_sizes",
+            "win_specific_isolated_scripts",
         ],
         additional_compile_targets = [
             "all",
@@ -1532,7 +1529,7 @@ ci.builder(
     targets = targets.bundle(
         targets = [
             "clang_tot_gtests",
-            "win_specific_isolated_scripts_and_sizes",
+            "win_specific_isolated_scripts",
         ],
         additional_compile_targets = [
             "all",
@@ -1817,7 +1814,7 @@ ci.builder(
             "mac_default_arm64",
             "mac_toolchain",
             "out_dir_arg",
-            "xcode_26_main",
+            "xcode_27_main",
             "xctest",
         ],
     ),
@@ -1893,7 +1890,7 @@ ci.builder(
             "limited_capacity_bot",
             "mac_toolchain",
             "out_dir_arg",
-            "xcode_26_main",
+            "xcode_27_main",
             "xctest",
         ],
     ),
@@ -1948,7 +1945,7 @@ tot_mac_builder(
             "all",
         ],
         mixins = [
-            "mac_default_x64",
+            "mac_15_x64",
         ],
     ),
     console_view_entry = consoles.console_view_entry(
@@ -1985,9 +1982,6 @@ tot_mac_builder(
     targets = targets.bundle(
         additional_compile_targets = [
             "all",
-        ],
-        mixins = [
-            "mac_default_x64",
         ],
     ),
     console_view_entry = consoles.console_view_entry(
@@ -2027,7 +2021,7 @@ tot_mac_builder(
             "clang_tot_gtests",
         ],
         additional_compile_targets = [
-            "chromium_builder_asan",
+            "blackbox_fuzzing_targets",
         ],
         mixins = [
             targets.mixin(
@@ -2035,7 +2029,7 @@ tot_mac_builder(
                     "--test-launcher-print-test-stdio=always",
                 ],
             ),
-            "mac_default_x64",
+            "mac_15_x64",
         ],
     ),
     console_view_entry = consoles.console_view_entry(
@@ -2080,7 +2074,7 @@ tot_mac_builder(
             "all",
         ],
         mixins = [
-            "mac_default_x64",
+            "mac_15_x64",
         ],
     ),
     console_view_entry = consoles.console_view_entry(
@@ -2121,9 +2115,6 @@ tot_mac_builder(
         additional_compile_targets = [
             "all",
         ],
-        mixins = [
-            "mac_default_x64",
-        ],
     ),
     console_view_entry = consoles.console_view_entry(
         category = "ToT Mac",
@@ -2161,9 +2152,6 @@ tot_mac_builder(
     targets = targets.bundle(
         additional_compile_targets = [
             "all",
-        ],
-        mixins = [
-            "mac_default_x64",
         ],
     ),
     console_view_entry = consoles.console_view_entry(
@@ -2317,9 +2305,6 @@ tot_mac_builder(
     targets = targets.bundle(
         additional_compile_targets = [
             "all",
-        ],
-        mixins = [
-            "mac_default_x64",
         ],
     ),
     console_view_entry = consoles.console_view_entry(

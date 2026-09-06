@@ -6,6 +6,7 @@
 
 #include "base/linux_util.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/process/process_handle.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
@@ -18,7 +19,7 @@ namespace {
 void SetThreadTypeOnLauncherThread(base::ProcessId peer_pid,
                                    base::PlatformThreadId ns_tid,
                                    base::ThreadType thread_type) {
-  DCHECK(CurrentlyOnProcessLauncherTaskRunner());
+  CHECK(CurrentlyOnProcessLauncherTaskRunner(), base::NotFatalUntil::M159);
 
   bool ns_pid_supported = false;
   pid_t peer_tid =
@@ -31,17 +32,27 @@ void SetThreadTypeOnLauncherThread(base::ProcessId peer_pid,
   }
 
   if (peer_tid == peer_pid && thread_type != base::ThreadType::kDefault &&
-      thread_type != base::ThreadType::kDisplayCritical &&
-      thread_type != base::ThreadType::kInteractive) {
+      thread_type != base::ThreadType::kPresentation &&
+      thread_type != base::ThreadType::kAudioProcessing) {
     // TODO(crbug.com/40226692): Consider reporting with ReceivedBadMessage().
     DLOG(WARNING) << "Changing main thread type to another value than "
-                  << "kDefault, kInteractive or kDisplayCritical isn't allowed";
+                  << "kDefault, kInteractive or kPresentation isn't allowed";
     return;
   }
 
-  base::PlatformThread::SetThreadType(peer_pid,
-                                      base::PlatformThreadId(peer_tid),
-                                      thread_type, base::IsViaIPC(true));
+  base::PlatformThread::SetThreadType(
+      peer_pid, base::PlatformThreadId(peer_tid), thread_type);
+}
+
+void SetThreadTypesOnLauncherThread(
+    base::ProcessId peer_pid,
+    std::vector<mojom::ThreadTypeChangePtr> changes) {
+  CHECK(CurrentlyOnProcessLauncherTaskRunner(), base::NotFatalUntil::M159);
+  for (const auto& change : changes) {
+    SetThreadTypeOnLauncherThread(
+        peer_pid, base::PlatformThreadId(change->platform_thread_id),
+        change->thread_type);
+  }
 }
 
 }  // namespace
@@ -63,25 +74,33 @@ bool ChildThreadTypeSwitcher::Bind(
 }
 
 void ChildThreadTypeSwitcher::SetPid(base::ProcessId child_pid) {
-  DCHECK_EQ(child_pid_, base::kNullProcessId);
+  CHECK_EQ(child_pid_, base::kNullProcessId, base::NotFatalUntil::M159);
   child_pid_ = child_pid;
   if (receiver_.is_bound()) {
     receiver_.Resume();
   }
 }
 
-void ChildThreadTypeSwitcher::SetThreadType(int32_t ns_tid,
-                                            base::ThreadType thread_type) {
-  // This function is only used on platforms with 32-bit thread ids.
-  static_assert(sizeof(ns_tid) == sizeof(base::PlatformThreadId));
+void ChildThreadTypeSwitcher::SetThreadTypes(
+    std::vector<mojom::ThreadTypeChangePtr> changes) {
+  // The mojom carries thread ids which must match the platform ThreadId size
+  // (32-bit in this case).
+  static_assert(sizeof(decltype(mojom::ThreadTypeChange::platform_thread_id)) ==
+                sizeof(base::PlatformThreadId));
 
-  // Post this task to process launcher task runner. All thread type changes
-  // (nice value, c-group setting) of renderer process would be performed on the
-  // same sequence as renderer process priority changes, to guarantee that
-  // there's no race of c-group manipulations.
+  // Record batch size for monitoring. Using the macro variant to avoid
+  // acquiring a lock here. See
+  // https://chromium.googlesource.com/chromium/src/tools/+/HEAD/metrics/histograms/README.md#coding-emitting-to-histograms.
+  UMA_HISTOGRAM_COUNTS_100("Process.ThreadTypeSwitcher.BatchSize",
+                           changes.size());
+
+  // Apply the whole batch on the process launcher task runner with a single
+  // PostTask. All thread type changes (nice value, c-group setting) of the
+  // child process are performed on the same sequence as the child process's
+  // priority changes, to guarantee there's no race of c-group manipulations.
   GetProcessLauncherTaskRunner()->PostTask(
-      FROM_HERE, base::BindOnce(&SetThreadTypeOnLauncherThread, child_pid_,
-                                base::PlatformThreadId(ns_tid), thread_type));
+      FROM_HERE, base::BindOnce(&SetThreadTypesOnLauncherThread, child_pid_,
+                                std::move(changes)));
 }
 
 }  // namespace content

@@ -8,7 +8,9 @@
 #include "components/input/features.h"
 #include "content/common/features.h"
 #include "content/public/common/content_features.h"
+#include "media/base/media_switches.h"
 #include "third_party/blink/public/common/features.h"
+#include "third_party/blink/public/common/features_generated.h"
 #include "ui/accessibility/accessibility_features.h"
 
 // Must come after all headers that specialize FromJniType() / ToJniType().
@@ -23,46 +25,65 @@ namespace {
 // in other locations in the code base (e.g. content_features.h).
 const base::Feature* const kFeaturesExposedToJava[] = {
     &blink::features::kAndroidDesktopWebPrefsLargeDisplays,
+    &blink::features::kAndroidSpellcheckFullApiBlink,
     &blink::features::kDevicePosture,
-    &blink::features::kSecurePaymentConfirmationBrowserBoundKeys,
-    &blink::features::kSecurePaymentConfirmationUxRefresh,
+    &blink::features::kInputCursorAnchorInfoMigration,
     &blink::features::kViewportSegments,
+    &blink::features::kWebHID,
+    &media::kAllowDelayedAudioFocusGainAndroid,
+    &media::kAndroidEnableBackgroundMediaCapturing,
     &input::features::kInputOnViz,
     &features::kAndroidCaptureKeyEvents,
-    &features::kAndroidCaretBrowsing,
     &features::kAndroidDevToolsFrontend,
     &features::kAccessibilityCheckJavaNodeCacheFreshness,
+    &features::kAccessibilityAtomicLiveRegions,
     &features::kAccessibilityDeprecateJavaNodeCache,
     &features::kAccessibilityDeprecateTypeAnnounce,
+    &features::kAccessibilityExposeNonAtomicTextFieldChildren,
+    &features::kAccessibilityExpandEventMetadata,
     &features::kAccessibilityExtendedSelection,
+    &features::kAccessibilitySyncFocusOnViewFocusGain,
+    &features::kAccessibilityImeGetFormattedText,
     &features::kAccessibilityImproveLiveRegionAnnounce,
-    &features::kAccessibilityMagnificationFollowsFocus,
+    &features::kAccessibilityMagnificationFollowsFocusKeyboardAttached,
+    &features::kAccessibilityMagnificationFollowsFocusNoKeyboard,
     &features::kAccessibilityRequestLayoutBasedActions,
+    &features::kAccessibilityRequestScopedContentChangedEvents,
     &features::kAccessibilityPageZoomV2,
     &features::kAccessibilityPopulateSupplementalDescriptionApi,
     &features::kAccessibilitySequentialFocus,
     &features::kAccessibilitySetSelectableOnAllNodesWithText,
-    &features::kAccessibilityUnifiedSnapshots,
     &features::kAccessibilityManageBroadcastReceiverOnBackground,
     &features::kAndroidDesktopZoomScaling,
     &features::kAndroidFallbackToNextSlot,
+    &features::kAndroidForceTextInputStateUpdateUponFocus,
     &features::kAndroidMediaInsertion,
     &features::kAndroidPkAutocorrectUnderline,
-    &features::kAndroidSpellingUnderlineInCompositionMode,
+    &features::kAndroidPkAutocorrectUnderlineV2,
+    &features::kAndroidRemoveSetLocalFocusWorkaroundOnBaklava,
+    &features::kAndroidReplayDelKeyEvent,
+    &features::kAndroidBlockMisspellingSuggestionSpanInCompositionMode,
+    &features::kAndroidBlockGrammarSuggestionSpanInCompositionMode,
+    &features::kEarlyTopAppForSandboxedRenderer,
     &features::kStrictHighRankProcessLRU,
     &features::kFedCm,
+    &features::kFedCmNativeIdPs,
     &features::kHidePastePopupOnGSB,
+    &features::kNoSelectionMenuCaching,
+    &features::kPrefetchOffTheMainThread,
+    &features::kPreviewHandwritingGesture,
     &features::kReduceGpuPriorityOnBackground,
-    &features::kRemoveCachedProcessFromBindingManager,
     &features::kContinueGestureOnLosingFocus,
+    &features::kSandboxedProcessServiceLimitOnAndroid,
     &features::kScrollAfterOSKViewportShrinkFix,
     &features::kSmartZoom,
     &features::kTouchDragAndContextMenu,
     &features::kWebBluetoothNewPermissionsBackend,
     &features::kWebContentsDiscard,
     &features::kWebIdentityDigitalCredentials,
+    &features::kTextClassifierTimeout,
+    &features::kJavalessRendererExperimentOn,
     &features::kBtmTtl,
-    &features::kEnableJavalessRenderers,
     &features::kSpareRendererProcessPriority,
 };
 
@@ -75,8 +96,8 @@ base::android::FeatureMap* GetFeatureMap() {
 
 }  // namespace
 
-static jlong JNI_ContentFeatureMap_GetNativeMap(JNIEnv* env) {
-  return reinterpret_cast<jlong>(GetFeatureMap());
+static int64_t JNI_ContentFeatureMap_GetNativeMap(JNIEnv* env) {
+  return reinterpret_cast<int64_t>(GetFeatureMap());
 }
 
 }  // namespace content::android

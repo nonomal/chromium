@@ -16,6 +16,7 @@ namespace {
 // components/browser_ui/notifications/android/features.h or in other
 // locations in the code base (e.g. content_features.h).
 const base::Feature* const kFeaturesExposedToJava[] = {
+    &kAndroidResizeLargeNotificationBitmaps,
     &kCacheNotificationsEnabled,
 };
 
@@ -28,8 +29,8 @@ base::android::FeatureMap* GetFeatureMap() {
 
 }  // namespace
 
-static jlong JNI_NotificationFeatureMap_GetNativeMap(JNIEnv* env) {
-  return reinterpret_cast<jlong>(GetFeatureMap());
+static int64_t JNI_NotificationFeatureMap_GetNativeMap(JNIEnv* env) {
+  return reinterpret_cast<int64_t>(GetFeatureMap());
 }
 
 }  // namespace browser_ui

@@ -9,7 +9,6 @@ import android.os.Bundle;
 
 import org.jni_zero.NativeMethods;
 
-import org.chromium.base.Callback;
 import org.chromium.base.lifetime.Destroyable;
 import org.chromium.base.supplier.NonNullObservableSupplier;
 import org.chromium.base.supplier.ObservableSuppliers;
@@ -27,6 +26,8 @@ import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.components.browser_ui.desktop_windowing.DesktopWindowStateManager;
 import org.chromium.content_public.browser.RenderFrameHost;
 import org.chromium.content_public.browser.WebContents;
+
+import java.util.List;
 
 /**
  * Exclusive Access Manager class and the Exclusive Access Context interface are used for
@@ -85,21 +86,27 @@ public class ExclusiveAccessManager
                                         mExclusiveAccessManagerAndroidNativePointer,
                                         tab.getWebContents());
                     }
+
+                    @Override
+                    public void willCloseTabs(
+                            List<Tab> tabs, boolean isAllTabs, boolean allowUndo) {
+                        if (mExclusiveAccessManagerAndroidNativePointer == 0) return;
+                        mLatestFullscreenOptions = null;
+                        for (Tab tab : tabs) {
+                            ExclusiveAccessManagerJni.get()
+                                    .onTabClosing(
+                                            mExclusiveAccessManagerAndroidNativePointer,
+                                            tab.getWebContents());
+                        }
+                    }
                 };
+        // Exclusive Access Manager always follows the fullscreen state. We subscribe to the FS
+        // state supplier in case when the fullscreen is delayed. Thanks to that EAM stat supplier
+        // will update on all FS enter and exit events. Exiting fullscreen should unlock all other
+        // locks.
         mFullscreenManager
                 .getPersistentFullscreenModeSupplier()
-                .addObserver(
-                        new Callback<Boolean>() {
-                            @Override
-                            public void onResult(Boolean result) {
-                                // Exclusive Access Manager always follows the fullscreen state. We
-                                // subscribe to the FS state supplier in case when the fullscreen is
-                                // delayed. Thanks to that EAM stat supplier will update on all FS
-                                // enter and exit events.
-                                // Exiting fullscreen should unlock all other locks.
-                                mExclusiveAccessState.set(result);
-                            }
-                        });
+                .addSyncObserverAndPostIfNonNull(mExclusiveAccessState::set);
     }
 
     public void initialize(
@@ -173,6 +180,19 @@ public class ExclusiveAccessManager
         ExclusiveAccessManagerJni.get()
                 .onTabDetachedFromView(
                         mExclusiveAccessManagerAndroidNativePointer, tab.getWebContents());
+    }
+
+    /**
+     * EAM frontend to check if a frame can enter fullscreen.
+     *
+     * @param renderFrameHost the render frame host asking for fullscreen
+     * @return true if the frame can enter fullscreen
+     */
+    public boolean canEnterFullscreenModeForTab(RenderFrameHost renderFrameHost) {
+        if (mExclusiveAccessManagerAndroidNativePointer == 0) return false;
+        return ExclusiveAccessManagerJni.get()
+                .canEnterFullscreenModeForTab(
+                        mExclusiveAccessManagerAndroidNativePointer, renderFrameHost);
     }
 
     /**
@@ -395,6 +415,9 @@ public class ExclusiveAccessManager
                 Context context,
                 FullscreenManager fullscreenManager,
                 ActivityTabProvider activityTabProvider);
+
+        boolean canEnterFullscreenModeForTab(
+                long nativeExclusiveAccessManagerAndroid, RenderFrameHost renderFrameHost);
 
         void enterFullscreenModeForTab(
                 long nativeExclusiveAccessManagerAndroid,

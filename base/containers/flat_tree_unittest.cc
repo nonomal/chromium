@@ -34,9 +34,11 @@
 #include <functional>
 #include <iterator>
 #include <list>
+#include <ranges>
 #include <string>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "base/test/gtest_util.h"
 #include "base/test/move_only_int.h"
@@ -330,7 +332,7 @@ TEST(FlatTree, MoveConstructor) {
 //           InputIterator last,
 //           const Compare& comp = Compare())
 
-TEST(FlatTree, RangeConstructor) {
+TEST(FlatTree, IteratorConstructor) {
   {
     IntPair input_vals[] = {{1, 1}, {1, 2}, {2, 1}, {2, 2}, {1, 3},
                             {2, 3}, {3, 1}, {3, 2}, {3, 3}};
@@ -348,6 +350,30 @@ TEST(FlatTree, RangeConstructor) {
 
     TreeWithStrangeCompare cont(MakeInputIterator(span.begin()),
                                 MakeInputIterator(span.end()),
+                                NonDefaultConstructibleCompare(0));
+    EXPECT_THAT(cont, ElementsAre(1, 2, 3));
+  }
+}
+
+// flat_tree(const Range& range,
+//           const Compare& comp = Compare())
+
+TEST(FlatTree, RangeConstructor) {
+  {
+    IntPair input_vals[] = {{1, 1}, {1, 2}, {2, 1}, {2, 2}, {1, 3},
+                            {2, 3}, {3, 1}, {3, 2}, {3, 3}};
+    auto span = base::span(input_vals);
+
+    IntPairTree first_of(std::from_range, span);
+    EXPECT_THAT(first_of,
+                ElementsAre(IntPair(1, 1), IntPair(2, 1), IntPair(3, 1)));
+  }
+  {
+    TreeWithStrangeCompare::value_type input_vals[] = {1, 1, 1, 2, 2,
+                                                       2, 3, 3, 3};
+    auto span = base::span(input_vals);
+
+    TreeWithStrangeCompare cont(std::from_range, span,
                                 NonDefaultConstructibleCompare(0));
     EXPECT_THAT(cont, ElementsAre(1, 2, 3));
   }
@@ -419,7 +445,7 @@ TYPED_TEST_P(FlatTreeTest, InitializerListConstructor) {
 //           InputIterator last,
 //           const Compare& comp = Compare())
 
-TEST(FlatTree, SortedUniqueRangeConstructor) {
+TEST(FlatTree, SortedUniqueIteratorConstructor) {
   {
     IntPair input_vals[] = {{1, 1}, {2, 1}, {3, 1}};
     auto span = base::span(input_vals);
@@ -435,6 +461,30 @@ TEST(FlatTree, SortedUniqueRangeConstructor) {
 
     TreeWithStrangeCompare cont(sorted_unique, MakeInputIterator(span.begin()),
                                 MakeInputIterator(span.end()),
+                                NonDefaultConstructibleCompare(0));
+    EXPECT_THAT(cont, ElementsAre(1, 2, 3));
+  }
+}
+
+// flat_tree(std::from_range_t,
+//           sorted_unique_t,
+//           const Range& range,
+//           const Compare& comp = Compare())
+
+TEST(FlatTree, SortedUniqueRangeConstructor) {
+  {
+    IntPair input_vals[] = {{1, 1}, {2, 1}, {3, 1}};
+    auto span = base::span(input_vals);
+
+    IntPairTree first_of(std::from_range, sorted_unique, span);
+    EXPECT_THAT(first_of,
+                ElementsAre(IntPair(1, 1), IntPair(2, 1), IntPair(3, 1)));
+  }
+  {
+    TreeWithStrangeCompare::value_type input_vals[] = {1, 2, 3};
+    auto span = base::span(input_vals);
+
+    TreeWithStrangeCompare cont(std::from_range, sorted_unique, span,
                                 NonDefaultConstructibleCompare(0));
     EXPECT_THAT(cont, ElementsAre(1, 2, 3));
   }
@@ -913,6 +963,16 @@ TEST(FlatTree, InsertRange) {
     EXPECT_THAT(cont, ElementsAre(IntPair(1, 1), IntPair(2, 1), IntPair(3, 1),
                                   IntPair(4, 1), IntPair(5, 2), IntPair(6, 2),
                                   IntPair(7, 2), IntPair(8, 2)));
+  }
+  {
+    std::list<MoveOnlyInt> list;
+    list.emplace_back(1);
+    list.emplace_back(2);
+
+    MoveOnlyTree tree;
+    tree.insert_range(std::views::as_rvalue(list));
+    EXPECT_EQ(1u, tree.count(MoveOnlyInt(1)));
+    EXPECT_EQ(1u, tree.count(MoveOnlyInt(2)));
   }
 }
 
@@ -1603,5 +1663,88 @@ REGISTER_TYPED_TEST_SUITE_P(FlatTreeTest,
 using IntSequenceContainers =
     ::testing::Types<std::deque<int>, std::vector<int>>;
 INSTANTIATE_TYPED_TEST_SUITE_P(My, FlatTreeTest, IntSequenceContainers);
+
+TEST(FlatTree, Constexpr) {
+  auto create_test_tree = [] {
+    return flat_tree<int, std::identity, std::less<>, std::vector<int>>(
+        sorted_unique, std::vector<int>({1, 2, 3, 5}));
+  };
+
+  static_assert(create_test_tree().size() == 4);
+  static_assert(!create_test_tree().empty());
+  static_assert(create_test_tree().contains(2));
+  static_assert(!create_test_tree().contains(4));
+  static_assert(*create_test_tree().find(3) == 3);
+  static_assert(!create_test_tree().contains(4));
+  static_assert(*create_test_tree().lower_bound(4) == 5);
+  static_assert(*create_test_tree().upper_bound(2) == 3);
+
+  EXPECT_EQ(create_test_tree().size(), 4u);
+}
+
+TEST(FlatTree, ConstexprIteratorsAndLifetime) {
+  // Test constexpr default constructor
+  static_assert([] {
+    flat_tree<int, std::identity, std::less<>, std::vector<int>> tree;
+    return tree.empty();
+  }());
+
+  // Test constexpr copy constructor
+  static_assert([] {
+    flat_tree<int, std::identity, std::less<>, std::vector<int>> tree(
+        sorted_unique, std::vector<int>{1, 2, 3});
+    flat_tree<int, std::identity, std::less<>, std::vector<int>> tree2(tree);
+    return tree2.size() == 3;
+  }());
+
+  // Test constexpr move constructor
+  static_assert([] {
+    flat_tree<int, std::identity, std::less<>, std::vector<int>> tree(
+        sorted_unique, std::vector<int>{1, 2, 3});
+    flat_tree<int, std::identity, std::less<>, std::vector<int>> tree2(
+        std::move(tree));
+    return tree2.size() == 3;
+  }());
+
+  // Test constexpr iterators
+  static_assert([] {
+    flat_tree<int, std::identity, std::less<>, std::vector<int>> tree(
+        sorted_unique, std::vector<int>{1, 2, 3});
+    int sum = 0;
+    for (auto it = tree.begin(); it != tree.end(); ++it) {
+      sum += *it;
+    }
+    return sum;
+  }() == 6);
+  static_assert([] {
+    flat_tree<int, std::identity, std::less<>, std::vector<int>> tree(
+        sorted_unique, std::vector<int>{1, 2, 3});
+    int sum = 0;
+    for (auto it = tree.cbegin(); it != tree.cend(); ++it) {
+      sum += *it;
+    }
+    return sum;
+  }() == 6);
+
+  // Test constexpr reverse iterators
+  static_assert([] {
+    flat_tree<int, std::identity, std::less<>, std::vector<int>> tree(
+        sorted_unique, std::vector<int>{1, 2, 3});
+    int sum = 0;
+    for (auto it = tree.rbegin(); it != tree.rend(); ++it) {
+      sum += *it;
+    }
+    return sum;
+  }() == 6);
+  static_assert([] {
+    flat_tree<int, std::identity, std::less<>, std::vector<int>> tree(
+        sorted_unique, std::vector<int>{1, 2, 3});
+    int sum = 0;
+    for (auto it = tree.crbegin(); it != tree.crend(); ++it) {
+      sum += *it;
+    }
+    return sum;
+  }() == 6);
+}
 
 }  // namespace base::internal

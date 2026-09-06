@@ -86,6 +86,13 @@ The Chromium CQ supports a variety of options that can change what it checks.
   want to risk accidentally submitting it via the CQ. The CQ will immediately
   stop processing the change if it contains this option.
 
+* `Cq-Exclude-Trybots: <trybots>`
+
+    This flag allows you to specify trybots to exclude from running on this CL,
+    even if they would otherwise be triggered by default or by directory-based
+    rules (location filters). The format for the list of trybots is
+    "bucket:trybot1,trybot2;bucket2:trybot3".
+
 * `Cq-Include-Trybots: <trybots>`
 
   This flag allows you to specify some additional bots to run for this CL, in
@@ -164,6 +171,16 @@ The Chromium CQ supports a variety of options that can change what it checks.
   Skip-Clang-Tidy-Checks: google-explicit-constructor
   Skip-Clang-Tidy-Checks: modernize-*,readability-*
   ```
+
+* `Merge-Approval-Bypass: <reason>`
+
+  Bypasses merge-approval check on release branches. Googlers can read more at
+  http://go/chrome-merge-process.
+
+* `Max-Compile-Failures: <number>`
+
+  Specifies the number of compilation failures each trybot should collect before
+  terminating the build (0 means infinity).
 
 ## Google-internal CQ Builders
 
@@ -273,7 +290,7 @@ There are several requirements for a builder to be added to the Commit Queue.
   If a configuration only fails once every couple of weeks on the waterfalls,
   then it's probably not worth adding it to the commit queue.
 
-Please email estaab@chromium.org, who will approve new build configurations.
+Please email bpastene@chromium.org, who will approve new build configurations.
 
 ### How do I ensure a trybot runs on all changes to a specific directory?
 

@@ -51,7 +51,6 @@
 #include "base/auto_reset.h"
 #include "base/check.h"
 #include "base/check_op.h"
-#include "base/containers/contains.h"
 #include "base/debug/crash_logging.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/functional/bind.h"
@@ -96,9 +95,6 @@ constexpr char kMoveWindowFromActiveDeskHistogramName[] =
 constexpr char kCloseAllUndoHistogramName[] = "Ash.Desks.CloseAllUndo";
 constexpr char kCloseAllTotalHistogramName[] = "Ash.Desks.CloseAllTotal";
 constexpr char kRemoveDeskTypeHistogramName[] = "Ash.Desks.RemoveDeskType";
-constexpr char kDeskApiRemoveDeskTypeHistogramName[] =
-    "Ash.DeskApi.RemoveDeskType";
-constexpr char kDeskApiCloseAllUndoHistogramName[] = "Ash.DeskApi.CloseAllUndo";
 constexpr char kNumberOfWindowsClosed[] = "Ash.Desks.NumberOfWindowsClosed2";
 constexpr char kNumberOfWindowsClosedByButton[] =
     "Ash.Desks.NumberOfWindowsClosed2.Button";
@@ -156,7 +152,7 @@ void AppendWindowsToOverview(
   overview_session->set_auto_add_windows_enabled(false);
   for (aura::Window* window :
        Shell::Get()->mru_window_tracker()->BuildMruWindowList(kActiveDesk)) {
-    if (!base::Contains(windows, window) ||
+    if (!std::ranges::contains(windows, window) ||
         window_util::ShouldExcludeForOverview(window)) {
       continue;
     }
@@ -651,7 +647,7 @@ void DesksController::NewDesk(DesksCreationRemovalSource source,
 }
 
 bool DesksController::HasDesk(const Desk* desk) const {
-  return base::Contains(desks_, desk, &std::unique_ptr<Desk>::get);
+  return std::ranges::contains(desks_, desk, &std::unique_ptr<Desk>::get);
 }
 
 Desk* DesksController::GetDeskAtIndex(size_t index) const {
@@ -1649,7 +1645,7 @@ void DesksController::OnAnimationFinished(DeskAnimationBase* animation) {
 }
 
 bool DesksController::HasDeskWithName(const std::u16string& desk_name) const {
-  return base::Contains(desks_, desk_name, &Desk::name);
+  return std::ranges::contains(desks_, desk_name, &Desk::name);
 }
 
 void DesksController::ActivateDeskInternal(const Desk* desk,
@@ -1949,10 +1945,6 @@ void DesksController::RemoveDeskInternal(const Desk* desk,
 
   UMA_HISTOGRAM_ENUMERATION(kRemoveDeskHistogramName, source);
   UMA_HISTOGRAM_ENUMERATION(kRemoveDeskTypeHistogramName, close_type);
-  if (source == DesksCreationRemovalSource::kApi) {
-    base::UmaHistogramEnumeration(kDeskApiRemoveDeskTypeHistogramName,
-                                  close_type);
-  }
 
   // We should only announce desks are being merged if we are combining desks.
   // Otherwise, we tell the user that the desk has closed with its windows.
@@ -1994,10 +1986,6 @@ void DesksController::RemoveDeskInternal(const Desk* desk,
 void DesksController::UndoDeskRemoval() {
   DCHECK(temporary_removed_desk_);
   base::UmaHistogramBoolean(kCloseAllUndoHistogramName, true);
-  if (temporary_removed_desk_->desk_removal_source() ==
-      DesksCreationRemovalSource::kApi) {
-    base::UmaHistogramBoolean(kDeskApiCloseAllUndoHistogramName, true);
-  }
   Desk* readded_desk_ptr = temporary_removed_desk_->desk();
   auto readded_desk_data = std::move(temporary_removed_desk_);
   const int readded_desk_index = readded_desk_data->index();
@@ -2258,7 +2246,7 @@ const Desk* DesksController::FindDeskOfWindow(aura::Window* window) const {
   }
 
   for (const auto& desk : desks_) {
-    if (base::Contains(desk->windows(), window))
+    if (std::ranges::contains(desk->windows(), window))
       return desk.get();
   }
 
@@ -2350,7 +2338,7 @@ bool DesksController::MoveWindowFromSourceDeskTo(
   // the active desk, and cannot be removed. Except floated window, which is
   // handled by `FloatController::OnMovingFloatedWindowToDesk`.
   const bool is_floated = WindowState::Get(window)->IsFloated();
-  if (!base::Contains(source_desk->windows(), window) && !is_floated) {
+  if (!std::ranges::contains(source_desk->windows(), window) && !is_floated) {
     return false;
   }
 

@@ -11,15 +11,19 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
+#include "base/time/time.h"
+#include "base/values.h"
 #include "components/autofill/core/browser/data_model/valuables/loyalty_card.h"
-#include "components/autofill/core/browser/test_utils/autofill_test_utils.h"
-#include "components/autofill/core/browser/test_utils/valuables_data_test_utils.h"
+#include "components/autofill/core/browser/test_utils/autofill_test_util.h"
+#include "components/autofill/core/browser/test_utils/valuables_data_test_util.h"
 #include "components/autofill/core/browser/ui/mock_autofill_image_fetcher.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_backend.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service_test_helper.h"
 #include "components/autofill/core/browser/webdata/valuables/valuables_table.h"
+#include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_prefs.h"
+#include "components/prefs/testing_pref_service.h"
 #include "components/sync/base/data_type.h"
 #include "components/sync/base/features.h"
 #include "components/webdata/common/web_database.h"
@@ -67,13 +71,11 @@ class ValuablesDataManagerTest : public testing::Test {
 
   ValuablesTable& valuables_table() { return *valuables_table_; }
 
-  PrefService& prefs() { return *prefs_; }
+  test::AutofillTestingPrefService& prefs() { return *prefs_; }
 
  private:
   base::test::TaskEnvironment task_environment_;
-  base::test::ScopedFeatureList scoped_feature_list{
-      syncer::kSyncAutofillLoyaltyCard};
-  std::unique_ptr<PrefService> prefs_;
+  std::unique_ptr<test::AutofillTestingPrefService> prefs_;
   NiceMock<MockAutofillImageFetcher> mock_image_fetcher_;
   raw_ptr<ValuablesTable> valuables_table_;
   std::unique_ptr<AutofillWebDataServiceTestHelper> helper_;
@@ -108,19 +110,22 @@ TEST_F(ValuablesDataManagerTest, GetLoyaltyCardsToSuggest) {
       /*merchant_name=*/"CVS Pharmacy",
       /*program_name=*/"CVS Extra",
       /*program_logo=*/GURL("https://empty.url.com"),
-      /*loyalty_card_number=*/"987654321987654321", {});
+      /*loyalty_card_number=*/"987654321987654321",
+      /*merchant_domains=*/{}, /*use_date=*/{}, /*use_count=*/0);
   const LoyaltyCard card2 = LoyaltyCard(
       /*loyalty_card_id=*/ValuableId("loyalty_card_id_3"),
       /*merchant_name=*/"Walgreens",
       /*program_name=*/"CustomerCard",
       /*program_logo=*/GURL("https://empty.url.com"),
-      /*loyalty_card_number=*/"998766823", {});
-  const LoyaltyCard card3 =
-      LoyaltyCard(/*loyalty_card_id=*/ValuableId("loyalty_card_id_2"),
-                  /*merchant_name=*/"Ticket Maester",
-                  /*program_name=*/"TourLoyal",
-                  /*program_logo=*/GURL("https://empty.url.com"),
-                  /*loyalty_card_number=*/"37262999281", {});
+      /*loyalty_card_number=*/"998766823",
+      /*merchant_domains=*/{}, /*use_date=*/{}, /*use_count=*/0);
+  const LoyaltyCard card3 = LoyaltyCard(
+      /*loyalty_card_id=*/ValuableId("loyalty_card_id_2"),
+      /*merchant_name=*/"Ticket Maester",
+      /*program_name=*/"TourLoyal",
+      /*program_logo=*/GURL("https://empty.url.com"),
+      /*loyalty_card_number=*/"37262999281",
+      /*merchant_domains=*/{}, /*use_date=*/{}, /*use_count=*/0);
 
   valuables_table().SetLoyaltyCards({card1, card2, card3});
 
@@ -257,6 +262,33 @@ TEST_F(ValuablesDataManagerPaymentMethodsOffTest,
   EXPECT_THAT(valuables_data_manager.GetLoyaltyCardsToSuggest(), IsEmpty());
 }
 
+TEST_F(ValuablesDataManagerTest,
+       GetLoyaltyCardsWhenEnterprisePolicyBlocksPayments) {
+  base::test::ScopedFeatureList feature_list{
+      features::kAutofillEnableAutofillSettingsEnterprisePolicy};
+
+  const LoyaltyCard card1 = test::CreateLoyaltyCard();
+  const LoyaltyCard card2 = test::CreateLoyaltyCard2();
+
+  valuables_table().SetLoyaltyCards({card1, card2});
+
+  base::ListValue blocked_list;
+  base::DictValue entry;
+  entry.Set("url_pattern", "*");
+  base::ListValue blocked_types;
+  blocked_types.Append("payments");
+  entry.Set("blocked_types", std::move(blocked_types));
+  blocked_list.Append(std::move(entry));
+  prefs().SetManagedPref(prefs::kAutofillTypesBlocked, std::move(blocked_list));
+
+  ValuablesDataManager valuables_data_manager(&webdata_service(), &prefs(),
+                                              &image_fetcher());
+  helper().WaitUntilIdle();
+
+  EXPECT_THAT(valuables_data_manager.GetLoyaltyCards(), IsEmpty());
+  EXPECT_THAT(valuables_data_manager.GetLoyaltyCardsToSuggest(), IsEmpty());
+}
+
 TEST_F(ValuablesDataManagerPaymentMethodsOffTest,
        GetLoyaltyCardByIdWhenPaymentMethodsOff) {
   const LoyaltyCard card1 = test::CreateLoyaltyCard();
@@ -268,6 +300,23 @@ TEST_F(ValuablesDataManagerPaymentMethodsOffTest,
 
   EXPECT_THAT(valuables_data_manager.GetLoyaltyCardById(card1.id()),
               testing::Eq(std::nullopt));
+}
+
+TEST_F(ValuablesDataManagerTest, RecordLoyaltyCardUsed) {
+  const LoyaltyCard card = test::CreateLoyaltyCard();
+  valuables_table().SetLoyaltyCards({card});
+
+  ValuablesDataManager valuables_data_manager(&webdata_service(), &prefs(),
+                                              &image_fetcher());
+  helper().WaitUntilIdle();
+
+  base::Time use_date = base::Time::Now();
+  valuables_data_manager.RecordLoyaltyCardUsed(card.id(), use_date);
+
+  helper().WaitUntilIdle();
+
+  EXPECT_EQ(valuables_table().GetValuableMetadata(card.id()),
+            ValuableMetadata(card.id(), use_date, 1));
 }
 
 }  // namespace

@@ -6,9 +6,7 @@
 
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/functional/callback_helpers.h"
-#include "device/fido/fido_parsing_utils.h"
 #include "device/fido/hid/fido_hid_discovery.h"
 #include "mojo/public/cpp/bindings/pending_associated_remote.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
@@ -219,7 +217,7 @@ void FakeFidoHidManager::Connect(
 }
 
 void FakeFidoHidManager::AddDevice(device::mojom::HidDeviceInfoPtr device) {
-  DCHECK(!base::Contains(devices_, device->guid));
+  DCHECK(!devices_.contains(device->guid));
   device::mojom::HidDeviceInfo* device_info = device.get();
   for (auto& client : clients_)
     client->DeviceAdded(device_info->Clone());
@@ -246,7 +244,7 @@ void FakeFidoHidManager::RemoveDevice(const std::string device_guid) {
 }
 
 void FakeFidoHidManager::ChangeDevice(device::mojom::HidDeviceInfoPtr device) {
-  DCHECK(base::Contains(devices_, device->guid));
+  DCHECK(devices_.contains(device->guid));
   device::mojom::HidDeviceInfo* device_info = device.get();
   for (auto& client : clients_)
     client->DeviceChanged(device_info->Clone());

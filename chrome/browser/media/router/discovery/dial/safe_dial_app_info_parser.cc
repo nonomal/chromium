@@ -17,9 +17,10 @@ namespace media_router {
 namespace {
 
 DialAppState ParseDialAppState(const std::string& app_state) {
-  if (base::ToLowerASCII(app_state) == "running") {
+  if (base::EqualsCaseInsensitiveASCII(app_state, "running")) {
     return DialAppState::kRunning;
-  } else if (base::ToLowerASCII(app_state) == "stopped") {
+  }
+  if (base::EqualsCaseInsensitiveASCII(app_state, "stopped")) {
     return DialAppState::kStopped;
   }
   return DialAppState::kUnknown;
@@ -27,7 +28,7 @@ DialAppState ParseDialAppState(const std::string& app_state) {
 
 void ProcessAdditionalDataElement(const base::Value& additional_data_element,
                                   ParsedDialAppInfo* out_app_info) {
-  const base::Value::List* child_elements =
+  const base::ListValue* child_elements =
       data_decoder::GetXmlElementChildren(additional_data_element);
   if (!child_elements) {
     return;
@@ -132,7 +133,7 @@ void SafeDialAppInfoParser::OnXmlParsingDone(
       data_decoder::GetXmlElementAttribute(*service_element, "dialVer");
 
   // Fetch all the children of <service> element.
-  const base::Value::List* child_elements =
+  const base::ListValue* child_elements =
       data_decoder::GetXmlElementChildren(*service_element);
   if (!child_elements) {
     std::move(callback).Run(nullptr, ParsingResult::kInvalidXML);

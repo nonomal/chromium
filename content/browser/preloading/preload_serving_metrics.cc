@@ -4,20 +4,19 @@
 
 #include "content/browser/preloading/preload_serving_metrics.h"
 
+#include <sstream>
+
+#include "base/debug/dump_without_crashing.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/strcat.h"
 #include "content/browser/preloading/prefetch/prefetch_match_resolver.h"
 #include "content/browser/preloading/prefetch/prefetch_servable_state.h"
 #include "content/browser/preloading/preload_serving_metrics_holder.h"
+#include "net/http/http_no_vary_search_data.h"
 
 namespace content {
 
 namespace {
-
-// Copied from components/page_load_metrics/browser/page_load_metrics_util.h
-#define PAGE_LOAD_HISTOGRAM(name, sample)                             \
-  base::UmaHistogramCustomTimes(name, sample, base::Milliseconds(10), \
-                                base::Minutes(10), 100)
 
 #define WITH(prefix, name) base::StrCat({prefix, name})
 
@@ -222,12 +221,14 @@ PrefetchContainerMetrics& PrefetchContainerMetrics::operator=(
 
 PrefetchMatchPrefetchAheadOfPrerenderDebugMetrics::
     PrefetchMatchPrefetchAheadOfPrerenderDebugMetrics()
-    :  // It will be filled just after ctor, but `PrefetchMatchResolverAction`
-       // has no default ctor. Here, we fill a garbage.
+    :  // The fields will be filled just after ctor, but they have no default
+       // ctor. Here, we fill invalid values.
       match_resolver_action(PrefetchMatchResolverAction(
           PrefetchMatchResolverAction::ActionKind::kDrop,
           PrefetchContainer::LoadState::kFailed,
-          /*is_expired=*/std::nullopt)) {}
+          /*is_expired=*/std::nullopt)),
+      prefetch_key_navigated(std::nullopt, GURL()),
+      prefetch_key_ahead_of_prerender(std::nullopt, GURL()) {}
 
 PrefetchMatchPrefetchAheadOfPrerenderDebugMetrics::
     ~PrefetchMatchPrefetchAheadOfPrerenderDebugMetrics() = default;
@@ -292,6 +293,35 @@ PreloadServingMetrics::GetMeaningfulPrefetchMatchMetrics() const {
   }
 }
 
+UsedInstantLoad PreloadServingMetrics::GetUsedInstantLoad(
+    bool nav_used_bfcache,
+    bool is_served_by_legacy_search_prefetch) const {
+  if (nav_used_bfcache) {
+    return UsedInstantLoad::kBFCache;
+  }
+
+  if (prerender_initial_preload_serving_metrics) {
+    return UsedInstantLoad::kPrerender;
+  }
+
+  if (const auto* prefetch_match = GetMeaningfulPrefetchMatchMetrics();
+      prefetch_match && prefetch_match->IsActualMatch()) {
+    if (prefetch_match->prefetch_container_metrics &&
+        prefetch_match->prefetch_container_metrics
+            ->is_constructed_from_pre_prefetch) {
+      return UsedInstantLoad::kPrefetchWithPrePrefetch;
+    }
+
+    return UsedInstantLoad::kPrefetchWithoutPrePrefetch;
+  }
+
+  if (is_served_by_legacy_search_prefetch) {
+    return UsedInstantLoad::kPrefetchWithoutPrePrefetch;
+  }
+
+  return UsedInstantLoad::kNoInstantLoad;
+}
+
 void PreloadServingMetrics::RecordMetricsForNonPrerenderNavigationCommitted()
     const {
   RecordMetricsInternal(*this, "PreloadServingMetrics.ForNavigationCommitted.",
@@ -306,8 +336,6 @@ void PreloadServingMetrics::RecordMetricsForNonPrerenderNavigationCommitted()
 
 void PreloadServingMetrics::RecordMetricsForPrerenderInitialNavigationFailed()
     const {
-  CHECK(PreloadServingMetricsCapsule::IsFeatureEnabled());
-
   RecordMetricsInternal(
       *this, "PreloadServingMetrics.ForPrerenderInitialNavigationFailed.",
       /*is_prerender_initial_navigation=*/true);
@@ -370,37 +398,64 @@ void PreloadServingMetrics::RecordMetricsForPrerenderInitialNavigationFailed()
           *this, prefix,
           /*is_prerender_initial_navigation=*/true,
           /*prefetch_match_metrics_force_use=*/&prefetch_match_metrics);
+
+      // See https://crbug.com/479983093 for more details.
+      if (prefetch_match_metrics.prerender_debug_metrics &&
+          prefetch_match_metrics.prerender_debug_metrics
+              ->prefetch_ahead_of_prerender_debug_metrics) {
+        const PrefetchMatchPrefetchAheadOfPrerenderDebugMetrics& debug_metrics =
+            *prefetch_match_metrics.prerender_debug_metrics
+                 ->prefetch_ahead_of_prerender_debug_metrics.get();
+        if (debug_metrics.collect_result ==
+            PrefetchPotentialCandidateCollectResult::
+                kUnavailablePrefetchIsNotInPrefetchService) {
+          // -
+          //   `PrefetchPotentialCandidateCollectResult::kUnavailablePrefetchIsNotInPrefetchService`
+          //   implies prefetch ahead of prerender didn't exist at the match
+          //   timing in the sense of
+          //   `CollectPotentialMatchPrefetchContainers()`.
+          // - Existence of `PrefetchMatchPrefetchAheadOfPrerenderDebugMetrics`
+          //   implies prefetch ahead of prerender existed at the match timing
+          //   in the sense of
+          //   `PrefetchService::FindPrefetchAheadOfPrerenderForMetrics()`.
+          //
+          // We don't expect the difference as it aborts the prerender. We
+          // record some values to investigate the issue.
+          SCOPED_CRASH_KEY_BOOL(
+              "PreloadServingMetrics", "keys_same",
+              debug_metrics.prefetch_key_navigated ==
+                  debug_metrics.prefetch_key_ahead_of_prerender);
+          SCOPED_CRASH_KEY_BOOL(
+              "PreloadServingMetrics", "urls_same",
+              debug_metrics.prefetch_key_navigated.url() ==
+                  debug_metrics.prefetch_key_ahead_of_prerender.url());
+          SCOPED_CRASH_KEY_BOOL(
+              "PreloadServingMetrics", "non_urls_same",
+              debug_metrics.prefetch_key_navigated.NonUrlPartIsSame(
+                  debug_metrics.prefetch_key_ahead_of_prerender));
+          SCOPED_CRASH_KEY_STRING256(
+              "PreloadServingMetrics", "prefetch_url",
+              debug_metrics.prefetch_key_ahead_of_prerender.url().spec());
+          std::string nvs_string;
+          if (debug_metrics.prefetch_nvs_hint_ahead_of_prerender.has_value()) {
+            std::ostringstream oss;
+            oss << debug_metrics.prefetch_nvs_hint_ahead_of_prerender.value();
+            nvs_string = oss.str();
+          }
+          SCOPED_CRASH_KEY_STRING256("PreloadServingMetrics", "nvs_hint",
+                                     nvs_string);
+          // Temporarily disable `DumpWithoutCrashing` as we collected data.
+          // Reenable it when we need it.
+          //
+          // Removal is managed by https://crbug.com/479983093.
+          // base::debug::DumpWithoutCrashing();
+        }
+      }
     }
   }
 }
 
-void PreloadServingMetrics::RecordFirstContentfulPaint(
-    base::TimeDelta corrected_first_contentful_paint) const {
-  const bool is_prerender_used = !!prerender_initial_preload_serving_metrics;
-  const PrefetchMatchMetrics* meaningful_prefetch_match_metrics =
-      GetMeaningfulPrefetchMatchMetrics();
-  const bool is_prefetch_actual_match =
-      meaningful_prefetch_match_metrics &&
-      meaningful_prefetch_match_metrics->IsActualMatch();
-
-  const char* suffix;
-  if (is_prerender_used) {
-    suffix = ".WithPrerender";
-  } else if (is_prefetch_actual_match) {
-    suffix = ".WithPrefetch";
-  } else {
-    suffix = ".WithoutPreload";
-  }
-  PAGE_LOAD_HISTOGRAM(
-      base::StrCat({"PreloadServingMetrics.PageLoad.Clients.PaintTiming."
-                    "NavigationToFirstContentfulPaint",
-                    suffix}),
-      corrected_first_contentful_paint);
-}
-
-PreloadServingMetrics::PreloadServingMetrics() {
-  CHECK(PreloadServingMetricsCapsule::IsFeatureEnabled());
-}
+PreloadServingMetrics::PreloadServingMetrics() = default;
 
 PreloadServingMetrics::~PreloadServingMetrics() = default;
 
@@ -408,8 +463,6 @@ PreloadServingMetrics::~PreloadServingMetrics() = default;
 std::unique_ptr<PreloadServingMetricsCapsule>
 PreloadServingMetricsCapsuleImpl::TakeFromNavigationHandle(
     NavigationHandle& navigation_handle) {
-  CHECK(PreloadServingMetricsCapsule::IsFeatureEnabled());
-
   return base::WrapUnique(new PreloadServingMetricsCapsuleImpl(
       PreloadServingMetricsHolder::GetOrCreateForNavigationHandle(
           navigation_handle)
@@ -418,9 +471,7 @@ PreloadServingMetricsCapsuleImpl::TakeFromNavigationHandle(
 
 PreloadServingMetricsCapsuleImpl::PreloadServingMetricsCapsuleImpl(
     std::unique_ptr<PreloadServingMetrics> preload_serving_metrics)
-    : preload_serving_metrics_(std::move(preload_serving_metrics)) {
-  CHECK(PreloadServingMetricsCapsule::IsFeatureEnabled());
-}
+    : preload_serving_metrics_(std::move(preload_serving_metrics)) {}
 
 PreloadServingMetricsCapsuleImpl::~PreloadServingMetricsCapsuleImpl() = default;
 
@@ -429,10 +480,11 @@ void PreloadServingMetricsCapsuleImpl::
   preload_serving_metrics_->RecordMetricsForNonPrerenderNavigationCommitted();
 }
 
-void PreloadServingMetricsCapsuleImpl::RecordFirstContentfulPaint(
-    base::TimeDelta corrected_first_contentful_paint) const {
-  preload_serving_metrics_->RecordFirstContentfulPaint(
-      std::move(corrected_first_contentful_paint));
+UsedInstantLoad PreloadServingMetricsCapsuleImpl::GetUsedInstantLoad(
+    bool nav_used_bfcache,
+    bool is_served_by_legacy_search_prefetch) const {
+  return preload_serving_metrics_->GetUsedInstantLoad(
+      nav_used_bfcache, is_served_by_legacy_search_prefetch);
 }
 
 }  // namespace content

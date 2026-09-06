@@ -23,12 +23,14 @@
 #include "components/safe_browsing/content/browser/safe_browsing_navigation_observer_manager.h"
 #include "components/safe_browsing/core/browser/referrer_chain_provider.h"
 #include "components/safe_browsing/core/common/features.h"
+#include "components/sessions/core/session_id.h"
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/fake_service_worker_context.h"
 #include "content/public/test/test_web_contents_factory.h"
+#include "extensions/buildflags/buildflags.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -117,10 +119,9 @@ class InterstitialEnterpriseUtilTest : public testing::Test {
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS) && BUILDFLAG(SAFE_BROWSING_AVAILABLE)
     enterprise_connectors::RealtimeReportingClientFactory::GetInstance()
         ->SetTestingFactory(
-            profile, base::BindRepeating([](content::BrowserContext* context) {
-              return std::unique_ptr<KeyedService>(
-                  new enterprise_connectors::RealtimeReportingClient(context));
-            }));
+            profile,
+            base::BindRepeating(
+                &enterprise_connectors::test::BuildRealtimeReportingClient));
     enterprise_connectors::test::SetOnSecurityEventReporting(
         profile->GetPrefs(), /*enabled=*/true, /*enabled_event_names=*/{},
         /*enabled_opt_in_events=*/{});
@@ -140,19 +141,34 @@ class InterstitialEnterpriseUtilTest : public testing::Test {
         ->SetBrowserCloudPolicyClientForTesting(client_.get());
   }
 
-  void ValidateReferrerChain(const base::Value::Dict& report_dict,
+  void ValidateReferrerChain(const base::DictValue& report_dict,
                              std::string_view event_name) {
-    const base::Value::List* events_list = report_dict.FindList("events");
+    const base::ListValue* events_list = report_dict.FindList("events");
     ASSERT_NE(events_list, nullptr);
     ASSERT_EQ(events_list->size(), 1u);
-    const base::Value::Dict* event_dict = (*events_list)[0].GetIfDict();
+    const base::DictValue* event_dict = (*events_list)[0].GetIfDict();
     ASSERT_NE(event_dict, nullptr);
-    const base::Value::Dict* intertitial_event =
-        event_dict->FindDict(event_name);
+    const base::DictValue* intertitial_event = event_dict->FindDict(event_name);
     ASSERT_NE(intertitial_event, nullptr);
-    const base::Value::List* referrer_chain =
+    const base::ListValue* referrer_chain =
         intertitial_event->FindList("referrers");
     EXPECT_EQ(referrer_chain->size(), 1u);
+  }
+
+  void ValidateReferrerChainForInterstitialEvent(
+      const ::chrome::cros::reporting::proto::UploadEventsRequest& request) {
+    ASSERT_EQ(1, request.events_size());
+    ASSERT_TRUE(request.events().Get(0).has_interstitial_event());
+    auto event = request.events().Get(0).interstitial_event();
+    ASSERT_EQ(event.referrers_size(), 1);
+  }
+
+  void ValidateReferrerChainForUrlFilteringEvent(
+      const ::chrome::cros::reporting::proto::UploadEventsRequest& request) {
+    ASSERT_EQ(1, request.events_size());
+    ASSERT_TRUE(request.events().Get(0).has_url_filtering_interstitial_event());
+    auto event = request.events().Get(0).url_filtering_interstitial_event();
+    ASSERT_EQ(event.referrers_size(), 1);
   }
 
  protected:
@@ -173,11 +189,13 @@ TEST_F(InterstitialEnterpriseUtilTest, RouterEventDisabledInIncognitoMode) {
           ->GetPrimaryOTRProfile(
               /*create_if_needed=*/true);
   EnableReportingPolicy(incognito_profile);
-  EXPECT_CALL(*client_, UploadSecurityEventReport).Times(0);
+
+  EXPECT_CALL(*client_, UploadSecurityEvent).Times(0);
+
   MaybeTriggerSecurityInterstitialShownEvent(
       web_contents_factory_.CreateWebContents(incognito_profile),
       GURL("https://phishing.com/"), "reason",
-      /*net_error_code=*/0);
+      /*net_error_code=*/0, "");
 }
 
 TEST_F(InterstitialEnterpriseUtilTest,
@@ -201,21 +219,25 @@ TEST_F(InterstitialEnterpriseUtilTest,
       .WillOnce(DoAll(SetArgPointee<2>(expected_referrer_chain),
                       Return(safe_browsing::ReferrerChainProvider::SUCCESS)));
   base::RunLoop run_loop;
-  base::Value::Dict report_dict;
-  EXPECT_CALL(*client_, UploadSecurityEventReport)
+  ::chrome::cros::reporting::proto::UploadEventsRequest event_request;
+
+  EXPECT_CALL(*client_, UploadSecurityEvent)
       .Times(1)
-      .WillOnce([&](bool include_device_info, base::Value::Dict&& report,
-                    policy::CloudPolicyClient::ResultCallback callback) {
-        report_dict = std::move(report);
-        run_loop.Quit();
-      });
+      .WillOnce(
+          [&](bool include_device_info,
+              ::chrome::cros::reporting::proto::UploadEventsRequest&& request,
+              policy::CloudPolicyClient::ResultCallback callback) {
+            event_request = std::move(request);
+            run_loop.Quit();
+          });
 
   MaybeTriggerSecurityInterstitialShownEvent(
       web_contents_factory_.CreateWebContents(guest_profile),
       GURL("https://phishing.com/"), "reason",
-      /*net_error_code=*/0);
+      /*net_error_code=*/0, "");
   run_loop.Run();
-  ValidateReferrerChain(report_dict, "interstitialEvent");
+
+  ValidateReferrerChainForInterstitialEvent(event_request);
 }
 
 TEST_F(InterstitialEnterpriseUtilTest,
@@ -239,21 +261,25 @@ TEST_F(InterstitialEnterpriseUtilTest,
       .WillOnce(DoAll(SetArgPointee<2>(expected_referrer_chain),
                       Return(safe_browsing::ReferrerChainProvider::SUCCESS)));
   base::RunLoop run_loop;
-  base::Value::Dict report_dict;
-  EXPECT_CALL(*client_, UploadSecurityEventReport)
+  ::chrome::cros::reporting::proto::UploadEventsRequest event_request;
+
+  EXPECT_CALL(*client_, UploadSecurityEvent)
       .Times(1)
-      .WillOnce([&](bool include_device_info, base::Value::Dict&& report,
-                    policy::CloudPolicyClient::ResultCallback callback) {
-        report_dict = std::move(report);
-        run_loop.Quit();
-      });
+      .WillOnce(
+          [&](bool include_device_info,
+              ::chrome::cros::reporting::proto::UploadEventsRequest&& request,
+              policy::CloudPolicyClient::ResultCallback callback) {
+            event_request = std::move(request);
+            run_loop.Quit();
+          });
 
   MaybeTriggerSecurityInterstitialProceededEvent(
       web_contents_factory_.CreateWebContents(guest_profile),
       GURL("https://phishing.com/"), "reason",
-      /*net_error_code=*/0);
+      /*net_error_code=*/0, "");
   run_loop.Run();
-  ValidateReferrerChain(report_dict, "interstitialEvent");
+
+  ValidateReferrerChainForInterstitialEvent(event_request);
 }
 
 TEST_F(InterstitialEnterpriseUtilTest,
@@ -286,20 +312,24 @@ TEST_F(InterstitialEnterpriseUtilTest,
       .WillOnce(DoAll(SetArgPointee<2>(expected_referrer_chain),
                       Return(safe_browsing::ReferrerChainProvider::SUCCESS)));
   base::RunLoop run_loop;
-  base::Value::Dict report_dict;
-  EXPECT_CALL(*client_, UploadSecurityEventReport)
+  ::chrome::cros::reporting::proto::UploadEventsRequest event_request;
+
+  EXPECT_CALL(*client_, UploadSecurityEvent)
       .Times(1)
-      .WillOnce([&](bool include_device_info, base::Value::Dict&& report,
-                    policy::CloudPolicyClient::ResultCallback callback) {
-        report_dict = std::move(report);
-        run_loop.Quit();
-      });
+      .WillOnce(
+          [&](bool include_device_info,
+              ::chrome::cros::reporting::proto::UploadEventsRequest&& request,
+              policy::CloudPolicyClient::ResultCallback callback) {
+            event_request = std::move(request);
+            run_loop.Quit();
+          });
 
   MaybeTriggerUrlFilteringInterstitialEvent(
       web_contents_factory_.CreateWebContents(guest_profile),
-      GURL("https://phishing.com/"), "ENTERPRISE_WARNED_SEEN", response);
+      GURL("https://phishing.com/"), "ENTERPRISE_WARNED_SEEN", response, "");
   run_loop.Run();
-  ValidateReferrerChain(report_dict, "urlFilteringInterstitialEvent");
+
+  ValidateReferrerChainForUrlFilteringEvent(event_request);
 }
 
 TEST_F(InterstitialEnterpriseUtilTest, ReferrerChainFallsbackToEventUrl) {
@@ -337,18 +367,22 @@ TEST_F(InterstitialEnterpriseUtilTest, ReferrerChainFallsbackToEventUrl) {
       .WillOnce(DoAll(SetArgPointee<3>(expected_referrer_chain),
                       Return(safe_browsing::ReferrerChainProvider::SUCCESS)));
   base::RunLoop run_loop;
-  base::Value::Dict report_dict;
-  EXPECT_CALL(*client_, UploadSecurityEventReport)
+  ::chrome::cros::reporting::proto::UploadEventsRequest event_request;
+
+  EXPECT_CALL(*client_, UploadSecurityEvent)
       .Times(1)
-      .WillOnce([&](bool include_device_info, base::Value::Dict&& report,
-                    policy::CloudPolicyClient::ResultCallback callback) {
-        report_dict = std::move(report);
-        run_loop.Quit();
-      });
+      .WillOnce(
+          [&](bool include_device_info,
+              ::chrome::cros::reporting::proto::UploadEventsRequest&& request,
+              policy::CloudPolicyClient::ResultCallback callback) {
+            event_request = std::move(request);
+            run_loop.Quit();
+          });
 
   MaybeTriggerUrlFilteringInterstitialEvent(
       web_contents_factory_.CreateWebContents(guest_profile),
-      GURL("https://phishing.com/"), "ENTERPRISE_WARNED_SEEN", response);
+      GURL("https://phishing.com/"), "ENTERPRISE_WARNED_SEEN", response, "");
   run_loop.Run();
-  ValidateReferrerChain(report_dict, "urlFilteringInterstitialEvent");
+
+  ValidateReferrerChainForUrlFilteringEvent(event_request);
 }

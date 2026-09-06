@@ -4,7 +4,6 @@
 
 #import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_module_container.h"
 
-#import "base/containers/contains.h"
 #import "base/notreached.h"
 #import "base/strings/sys_string_conversions.h"
 #import "components/commerce/core/commerce_feature_list.h"
@@ -13,21 +12,21 @@
 #import "ios/chrome/browser/content_suggestions/magic_stack/public/magic_stack_utils.h"
 #import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_context_menu_interaction_handler.h"
 #import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_module.h"
-#import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_module_background_view.h"
 #import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_module_container_delegate.h"
 #import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_module_content_view_delegate.h"
 #import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_module_contents_factory.h"
 #import "ios/chrome/browser/content_suggestions/most_visited_tiles/ui/most_visited_tiles_config.h"
 #import "ios/chrome/browser/content_suggestions/public/content_suggestions_constants.h"
 #import "ios/chrome/browser/content_suggestions/safety_check/model/safety_check_utils.h"
-#import "ios/chrome/browser/content_suggestions/safety_check/ui/safety_check_state.h"
+#import "ios/chrome/browser/content_suggestions/safety_check/ui/safety_check_config.h"
+#import "ios/chrome/browser/content_suggestions/shop_card/ui/shop_card_config.h"
 #import "ios/chrome/browser/content_suggestions/shop_card/ui/shop_card_data.h"
-#import "ios/chrome/browser/content_suggestions/shop_card/ui/shop_card_item.h"
-#import "ios/chrome/browser/content_suggestions/tab_resumption/ui/tab_resumption_item.h"
+#import "ios/chrome/browser/content_suggestions/tab_resumption/ui/tab_resumption_config.h"
 #import "ios/chrome/browser/content_suggestions/ui/content_suggestions_collection_utils.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_color_palette.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_image_background_trait.h"
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_trait.h"
+#import "ios/chrome/browser/ntp/ui_bundled/ntp_card_background_view.h"
 #import "ios/chrome/browser/push_notification/model/push_notification_client_id.h"
 #import "ios/chrome/browser/push_notification/model/push_notification_settings_util.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
@@ -79,7 +78,7 @@ const CGFloat kSeparatorHeight = 0.5;
   ContentSuggestionsModuleType _type;
   BOOL _reducedBottomMargin;
   MagicStackContextMenuInteractionHandler* _contextMenuInteractionHandler;
-  MagicStackModuleBackgroundView* _backgroundView;
+  NTPCardBackgroundView* _backgroundView;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame noInset:(BOOL)noInset {
@@ -182,7 +181,7 @@ const CGFloat kSeparatorHeight = 0.5;
     [_stackView addArrangedSubview:_separator];
     [NSLayoutConstraint activateConstraints:@[
       [_separator.heightAnchor
-          constraintEqualToConstant:AlignValueToPixel(kSeparatorHeight)],
+          constraintEqualToConstant:AlignValueToLowerPixel(kSeparatorHeight)],
       [_separator.leadingAnchor
           constraintEqualToAnchor:_stackView.leadingAnchor],
       [_separator.trailingAnchor
@@ -191,8 +190,7 @@ const CGFloat kSeparatorHeight = 0.5;
 
     [self addSubview:_stackView];
     AddSameConstraintsToSidesWithInsets(
-        _stackView, self,
-        (LayoutSides::kTop | LayoutSides::kLeading | LayoutSides::kTrailing),
+        _stackView, self, LayoutSides::kTop | LayoutSides::kHorizontal,
         noInset ? NSDirectionalEdgeInsetsZero : kMagicStackContainerInsets);
     _contentStackViewBottomMarginAnchor =
         [_stackView.bottomAnchor constraintEqualToAnchor:self.bottomAnchor
@@ -200,14 +198,10 @@ const CGFloat kSeparatorHeight = 0.5;
     [NSLayoutConstraint
         activateConstraints:@[ _contentStackViewBottomMarginAnchor ]];
 
-    NSArray<UITrait>* traits = TraitCollectionSetForTraits(
-        @[ UITraitPreferredContentSizeCategory.class ]);
-    [self registerForTraitChanges:traits
+    [self registerForTraitChanges:@[ UITraitPreferredContentSizeCategory.class ]
                        withAction:@selector(updateCardSizing)];
-    if (IsNTPBackgroundCustomizationEnabled()) {
-      [self registerForTraitChanges:@[ NewTabPageTrait.class ]
-                         withAction:@selector(applyBackgroundColors)];
-    }
+    [self registerForTraitChanges:@[ NewTabPageTrait.class ]
+                       withAction:@selector(applyBackgroundColors)];
     [self applyBackgroundColors];
   }
   return self;
@@ -247,6 +241,7 @@ const CGFloat kSeparatorHeight = 0.5;
             NSFontAttributeName :
                 [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote]
           }];
+  buttonConfiguration.background.backgroundColor = [UIColor clearColor];
   button.configuration = buttonConfiguration;
 
   [button setTitleColor:[UIColor colorNamed:kBlueColor]
@@ -269,6 +264,7 @@ const CGFloat kSeparatorHeight = 0.5;
 }
 
 - (void)configureWithConfig:(MagicStackModule*)config {
+  [self resetView];
   // Ensures that the modules conforms to the dynamic MS height. For
   // the MVT when it lives outside of the Magic Stack to stay as close to its
   // intrinsic size as possible, the constraint is configured to be less than
@@ -277,7 +273,7 @@ const CGFloat kSeparatorHeight = 0.5;
     // Only create and add the background view if it isn't already in the view
     // heirarchy.
     if (!_backgroundView.superview) {
-      _backgroundView = [[MagicStackModuleBackgroundView alloc] init];
+      _backgroundView = [[NTPCardBackgroundView alloc] init];
       _backgroundView.translatesAutoresizingMaskIntoConstraints = NO;
       [self insertSubview:_backgroundView atIndex:0];
       AddSameConstraints(self, _backgroundView);
@@ -391,17 +387,6 @@ const CGFloat kSeparatorHeight = 0.5;
     case ContentSuggestionsModuleType::kMostVisited:
       return @"";
     case ContentSuggestionsModuleType::kTabResumption: {
-      TabResumptionItem* tabResumptionItem =
-          static_cast<TabResumptionItem*>(config);
-      // Arm 4 of ShopCard is an alternative to Tab Resumption,
-      // triggered by Tab Resumption where the user is given the
-      // option to price track a URL for a price trackable URL.
-      if (tabResumptionItem.shopCardData &&
-          tabResumptionItem.shopCardData.shopCardItemType ==
-              ShopCardItemType::kPriceTrackableProductOnTab) {
-        return l10n_util::GetNSString(
-            IDS_IOS_CONTENT_SUGGESTIONS_SHOPCARD_TRACK_PRICE_ALT_TITLE_2);
-      }
       return l10n_util::GetNSString(IDS_IOS_TAB_RESUMPTION_TITLE);
     }
     case ContentSuggestionsModuleType::kSafetyCheck:
@@ -411,8 +396,8 @@ const CGFloat kSeparatorHeight = 0.5;
       // Send Tab and Price Tracking Promo design do not use title.
       return @"";
     case ContentSuggestionsModuleType::kShopCard: {
-      ShopCardItem* shopCardItem = static_cast<ShopCardItem*>(config);
-      if (shopCardItem.shopCardData.shopCardItemType ==
+      ShopCardConfig* shopCardConfig = static_cast<ShopCardConfig*>(config);
+      if (shopCardConfig.shopCardData.shopCardItemType ==
           ShopCardItemType::kPriceDropForTrackedProducts) {
         return l10n_util::GetNSString(
             IDS_IOS_CONTENT_SUGGESTIONS_SHOPCARD_PRICE_TRACKING_TITLE);
@@ -431,6 +416,8 @@ const CGFloat kSeparatorHeight = 0.5;
     case ContentSuggestionsModuleType::kAppBundlePromo:
     case ContentSuggestionsModuleType::kDefaultBrowser:
       return l10n_util::GetNSString(IDS_IOS_MAGIC_STACK_TIP_TITLE);
+    case ContentSuggestionsModuleType::kLevelUp:
+      return l10n_util::GetNSString(IDS_IOS_TOOLS_MENU_LEVEL_UP);
     default:
       NOTREACHED();
   }
@@ -457,9 +444,9 @@ const CGFloat kSeparatorHeight = 0.5;
                                              config:(MagicStackModule*)config {
   switch (type) {
     case ContentSuggestionsModuleType::kShopCard: {
-      ShopCardItem* shopCardItem = static_cast<ShopCardItem*>(config);
+      ShopCardConfig* shopCardConfig = static_cast<ShopCardConfig*>(config);
       _seeMoreButton.accessibilityLabel = [@[
-        _seeMoreButton.titleLabel.text, shopCardItem.shopCardData.productTitle
+        _seeMoreButton.titleLabel.text, shopCardConfig.shopCardData.productTitle
       ] componentsJoinedByString:@", "];
       break;
     }
@@ -481,8 +468,8 @@ const CGFloat kSeparatorHeight = 0.5;
       _reducedBottomMargin = true;
       break;
     case ContentSuggestionsModuleType::kSafetyCheck: {
-      SafetyCheckState* safetyCheckConfig =
-          static_cast<SafetyCheckState*>(config);
+      SafetyCheckConfig* safetyCheckConfig =
+          static_cast<SafetyCheckConfig*>(config);
       if ([safetyCheckConfig numberOfIssues] > 1) {
         _contentStackViewBottomMarginAnchor.constant =
             isContentOversized(_stackView)
@@ -559,8 +546,8 @@ const CGFloat kSeparatorHeight = 0.5;
 // Returns the module's subtitle, if any, given the Magic Stack module `type`.
 - (NSString*)subtitleStringForConfig:(MagicStackModule*)config {
   if (config.type == ContentSuggestionsModuleType::kSafetyCheck) {
-    SafetyCheckState* safetyCheckConfig =
-        static_cast<SafetyCheckState*>(config);
+    SafetyCheckConfig* safetyCheckConfig =
+        static_cast<SafetyCheckConfig*>(config);
     return FormatElapsedTimeSinceLastSafetyCheck(safetyCheckConfig.lastRunTime);
   }
 

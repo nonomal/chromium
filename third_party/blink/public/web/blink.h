@@ -88,6 +88,12 @@ BLINK_EXPORT v8::Isolate* CreateMainThreadIsolate();
 BLINK_EXPORT void SetWebTestMode(bool);
 BLINK_EXPORT bool WebTestMode();
 
+// Tells Blink whether the current process is running with
+// switches::kSingleProcess while running web tests. Blink can't read that
+// switch directly (content_switches.h is above its layer), so the embedder
+// pushes the value down instead.
+BLINK_EXPORT void SetIsRunningSingleProcessWebTest(bool);
+
 // Alters whether the browser can handle focus events while running web tests.
 BLINK_EXPORT void SetBrowserCanHandleFocusForWebTest(bool);
 
@@ -127,15 +133,6 @@ BLINK_EXPORT void ForceNextWebGLContextCreationToFailForTest();
 // Force the drawing buffer used by webgl contexts to fail so that the webgl
 // context's ability to deal with that failure gracefully can be tested.
 BLINK_EXPORT void ForceNextDrawingBufferCreationToFailForTest();
-
-// Set whether this renderer process is "cross-origin isolated". This
-// corresponds to agent cluster's "cross-origin isolated" concept.
-// TODO(yhirano): Have the spec URL.
-// This property is process global because we ensure that a renderer process
-// host only cross-origin isolated agents or only non-cross-origin isolated
-// agents, not both.
-// This is called at most once. This is called earlier than any frame commit.
-BLINK_EXPORT void SetIsCrossOriginIsolated(bool value);
 
 // Allows disabling web security. One example of this is that it enables APIs
 // that would otherwise require cross-origin-isolated contexts.

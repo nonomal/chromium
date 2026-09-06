@@ -23,8 +23,8 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 
 import org.chromium.base.IntentUtils;
 import org.chromium.base.supplier.NonNullObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplierImpl;
 import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
@@ -54,10 +54,13 @@ import org.chromium.components.browser_ui.widget.selectable_list.SelectionDelega
 import org.chromium.components.prefs.PrefService;
 import org.chromium.components.search_engines.TemplateUrl;
 import org.chromium.components.user_prefs.UserPrefs;
+import org.chromium.ui.base.ActivityResultTracker;
 import org.chromium.ui.base.Clipboard;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.DeviceInput;
+import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.edge_to_edge.EdgeToEdgePadAdjuster;
+import org.chromium.ui.modaldialog.ModalDialogManager;
 
 import java.util.List;
 import java.util.function.Function;
@@ -89,18 +92,20 @@ public class HistoryManager
     private @Nullable HistoryContentManager mContentManager;
     private @Nullable SelectionDelegate<HistoryItem> mSelectionDelegate;
     private @Nullable HistoryManagerToolbar mToolbar;
+    private @Nullable HistoryDesktopNavigationCoordinator mDesktopNavigationCoordinator;
     private TextView mEmptyView;
     private final SnackbarManager mSnackbarManager;
-    private final ObservableSupplierImpl<Boolean> mShouldShowPrivacyDisclaimerSupplier =
-            new ObservableSupplierImpl<>();
-    private final ObservableSupplierImpl<Boolean> mShouldShowClearBrowsingDataSupplier =
-            new ObservableSupplierImpl<>();
+    private final SettableMonotonicObservableSupplier<Boolean>
+            mShouldShowPrivacyDisclaimerSupplier = ObservableSuppliers.createMonotonic();
+    private final SettableMonotonicObservableSupplier<Boolean>
+            mShouldShowClearBrowsingDataSupplier = ObservableSuppliers.createMonotonic();
 
     private final SettableNonNullObservableSupplier<Boolean> mBackPressStateSupplier =
             ObservableSuppliers.createNonNull(false);
 
     private final PrefService mPrefService;
     private final Profile mProfile;
+    private final boolean mIsLargeFormFactorDevice;
 
     private boolean mIsSearching;
 
@@ -112,13 +117,16 @@ public class HistoryManager
     /**
      * Creates a new HistoryManager.
      *
+     * @param profile The profile launching History.
+     * @param windowAndroid The current {@link WindowAndroid} showing the history UI.
      * @param activity The Activity associated with the HistoryManager.
      * @param isSeparateActivity Whether the history UI will be shown in a separate activity than
      *     the main Chrome activity.
      * @param snackbarManager The {@link SnackbarManager} used to display snackbars.
-     * @param profile The profile launching History.
-     * @param bottomSheetController Supplier of {@link BottomSheetController} to show app filter
-     *     sheet in.
+     * @param bottomSheetControllerSupplier Supplier of {@link BottomSheetController} to show app
+     *     filter sheet in.
+     * @param modalDialogManagerSupplier Supplies the {@link ModalDialogManager}.
+     * @param activityResultTracker Tracker of activity results.
      * @param tabSupplier Supplies the current tab, null if the history UI will be shown in a
      *     separate activity.
      * @param historyProvider Provider of methods for querying and managing browsing history.
@@ -134,11 +142,14 @@ public class HistoryManager
      */
     @SuppressWarnings("unchecked") // mSelectableListLayout
     public HistoryManager(
+            Profile profile,
+            WindowAndroid windowAndroid,
             Activity activity,
             boolean isSeparateActivity,
             SnackbarManager snackbarManager,
-            Profile profile,
-            Supplier<@Nullable BottomSheetController> bottomSheetController,
+            Supplier<BottomSheetController> bottomSheetControllerSupplier,
+            Supplier<ModalDialogManager> modalDialogManagerSupplier,
+            ActivityResultTracker activityResultTracker,
             @Nullable Supplier<@Nullable Tab> tabSupplier,
             HistoryProvider historyProvider,
             HistoryUmaRecorder umaRecorder,
@@ -146,12 +157,13 @@ public class HistoryManager
             boolean shouldShowClearData,
             boolean launchedForApp,
             boolean showAppFilter,
+            boolean shouldClusterByDomain,
             @Nullable Runnable openHistoryItemCallback,
             @Nullable Function<View, EdgeToEdgePadAdjuster> edgeToEdgePadAdjusterGenerator) {
+        mProfile = profile;
         mActivity = activity;
         mIsSeparateActivity = isSeparateActivity;
         mSnackbarManager = snackbarManager;
-        mProfile = profile;
         mIsIncognito = profile.isOffTheRecord();
         mUmaRecorder = umaRecorder;
         mLaunchedForApp = launchedForApp;
@@ -169,6 +181,7 @@ public class HistoryManager
         mUmaRecorder.recordOpenHistory();
         // If incognito placeholder is shown, we don't need to create History UI elements.
         if (mIsIncognito) {
+            mIsLargeFormFactorDevice = false;
             mSelectableListLayout = null;
             mRootView = getIncognitoHistoryPlaceholderView();
             return;
@@ -176,10 +189,22 @@ public class HistoryManager
 
         mRootView = new FrameLayout(mActivity);
 
+        final boolean isDesktopLayoutEnabled =
+                ChromeFeatureList.isEnabled(ChromeFeatureList.ANDROID_DESKTOP_HISTORY_LAYOUT);
+        int layoutId =
+                isDesktopLayoutEnabled ? R.layout.history_main_desktop : R.layout.history_main;
+
         // 1. Create selectable components.
+        ViewGroup mainView = (ViewGroup) LayoutInflater.from(activity).inflate(layoutId, null);
+        SelectableListLayout<HistoryItem> selectableListLayout =
+                mainView.findViewById(R.id.selectable_list);
+        // For the new desktop architecture, the selectable list is embedded in the layout, so it is
+        // found via findViewById. The fallback directly casts the mainView for the legacy mobile
+        // layout where the list acts as the root view.
         mSelectableListLayout =
-                (SelectableListLayout<HistoryItem>)
-                        LayoutInflater.from(activity).inflate(R.layout.history_main, null);
+                selectableListLayout != null
+                        ? selectableListLayout
+                        : (SelectableListLayout<HistoryItem>) mainView;
         mSelectionDelegate = new SelectionDelegate<>();
         mSelectionDelegate.addObserver(this);
 
@@ -187,16 +212,19 @@ public class HistoryManager
         boolean shouldShowInfoHeader = mHeaderPref.isVisible();
 
         mContentManager =
-                new HistoryContentManager(
+                HistoryContentManager.create(
+                        windowAndroid,
                         mActivity,
                         this,
                         isSeparateActivity,
                         profile,
                         shouldShowInfoHeader,
                         shouldShowClearData,
-                        /* hostName= */ null,
                         mSelectionDelegate,
-                        bottomSheetController,
+                        bottomSheetControllerSupplier,
+                        modalDialogManagerSupplier,
+                        snackbarManager,
+                        activityResultTracker,
                         tabSupplier,
                         () -> assumeNonNull(mToolbar).hideKeyboard(),
                         mUmaRecorder,
@@ -204,6 +232,7 @@ public class HistoryManager
                         clientPackageName,
                         launchedForApp,
                         showAppFilter,
+                        shouldClusterByDomain,
                         openHistoryItemCallback,
                         new ChromeAsyncTabLauncher(/* incognito= */ false),
                         new ChromeAsyncTabLauncher(/* incognito= */ true));
@@ -211,10 +240,19 @@ public class HistoryManager
                 mContentManager.getAdapter(),
                 mContentManager.getRecyclerView(),
                 edgeToEdgePadAdjusterGenerator);
-        boolean isLargeScreenWithKeyboard =
-                DeviceInput.supportsKeyboard()
-                        && DeviceFormFactor.isNonMultiDisplayContextOnTablet(mActivity);
-        if (mContentManager.showAppFilter() || isLargeScreenWithKeyboard) {
+
+        if (isDesktopLayoutEnabled) {
+            View navigationPane = mainView.findViewById(R.id.navigation_pane);
+            mDesktopNavigationCoordinator =
+                    new HistoryDesktopNavigationCoordinator(
+                            mActivity,
+                            navigationPane,
+                            this::showHistoryPane,
+                            this::showTabsFromOtherDevicesPane);
+        }
+
+        mIsLargeFormFactorDevice = DeviceFormFactor.isNonMultiDisplayContextOnTablet(mActivity);
+        if (mContentManager.showAppFilter() || mIsLargeFormFactorDevice) {
             // Now the search mode can have a header. Let the layout ignore it to
             // return the right item count.
             mSelectableListLayout.ignoreItemTypeForEmptyState(ItemViewType.STANDARD_HEADER);
@@ -253,15 +291,19 @@ public class HistoryManager
                     }
                 });
 
-        mToolbar.setIsLargeScreenWithKeyboard(isLargeScreenWithKeyboard);
-
         /* If the current device is LFF device w/ physical keyboard attached,
          * then initialize the search box only; Otherwise initialize the whole toolbar
          */
-        if (!isLargeScreenWithKeyboard) {
+        if (!mIsLargeFormFactorDevice) {
             mToolbar.initializeSearchView(
                     this, R.string.history_manager_search, R.id.search_menu_id);
-        } else mToolbar.initializeInlineSearchView(this, R.id.search_menu_id);
+        } else {
+            mToolbar.initializeInlineSearchView(this, R.id.search_menu_id);
+            ViewGroup searchBoxContainer =
+                    mToolbar.initializeSearchBoxContainer(
+                            mSelectableListLayout, R.string.history_manager_search);
+            mSelectableListLayout.addInlineSearchBox(searchBoxContainer);
+        }
 
         mToolbar.setInfoMenuItem(R.id.info_menu_id);
         mToolbar.updateInfoMenuItem(shouldShowInfoButton(), shouldShowInfoHeaderIfAvailable());
@@ -272,7 +314,9 @@ public class HistoryManager
         mToolbar.setFocusable(true);
 
         // 4. Width constrain the SelectableListLayout.
-        mSelectableListLayout.configureWideDisplayStyle();
+        if (!isDesktopLayoutEnabled) {
+            mSelectableListLayout.configureWideDisplayStyle();
+        }
 
         // 5. Initialize empty view.
         initializeEmptyView();
@@ -280,17 +324,16 @@ public class HistoryManager
         // 6. Load items.
         mContentManager.startLoadingItems();
 
-        setContentView(mSelectableListLayout);
+        setContentView(mainView);
         mRootView.addView(mContentView);
         mSelectableListLayout
                 .getHandleBackPressChangedSupplier()
-                .addObserver((x) -> onBackPressStateChanged());
+                .addSyncObserverAndPostIfNonNull(_ -> onBackPressStateChanged());
 
         onBackPressStateChanged(); // Initialize back press State.
         mContentManager.maybeQueryApps();
 
-        mContentManager.getAdapter().setIsLargeScreenWithKeyboard(isLargeScreenWithKeyboard);
-        mContentManager.getAdapter().setToolbar(mToolbar);
+        mContentManager.getAdapter().setIsLargeFormFactorDevice(mIsLargeFormFactorDevice);
     }
 
     private void initializeEmptyView() {
@@ -372,7 +415,7 @@ public class HistoryManager
 
             return true;
         } else if (item.getItemId() == R.id.search_menu_id) {
-            enterSearchMode();
+            enterSearchMode(true);
             return true;
         } else if (item.getItemId() == R.id.info_menu_id) {
             toggleInfoHeaderVisibility();
@@ -380,19 +423,31 @@ public class HistoryManager
         return false;
     }
 
-    private void enterSearchMode() {
+    private void enterSearchMode(boolean showKeyboard) {
         assumeNonNull(mContentManager);
         assumeNonNull(mToolbar);
         assumeNonNull(mSelectableListLayout);
 
         mContentManager.maybeResetAppFilterChip();
         mContentManager.getAdapter().onSearchStart();
-        mToolbar.showSearchView(true);
+        mToolbar.showSearchView(showKeyboard);
         String searchEmptyString = getSearchEmptyString();
         mSelectableListLayout.onStartSearch(
                 searchEmptyString, R.string.history_manager_empty_state_view_or_open_more_history);
         mUmaRecorder.recordSearchHistory();
         mIsSearching = true;
+    }
+
+    public void setQuery(String query) {
+        if (mToolbar == null) {
+            // In the Incognito mode, we don't have the query box.
+            return;
+        }
+
+        if (!mIsLargeFormFactorDevice && !mIsSearching) {
+            enterSearchMode(false);
+        }
+        mToolbar.setSearchText(query);
     }
 
     private void toggleInfoHeaderVisibility() {
@@ -421,6 +476,21 @@ public class HistoryManager
                 : mActivity.getString(R.string.history_manager_no_results, defaultSearchEngineName);
     }
 
+    /** Reloads the history items. */
+    public void reload() {
+        if (mContentManager != null) {
+            mContentManager.startLoadingItems();
+        }
+    }
+
+    private void showHistoryPane() {
+        // TODO(crbug.com/546215044): embed the history pane.
+    }
+
+    private void showTabsFromOtherDevicesPane() {
+        // TODO(crbug.com/546215044): embed the cross device pane.
+    }
+
     /**
      * @return The view that shows the main browsing history UI.
      */
@@ -446,7 +516,7 @@ public class HistoryManager
         ImageButton dismissButton =
                 placeholderView.findViewById(R.id.close_history_placeholder_button);
         if (mIsSeparateActivity) {
-            dismissButton.setOnClickListener(v -> mActivity.finish());
+            dismissButton.setOnClickListener(_ -> mActivity.finish());
         } else {
             dismissButton.setVisibility(View.GONE);
         }
@@ -465,6 +535,11 @@ public class HistoryManager
         if (mIsIncognito) {
             // If Incognito placeholder is shown no need to call any destroy method.
             return;
+        }
+
+        if (mDesktopNavigationCoordinator != null) {
+            mDesktopNavigationCoordinator.destroy();
+            mDesktopNavigationCoordinator = null;
         }
 
         if (mSelectableListLayout != null) {
@@ -492,6 +567,13 @@ public class HistoryManager
 
     @Override
     public void onSearchTextChanged(String query) {
+        assumeNonNull(mSelectionDelegate);
+        boolean isLargeScreenWithKeyboard =
+                DeviceInput.supportsKeyboard(mActivity)
+                        && DeviceFormFactor.isNonMultiDisplayContextOnTablet(mActivity);
+        if (isLargeScreenWithKeyboard && mSelectionDelegate.isSelectionEnabled()) {
+            mSelectionDelegate.clearSelection();
+        }
         assumeNonNull(mContentManager).search(query);
     }
 
@@ -542,7 +624,7 @@ public class HistoryManager
         // Before the RecyclerView binds its items, LinearLayoutManager#firstVisibleItemPosition()
         // returns {@link RecyclerView#NO_POSITION}. If #findVisibleItemPosition() returns
         // NO_POSITION, the current adapter position should not prevent the info button from being
-        // displayed if all of the other criteria is met. See crbug.com/756249#c3.
+        // displayed if all of the other criteria is met. See crbug.com/41339744#comment4.
         boolean firstAdapterItemScrolledOff =
                 assumeNonNull(layoutManager).findFirstVisibleItemPosition() > 0;
 

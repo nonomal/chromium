@@ -87,7 +87,7 @@ TEST_F(MoveToAccountStoreBubbleControllerTest, CloseExplicitly) {
 
 TEST_F(MoveToAccountStoreBubbleControllerTest,
        AcceptMoveIfAccountStorageEnabled) {
-  ON_CALL(*password_feature_manager(), IsAccountStorageEnabled)
+  ON_CALL(*password_feature_manager(), IsAccountStorageActive)
       .WillByDefault(Return(true));
   ON_CALL(*delegate(), GetState)
       .WillByDefault(
@@ -125,7 +125,8 @@ TEST_F(MoveToAccountStoreBubbleControllerTest, ProvidesProfileIcon) {
   AccountInfo info = signin::MakePrimaryAccountAvailable(
       identity_manager, "todd.tester@gmail.com", signin::ConsentLevel::kSignin);
   signin::SimulateAccountImageFetch(
-      identity_manager, info.account_id, "https://todd.tester.com/avatar.png",
+      identity_manager, info.GetAccountId(),
+      "https://todd.tester.com/avatar.png",
       gfx::Image(gfx::test::CreateImageSkia(96, 96)));
   EXPECT_FALSE(controller()->GetProfileIcon(/*size=*/48).IsEmpty());
 }

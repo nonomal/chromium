@@ -4,24 +4,20 @@
 
 #include "chrome/browser/signin/bound_session_credentials/bound_session_registration_fetcher_param.h"
 
+#include <vector>
+
 #include "base/memory/scoped_refptr.h"
-#include "base/strings/strcat.h"
-#include "base/test/bind.h"
-#include "base/test/scoped_feature_list.h"
-#include "base/test/task_environment.h"
-#include "chrome/browser/signin/bound_session_credentials/bound_session_registration_fetcher.h"
-#include "crypto/signature_verifier.h"
+#include "crypto/sign.h"
 #include "net/http/http_response_headers.h"
-#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
-#include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 namespace {
 
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
-using enum ::crypto::SignatureVerifier::SignatureAlgorithm;
+using enum ::crypto::sign::SignatureKind;
 
 constexpr char kChallenge[] = "Y2hhbGxlbmdl";
 constexpr char kChallenge2[] = "Y2hhbGxlbmdlMg==";
@@ -29,7 +25,7 @@ constexpr char kChallenge2[] = "Y2hhbGxlbmdlMg==";
 class BoundSessionRegistrationFetcherParamTest : public testing::Test {};
 
 TEST_F(BoundSessionRegistrationFetcherParamTest, AllInvalid) {
-  std::vector<crypto::SignatureVerifier::SignatureAlgorithm> supported_algos;
+  std::vector<crypto::sign::SignatureKind> supported_algos;
   BoundSessionRegistrationFetcherParam params =
       BoundSessionRegistrationFetcherParam::CreateInstanceForTesting(
           GURL(), supported_algos, "");

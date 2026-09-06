@@ -13,15 +13,12 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
-#include "base/scoped_observation.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/common/buildflags.h"
-#include "components/supervised_user/core/browser/supervised_user_service.h"
-#include "components/supervised_user/core/browser/supervised_user_service_observer.h"
 #include "ui/gfx/image/image.h"
 
 class AvatarMenuObserver;
-class Browser;
+class BrowserWindowInterface;
 class ProfileAttributesStorage;
 class ProfileListDesktop;
 
@@ -30,13 +27,12 @@ class ProfileListDesktop;
 // browser window frame. This class will notify its observer when the backend
 // data changes, and the view for this model should forward actions
 // back to it in response to user events.
-class AvatarMenu :
-    public SupervisedUserServiceObserver,
-    public ProfileAttributesStorage::Observer {
+class AvatarMenu : public ProfileAttributesStorage::Observer {
  public:
   // Represents an item in the menu.
   struct Item {
-    Item(size_t menu_index, const base::FilePath& profile_path,
+    Item(size_t menu_index,
+         const base::FilePath& profile_path,
          const gfx::Image& icon);
     Item(const Item& other);
     ~Item();
@@ -85,7 +81,7 @@ class AvatarMenu :
   // will be created if an action requires it.
   AvatarMenu(ProfileAttributesStorage* profile_storage,
              AvatarMenuObserver* observer,
-             Browser* browser);
+             BrowserWindowInterface* browser);
 
   AvatarMenu(const AvatarMenu&) = delete;
   AvatarMenu& operator=(const AvatarMenu&) = delete;
@@ -133,7 +129,7 @@ class AvatarMenu :
   // This menu is also used for the always-present Mac and Linux system menubar.
   // If the last active browser changes, the menu will need to reference that
   // browser.
-  void ActiveBrowserChanged(Browser* browser);
+  void ActiveBrowserChanged(BrowserWindowInterface* browser);
 
   // Returns true if the add profile link should be shown/enabled.
   bool ShouldShowAddNewProfileLink() const;
@@ -156,19 +152,11 @@ class AvatarMenu :
       const base::FilePath& profile_path) override;
   void OnProfileIsOmittedChanged(const base::FilePath& profile_path) override;
 
-  // SupervisedUserServiceObserver:
-  void OnCustodianInfoChanged() override;
-
-  // Rebuilds the menu and notifies any observers that an update occured.
+  // Rebuilds the menu and notifies any observers that an update occurred.
   void Update();
 
   // The model that provides the list of menu items.
   std::unique_ptr<ProfileListDesktop> profile_list_;
-
-  // Observes changes to a supervised user's custodian info.
-  base::ScopedObservation<supervised_user::SupervisedUserService,
-                          SupervisedUserServiceObserver>
-      supervised_user_observation_{this};
 
   // The storage that provides the profile attributes.
   base::WeakPtr<ProfileAttributesStorage> profile_storage_;
@@ -177,7 +165,7 @@ class AvatarMenu :
   raw_ptr<AvatarMenuObserver, DanglingUntriaged> observer_;
 
   // Browser in which this avatar menu resides. Weak.
-  raw_ptr<Browser, AcrossTasksDanglingUntriaged> browser_;
+  raw_ptr<BrowserWindowInterface, AcrossTasksDanglingUntriaged> browser_;
 };
 
 #endif  // CHROME_BROWSER_PROFILES_AVATAR_MENU_H_

@@ -39,7 +39,7 @@ import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
 import org.chromium.chrome.browser.safety_check.SafetyCheckProperties.SafeBrowsingState;
 import org.chromium.chrome.browser.safety_check.SafetyCheckProperties.UpdatesState;
-import org.chromium.chrome.browser.settings.SettingsActivityTestRule;
+import org.chromium.chrome.browser.settings.SettingsTestRule;
 import org.chromium.chrome.browser.sync.SyncServiceFactory;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.components.signin.base.CoreAccountInfo;
@@ -71,8 +71,8 @@ public class SafetyCheckSettingsFragmentTest {
     @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
 
     @Rule
-    public SettingsActivityTestRule<SafetyCheckSettingsFragment> mSettingsActivityTestRule =
-            new SettingsActivityTestRule<>(SafetyCheckSettingsFragment.class);
+    public SettingsTestRule<SafetyCheckSettingsFragment> mSettingsActivityTestRule =
+            new SettingsTestRule<>(SafetyCheckSettingsFragment.class);
 
     @Mock private SyncService mSyncService;
     @Mock private PasswordManagerUtilBridge.Natives mPasswordManagerUtilBridgeNativeMock;
@@ -93,7 +93,7 @@ public class SafetyCheckSettingsFragmentTest {
         PasswordManagerTestHelper.setUpGmsCoreFakeBackends();
 
         when(mBackendSupportHelperMock.isBackendPresent()).thenReturn(true);
-        // The password manger is always available in Safety Check after login db deprecation.
+        // The password manager is always available in Safety Check after login db deprecation.
         configurePasswordManagerUtilBridge();
     }
 
@@ -167,12 +167,11 @@ public class SafetyCheckSettingsFragmentTest {
     }
 
     private void configureMockSyncService(boolean isPasswordSyncEnabled) {
-        when(mSyncService.isSyncFeatureEnabled()).thenReturn(true);
         Set<Integer> selectedTypes;
         selectedTypes =
                 isPasswordSyncEnabled
                         ? Set.of(UserSelectableType.PASSWORDS)
-                        : Collections.EMPTY_SET;
+                        : Collections.emptySet();
         when(mSyncService.getSelectedTypes()).thenReturn(selectedTypes);
         when(mSyncService.getAccountInfo())
                 .thenReturn(

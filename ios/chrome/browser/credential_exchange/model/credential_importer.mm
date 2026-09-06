@@ -8,6 +8,8 @@
 
 #import "base/apple/foundation_util.h"
 #import "base/barrier_closure.h"
+#import "base/check_deref.h"
+#import "base/containers/to_vector.h"
 #import "base/rand_util.h"
 #import "base/strings/sys_string_conversions.h"
 #import "base/task/thread_pool.h"
@@ -22,8 +24,12 @@
 #import "components/webauthn/core/browser/import/passkey_importer.h"
 #import "components/webauthn/core/browser/passkey_model.h"
 #import "components/webauthn/core/browser/passkey_model_utils.h"
+#import "components/webauthn/ios/passkey_types.h"
 #import "ios/chrome/browser/credential_exchange/model/credential_exchange_passkey.h"
 #import "ios/chrome/browser/credential_exchange/model/credential_exchange_password.h"
+#import "ios/chrome/browser/credential_exchange/model/features.h"
+#import "ios/chrome/browser/credential_exchange/model/import_stats.h"
+#import "ios/chrome/browser/credential_exchange/model/metrics_util.h"
 #import "ios/chrome/browser/data_import/public/passkey_import_item.h"
 #import "ios/chrome/browser/data_import/public/password_import_item.h"
 #import "net/base/apple/url_conversions.h"
@@ -33,10 +39,6 @@ namespace {
 
 // Count of credential types that are currently supported by the importer.
 constexpr int kSupportedCredentialTypesCount = 2;
-
-std::string DataToString(NSData* data) {
-  return std::string(static_cast<const char*>(data.bytes), data.length);
-}
 
 }  // namespace
 
@@ -84,7 +86,8 @@ std::string DataToString(NSData* data) {
     _credentialImportManager.delegate = self;
     _delegate = delegate;
     _passwordImporter = std::make_unique<password_manager::PasswordImporter>(
-        savedPasswordsPresenter, /*user_confirmation_required=*/true);
+        CHECK_DEREF(savedPasswordsPresenter),
+        /*user_confirmation_required=*/true);
     CHECK(passkeyModel);
     _passkeyImporter =
         std::make_unique<webauthn::PasskeyImporter>(*passkeyModel);
@@ -101,20 +104,27 @@ std::string DataToString(NSData* data) {
 #pragma mark - Public
 
 - (void)startImportingCredentialsWithTrustedVaultKeys:
-    (NSArray<NSData*>*)trustedVaultKeys {
+    (webauthn::SharedKeyList)trustedVaultKeys {
   __weak __typeof(self) weakSelf = self;
   _allCredentialTypesProcessedClosure =
       base::BarrierClosure(kSupportedCredentialTypesCount, base::BindOnce(^{
                              [weakSelf onAllCredentialTypesProcessed];
                            }));
+
+  std::vector<uint8_t> trustedVaultKey;
+  if (_passkeys.count != 0) {
+    CHECK_GE(trustedVaultKeys.size(), 1u);
+    trustedVaultKey = trustedVaultKeys.back();
+  }
+
   base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::TaskPriority::USER_VISIBLE}, base::BindOnce(^{
-        return [weakSelf translateCredentialExchangePasskeys:trustedVaultKeys];
+        return [weakSelf translateCredentialExchangePasskeys];
       }),
-      base::BindOnce(
-          ^(std::vector<sync_pb::WebauthnCredentialSpecifics> passkeys) {
-            [weakSelf startImportingPasskeys:std::move(passkeys)];
-          }));
+      base::BindOnce(^(std::vector<webauthn::PasskeyImportCandidate> passkeys) {
+        [weakSelf startImportingPasskeys:std::move(passkeys)
+                         trustedVaultKey:std::move(trustedVaultKey)];
+      }));
   base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::TaskPriority::USER_VISIBLE}, base::BindOnce(^{
         return [weakSelf translateCredentialExchangePasswords];
@@ -158,11 +168,13 @@ std::string DataToString(NSData* data) {
                                     passkeys:
                                         (NSArray<CredentialExchangePasskey*>*)
                                             passkeys
-                         exporterDisplayName:(NSString*)exporterDisplayName {
+                         exporterDisplayName:(NSString*)exporterDisplayName
+                                       stats:(ImportStats*)stats {
   _passwords = passwords;
   _passkeys = passkeys;
   _presentCredentialTypesCount =
       (passwords.count > 0 ? 1 : 0) + (passkeys.count > 0 ? 1 : 0);
+  LogImportStats(stats);
   [_delegate showImportScreenWithPasswordCount:passwords.count
                                   passkeyCount:passkeys.count
                            exporterDisplayName:exporterDisplayName];
@@ -233,43 +245,55 @@ std::string DataToString(NSData* data) {
 }
 
 // Converts `_passkeys` into structures used by `_passkeyImporter`.
-- (std::vector<sync_pb::WebauthnCredentialSpecifics>)
-    translateCredentialExchangePasskeys:(NSArray<NSData*>*)trustedVaultKeys {
+- (std::vector<webauthn::PasskeyImportCandidate>)
+    translateCredentialExchangePasskeys {
   if (_passkeys.count == 0) {
     return {};
   }
 
-  // `hw_protected` security domain currently supports a single key.
-  CHECK(trustedVaultKeys.count == 1);
-  base::span<const uint8_t> trustedVaultKey =
-      base::apple::NSDataToSpan(trustedVaultKeys[0]);
-  int64_t timeNow = base::Time::Now().InMillisecondsSinceUnixEpoch();
-  std::vector<sync_pb::WebauthnCredentialSpecifics> passkeys;
+  std::vector<webauthn::PasskeyImportCandidate> passkeys;
 
   for (CredentialExchangePasskey* passkey : _passkeys) {
-    // TODO(crbug.com/458337350): Handle extensions.
-    sync_pb::WebauthnCredentialSpecifics specifics;
-    sync_pb::WebauthnCredentialSpecifics_Encrypted encrypted;
-    encrypted.set_private_key(passkey.privateKey.bytes,
-                              passkey.privateKey.length);
-
-    // Encrypting might fail here. Don't skip the passkey, as `passkeyImporter`
-    // deals with parsing all the errors.
-    // TODO(crbug.com/458337350): Consider passing CredentialExchangePasskey or
-    // NSData instead or just log failure here.
-    webauthn::passkey_model_utils::EncryptWebauthnCredentialSpecificsData(
-        trustedVaultKey, encrypted, &specifics);
-
-    specifics.set_sync_id(
-        base::RandBytesAsString(webauthn::passkey_model_utils::kSyncIdLength));
-    specifics.set_credential_id(DataToString(passkey.credentialId));
-    specifics.set_user_id(DataToString(passkey.userId));
-    specifics.set_rp_id(base::SysNSStringToUTF8(passkey.rpId));
-    specifics.set_user_name(base::SysNSStringToUTF8(passkey.userName));
-    specifics.set_user_display_name(
-        base::SysNSStringToUTF8(passkey.userDisplayName));
-    specifics.set_creation_time(timeNow);
-    passkeys.push_back(specifics);
+    std::vector<uint8_t> hmacSecret;
+    std::optional<std::string> hmacSecretAlgorithm;
+    std::optional<std::vector<uint8_t>> largeBlob;
+    std::optional<uint64_t> largeBlobUncompressedSize;
+    if (base::FeatureList::IsEnabled(kCredentialExchangeFidoExtensions)) {
+      if (passkey.hmacSecret) {
+        hmacSecret =
+            base::ToVector(base::apple::NSDataToSpan(passkey.hmacSecret));
+      }
+      if (passkey.hmacSecretAlgorithm) {
+        hmacSecretAlgorithm =
+            base::SysNSStringToUTF8(passkey.hmacSecretAlgorithm);
+      }
+      if (passkey.largeBlob) {
+        largeBlob =
+            base::ToVector(base::apple::NSDataToSpan(passkey.largeBlob));
+      }
+      if (passkey.largeBlobUncompressedSize) {
+        largeBlobUncompressedSize =
+            [passkey.largeBlobUncompressedSize unsignedLongLongValue];
+      }
+    }
+    passkeys.push_back(webauthn::PasskeyImportCandidate{
+        .rp_id = base::SysNSStringToUTF8(passkey.rpId),
+        .user_name = base::SysNSStringToUTF8(passkey.userName),
+        .user_display_name = base::SysNSStringToUTF8(passkey.userDisplayName),
+        .credential_id =
+            base::ToVector(base::apple::NSDataToSpan(passkey.credentialId)),
+        .user_id = base::ToVector(base::apple::NSDataToSpan(passkey.userId)),
+        .private_key =
+            base::ToVector(base::apple::NSDataToSpan(passkey.privateKey)),
+        .exporter_creation_time =
+            passkey.creationDate
+                ? std::optional(base::Time::FromNSDate(passkey.creationDate))
+                : std::nullopt,
+        .hmac_secret = std::move(hmacSecret),
+        .hmac_secret_algorithm = std::move(hmacSecretAlgorithm),
+        .large_blob = std::move(largeBlob),
+        .large_blob_uncompressed_size = largeBlobUncompressedSize,
+    });
   }
 
   return passkeys;
@@ -277,7 +301,8 @@ std::string DataToString(NSData* data) {
 
 // Triggers initial processing of `passkeys` handled by `_passkeyImporter`.
 - (void)startImportingPasskeys:
-    (std::vector<sync_pb::WebauthnCredentialSpecifics>)passkeys {
+            (std::vector<webauthn::PasskeyImportCandidate>)passkeys
+               trustedVaultKey:(std::vector<uint8_t>)trustedVaultKey {
   if (passkeys.empty()) {
     _allCredentialTypesProcessedClosure.Run();
     return;
@@ -285,7 +310,7 @@ std::string DataToString(NSData* data) {
 
   __weak __typeof(self) weakSelf = self;
   _passkeyImporter->StartImport(
-      std::move(passkeys),
+      std::move(passkeys), std::move(trustedVaultKey),
       base::BindOnce(^(const webauthn::ImportProcessingResult& result) {
         [weakSelf onPasskeyParsingFinished:result];
       }));
@@ -324,6 +349,10 @@ std::string DataToString(NSData* data) {
                         invalid:[PasskeyImportItem
                                     passkeyImportItemsFromImportedPasskeyInfos:
                                         _passkeyImportResult.errors]];
+}
+
+- (void)onImportError {
+  [_delegate onImportError];
 }
 
 @end

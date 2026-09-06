@@ -16,6 +16,7 @@
 #include "base/bits.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/no_destructor.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
 #include "base/test/launcher/unit_test_launcher.h"
@@ -110,8 +111,12 @@ const char* help_msg =
     ;
 
 bool g_save_images = false;
-base::FilePath g_source_directory =
-    base::FilePath(base::FilePath::kCurrentDirectory);
+
+base::FilePath& GetSourceDir() {
+  static base::NoDestructor<base::FilePath> source_directory(
+      base::FilePath::kCurrentDirectory);
+  return *source_directory;
+}
 
 // BackendType defines an enum for specifying a particular backend.
 enum class BackendType {
@@ -177,7 +182,7 @@ std::optional<ImageProcessor::CreateBackendCB> GetCreateBackendCB(
 std::optional<BackendType> g_backend_type;
 
 base::FilePath BuildSourceFilePath(const base::FilePath& filename) {
-  return media::g_source_directory.Append(filename);
+  return GetSourceDir().Append(filename);
 }
 
 media::test::VideoTestEnvironment* g_env;
@@ -273,25 +278,32 @@ bool SupportsNecessaryGLExtension() {
 }
 
 scoped_refptr<VideoFrame> CreateNV12Frame(
+    const gfx::ColorSpace& color_space,
     const gfx::Size& size,
     VideoFrame::StorageType type,
     gpu::TestSharedImageInterface* test_sii) {
   const gfx::Rect visible_rect(size);
   constexpr base::TimeDelta kNullTimestamp;
   if (type == VideoFrame::STORAGE_MAPPABLE_SHARED_IMAGE) {
-    return CreateMappableVideoFrame(
-        VideoPixelFormat::PIXEL_FORMAT_NV12, size, visible_rect, size,
-        kNullTimestamp, gfx::BufferUsage::SCANOUT_CPU_READ_WRITE, test_sii);
+    return CreateMappableSharedImageVideoFrame(
+        VideoPixelFormat::PIXEL_FORMAT_NV12, color_space, size, visible_rect,
+        size, kNullTimestamp, gfx::BufferUsage::SCANOUT_CPU_READ_WRITE,
+        test_sii);
   } else {
     DCHECK(type == VideoFrame::STORAGE_DMABUFS);
-    return CreatePlatformVideoFrame(VideoPixelFormat::PIXEL_FORMAT_NV12, size,
-                                    visible_rect, size, kNullTimestamp,
-                                    gfx::BufferUsage::SCANOUT_CPU_READ_WRITE);
+    const auto frame = CreatePlatformVideoFrame(
+        VideoPixelFormat::PIXEL_FORMAT_NV12, size, visible_rect, size,
+        kNullTimestamp, gfx::BufferUsage::SCANOUT_CPU_READ_WRITE);
+    DCHECK(frame);
+    frame->set_color_space(color_space);
+    return frame;
   }
 }
 
-scoped_refptr<VideoFrame> CreateRandomMM21Frame(const gfx::Size& size,
-                                                VideoFrame::StorageType type) {
+scoped_refptr<VideoFrame> CreateRandomMM21Frame(
+    const gfx::ColorSpace& color_space,
+    const gfx::Size& size,
+    VideoFrame::StorageType type) {
   DCHECK_EQ(static_cast<unsigned int>(size.width()),
             base::bits::AlignUp(static_cast<unsigned int>(size.width()),
                                 MM21_TILE_WIDTH));
@@ -300,7 +312,7 @@ scoped_refptr<VideoFrame> CreateRandomMM21Frame(const gfx::Size& size,
                                 MM21_TILE_HEIGHT));
 
   scoped_refptr<VideoFrame> ret =
-      CreateNV12Frame(size, type, /*test_sii=*/nullptr);
+      CreateNV12Frame(color_space, size, type, /*test_sii=*/nullptr);
   if (!ret) {
     LOG(ERROR) << "Failed to create MM21 frame";
     return nullptr;
@@ -327,9 +339,9 @@ scoped_refptr<VideoFrame> CreateRandomMM21Frame(const gfx::Size& size,
       mapped_ret->GetWritableVisiblePlaneData(VideoFrame::Plane::kUV);
   for (int row = 0; row < size.height(); row++) {
     for (int col = 0; col < size.width(); col++) {
-      y_plane[col] = base::RandInt(/*min=*/0, /*max=*/255);
+      y_plane[col] = base::RandIntInclusive(/*min=*/0, /*max=*/255);
       if (row % 2 == 0) {
-        uv_plane[col] = base::RandInt(/*min=*/0, /*max=*/255);
+        uv_plane[col] = base::RandIntInclusive(/*min=*/0, /*max=*/255);
       }
     }
     y_plane = y_plane.subspan(mapped_ret->stride(VideoFrame::Plane::kY));
@@ -602,9 +614,10 @@ TEST_P(ImageProcessorParamTest, ConvertOneTime_DmabufToDmabuf) {
   EXPECT_TRUE(ip_client->WaitForFrameProcessors());
 }
 
-// Although GpuMemoryBuffer is a cross platform class, code for image processor
-// test is designed only for ChromeOS. So this test runs on ChromeOS only.
-TEST_P(ImageProcessorParamTest, ConvertOneTime_GmbToGmb) {
+// Although MappableSharedImage is a cross platform class, code for image
+// processor test is designed only for ChromeOS. So this test runs on ChromeOS
+// only.
+TEST_P(ImageProcessorParamTest, ConvertOneTime_MappableSIToMappableSI) {
   // Load the test input image. We only need the output image's metadata so we
   // can compare checksums.
   test::Image input_image(BuildSourceFilePath(std::get<0>(GetParam())));
@@ -612,12 +625,10 @@ TEST_P(ImageProcessorParamTest, ConvertOneTime_GmbToGmb) {
   ASSERT_TRUE(input_image.Load());
   ASSERT_TRUE(output_image.LoadMetadata());
   if (!IsFormatTestedForDmabufAndGbm(input_image.PixelFormat())) {
-    GTEST_SKIP() << "Skipping GpuMemoryBuffer format "
-                 << input_image.PixelFormat();
+    GTEST_SKIP() << "Skipping format " << input_image.PixelFormat();
   }
   if (!IsFormatTestedForDmabufAndGbm(output_image.PixelFormat())) {
-    GTEST_SKIP() << "Skipping GpuMemoryBuffer format "
-                 << output_image.PixelFormat();
+    GTEST_SKIP() << "Skipping format " << output_image.PixelFormat();
   }
 
   auto ip_client = CreateImageProcessorClient(
@@ -705,6 +716,7 @@ TEST(ImageProcessorBackendTest, CompareLibYUVAndGLBackendsForMM21Image) {
                     "the command line arguments.";
   }
 
+  constexpr gfx::ColorSpace kColorSpace = gfx::ColorSpace::CreateREC709();
   constexpr gfx::Size kTestImageSize(1920, 1088);
   constexpr gfx::Rect kTestImageVisibleRect(kTestImageSize);
   const ImageProcessor::PixelLayoutCandidate candidate = {Fourcc(Fourcc::MM21),
@@ -741,18 +753,18 @@ TEST(ImageProcessorBackendTest, CompareLibYUVAndGLBackendsForMM21Image) {
           client_task_runner, pick_format_cb, error_cb);
   ASSERT_TRUE(gl_image_processor) << "Error creating GLImageProcessor";
 
-  scoped_refptr<VideoFrame> input_frame =
-      CreateRandomMM21Frame(kTestImageSize, VideoFrame::STORAGE_DMABUFS);
+  scoped_refptr<VideoFrame> input_frame = CreateRandomMM21Frame(
+      kColorSpace, kTestImageSize, VideoFrame::STORAGE_DMABUFS);
   ASSERT_TRUE(input_frame) << "Error creating input frame";
 
   auto test_sii = base::MakeRefCounted<gpu::TestSharedImageInterface>();
-  scoped_refptr<VideoFrame> gl_output_frame =
-      CreateNV12Frame(kTestImageSize, VideoFrame::STORAGE_MAPPABLE_SHARED_IMAGE,
-                      test_sii.get());
+  scoped_refptr<VideoFrame> gl_output_frame = CreateNV12Frame(
+      kColorSpace, kTestImageSize, VideoFrame::STORAGE_MAPPABLE_SHARED_IMAGE,
+      test_sii.get());
   ASSERT_TRUE(gl_output_frame) << "Error creating GL output frame";
-  scoped_refptr<VideoFrame> libyuv_output_frame =
-      CreateNV12Frame(kTestImageSize, VideoFrame::STORAGE_MAPPABLE_SHARED_IMAGE,
-                      test_sii.get());
+  scoped_refptr<VideoFrame> libyuv_output_frame = CreateNV12Frame(
+      kColorSpace, kTestImageSize, VideoFrame::STORAGE_MAPPABLE_SHARED_IMAGE,
+      test_sii.get());
   ASSERT_TRUE(libyuv_output_frame) << "Error creating LibYUV output frame";
 
   int outstanding_processors = 2;
@@ -837,7 +849,7 @@ int main(int argc, char** argv) {
     if (it->first == "save_images") {
       media::g_save_images = true;
     } else if (it->first == "source_directory") {
-      media::g_source_directory = base::FilePath(it->second);
+      media::GetSourceDir() = base::FilePath(it->second);
 #if defined(ARCH_CPU_ARM_FAMILY)
     } else if (it->first == "force_gl") {
       if (int ret =

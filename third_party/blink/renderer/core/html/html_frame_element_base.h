@@ -65,7 +65,7 @@ class CORE_EXPORT HTMLFrameElementBase : public HTMLFrameOwnerElement {
   // feature on the origin which is specified by the frame's "src" attribute. It
   // also takes into account details such as the frame's sandbox status, and
   // whether the frame should inherit its parent's origin.
-  scoped_refptr<const SecurityOrigin> GetOriginForPermissionsPolicy()
+  scoped_refptr<const SecurityOrigin> MakeOriginForPermissionsPolicy()
       const override;
 
  private:
@@ -73,13 +73,13 @@ class CORE_EXPORT HTMLFrameElementBase : public HTMLFrameOwnerElement {
     return FocusableState::kFocusable;
   }
   int DefaultTabIndex() const final;
-  void SetFocused(bool, mojom::blink::FocusType) final;
+  void SetFocused(bool, mojom::blink::FocusType, BlurEventBehavior) final;
 
   bool IsURLAttribute(const Attribute&) const final;
   bool HasLegalLinkAttribute(const QualifiedName&) const final;
   bool IsHTMLContentAttribute(const Attribute&) const final;
 
-  void SetLocation(const String&);
+  void SetLocation(const StringView&);
   void SetNameAndOpenURL();
   void OpenURL(bool replace_current_item = true);
 

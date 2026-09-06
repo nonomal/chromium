@@ -7,7 +7,7 @@
 #include "chrome/browser/android/resource_mapper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/autofill/payments/create_card_unmask_prompt_view.h"
-#include "components/autofill/core/browser/ui/autofill_resource_utils.h"
+#include "components/autofill/core/browser/ui/autofill_resource_util.h"
 #include "components/autofill/core/browser/ui/payments/card_unmask_prompt_controller.h"
 #include "components/autofill/core/common/autofill_payments_features.h"
 #include "content/public/browser/web_contents.h"
@@ -73,8 +73,8 @@ void CardUnmaskPromptViewAndroid::OnUserInput(JNIEnv* env,
                                               const std::u16string& cvc,
                                               const std::u16string& month,
                                               const std::u16string& year,
-                                              jboolean enable_fido_auth,
-                                              jboolean was_checkbox_visible) {
+                                              bool enable_fido_auth,
+                                              bool was_checkbox_visible) {
   controller_->OnUnmaskPromptAccepted(cvc, month, year, enable_fido_auth,
                                       was_checkbox_visible);
 }

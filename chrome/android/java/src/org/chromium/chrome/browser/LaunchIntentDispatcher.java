@@ -10,15 +10,9 @@ import static org.chromium.build.NullUtil.assumeNonNull;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.ActivityManager.RecentTaskInfo;
-import android.app.Notification;
-import android.app.SearchManager;
-import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.os.Bundle;
-import android.provider.MediaStore;
 import android.text.TextUtils;
 
 import androidx.annotation.IntDef;
@@ -26,40 +20,39 @@ import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.browser.customtabs.TrustedWebUtils;
 import androidx.core.os.BuildCompat;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.CommandLine;
-import org.chromium.base.ContextUtils;
 import org.chromium.base.IntentUtils;
 import org.chromium.base.Log;
-import org.chromium.base.PackageManagerUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.browserservices.SessionDataHolder;
+import org.chromium.chrome.browser.browserservices.SessionHandler;
 import org.chromium.chrome.browser.browserservices.intents.SessionHolder;
 import org.chromium.chrome.browser.browserservices.ui.splashscreen.trustedwebactivity.TwaSplashController;
 import org.chromium.chrome.browser.customtabs.AuthTabIntentDataProvider;
 import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
 import org.chromium.chrome.browser.customtabs.CustomTabsConnection;
+import org.chromium.chrome.browser.customtabs.content.WebAppLaunchHandler;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
-import org.chromium.chrome.browser.firstrun.FirstRunFlowSequencer;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
+import org.chromium.chrome.browser.glic.GlicEnabling;
+import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
-import org.chromium.chrome.browser.notifications.NotificationPlatformBridge;
-import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomizations;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.profiles.ProfileManager;
-import org.chromium.chrome.browser.searchwidget.SearchActivity;
-import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.ui.searchactivityutils.SearchActivityClient;
 import org.chromium.chrome.browser.ui.searchactivityutils.SearchActivityExtras.ResolutionType;
 import org.chromium.chrome.browser.util.AndroidTaskUtils;
-import org.chromium.chrome.browser.webapps.WebappLauncherActivity;
+import org.chromium.components.browser_ui.notifications.ForegroundServiceUtils;
 import org.chromium.components.embedder_support.util.UrlConstants;
+import org.chromium.components.externalauth.ExternalAuthUtils;
 import org.chromium.ui.widget.Toast;
-import org.chromium.webapk.lib.common.WebApkConstants;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -75,6 +68,12 @@ public class LaunchIntentDispatcher {
     public static final String EXTRA_LAUNCH_MODE =
             "com.google.android.apps.chrome.EXTRA_LAUNCH_MODE";
 
+    private static final String START_ACTOR_FOREGROUND_SERVICE =
+            "org.chromium.chrome.browser.actor.START_ACTOR_FOREGROUND_SERVICE";
+
+    private static final String GLIC_EXTERNAL_TRIGGERING_ACTION =
+            "org.chromium.chrome.browser.glic.EXTERNAL_TRIGGERING";
+
     private static final String TAG = "ActivityDispatcher";
 
     private final Activity mActivity;
@@ -89,22 +88,8 @@ public class LaunchIntentDispatcher {
     }
 
     /**
-     * Dispatches the intent in the context of the activity.
-     * In most cases calling this method will result in starting a new activity, in which case
-     * the current activity will need to be finished as per the action returned.
-     *
-     * @param currentActivity activity that received the intent
-     * @param intent intent to dispatch
-     * @return action to take
-     */
-    public static @Action int dispatch(Activity currentActivity, Intent intent) {
-        return new LaunchIntentDispatcher(currentActivity, intent).dispatch();
-    }
-
-    /**
-     * Dispatches the intent to proper tabbed activity.
-     * This method is similar to {@link #dispatch()}, but only handles intents that result in
-     * starting a tabbed activity (i.e. one of *TabbedActivity classes).
+     * Dispatches the intent to proper tabbed activity. Only handles intents that result in starting
+     * a tabbed activity (i.e. one of *TabbedActivity classes).
      *
      * @param currentActivity activity that received the intent
      * @param intent intent to dispatch
@@ -132,8 +117,7 @@ public class LaunchIntentDispatcher {
     }
 
     /**
-     * Dispatches the intent to proper tabbed activity. This method is similar to {@link
-     * #dispatch()}, but only handles intents that result in starting a custom tab activity.
+     * Dispatches the intent to CustomTabActivity if the itent is a valid CustomTabActivity intent.
      */
     public static @Action int dispatchToCustomTabActivity(Activity currentActivity, Intent intent) {
         LaunchIntentDispatcher dispatcher = new LaunchIntentDispatcher(currentActivity, intent);
@@ -145,106 +129,60 @@ public class LaunchIntentDispatcher {
         }
     }
 
+    /**
+     * Dispatches the intent to start ActorForegroundService securely for Glic triggering.
+     * Synchronously loads native to check the explicit opt-in state before routing.
+     */
+    public static @Action int dispatchGlicExternalTrigger(Activity currentActivity, Intent intent) {
+        Log.d(TAG, "dispatchGlicExternalTrigger");
+        if (!ChromeFeatureList.sGlicBackgroundTriggering.isEnabled()
+                || !GLIC_EXTERNAL_TRIGGERING_ACTION.equals(intent.getAction())) {
+            return Action.CONTINUE;
+        }
+
+        String callingPackage = currentActivity.getCallingPackage();
+        // TODO(b/548542183): Check calling package.
+        if (ExternalAuthUtils.getInstance().isGoogleSigned(callingPackage)) {
+
+            // Load native before checking consent state and starting the service.
+            // TODO(b/548905266): Should move to the foreground service imp if possible.
+            ChromeBrowserInitializer.getInstance().handleSynchronousStartup();
+
+            Profile profile = ProfileManager.getLastUsedRegularProfile();
+
+            if (!GlicEnabling.isEnabledForProfile(profile)) {
+                currentActivity.setResult(Activity.RESULT_CANCELED);
+                return Action.FINISH_ACTIVITY;
+            }
+
+            // TODO(b/549302429): Check notification setting, if it's enabled, launch the fgs
+            // intent.
+            // TODO(b/557413667): It should be possible to warm up Glic instance here as
+            // well, in the future.
+            if (!GlicEnabling.experimentalOptInIsNeeded(profile)) {
+                Intent serviceIntent =
+                        new Intent(
+                                currentActivity,
+                                org.chromium.chrome.browser.actor.ActorForegroundService.class);
+                serviceIntent.setAction(START_ACTOR_FOREGROUND_SERVICE);
+                IntentUtils.addTrustedIntentExtras(serviceIntent);
+                ForegroundServiceUtils.getInstance().startForegroundService(serviceIntent);
+                // TODO(b/548905982): Ensure foreground service started before finishing activity.
+                currentActivity.setResult(Activity.RESULT_OK);
+                return Action.FINISH_ACTIVITY;
+            }
+
+            return Action.CONTINUE;
+        } else {
+            currentActivity.setResult(Activity.RESULT_CANCELED);
+            return Action.FINISH_ACTIVITY;
+        }
+    }
+
     private LaunchIntentDispatcher(Activity activity, Intent intent) {
         mActivity = activity;
-        mIntent = assertNonNull(IntentUtils.sanitizeIntent(intent));
-    }
-
-    /**
-     * Figure out how to route the Intent. Because this is on the critical path to startup, please
-     * avoid making the pathway any more complicated than it already is. Make sure that anything you
-     * add _absolutely has_ to be here.
-     */
-    private @Action int dispatch() {
-        // Read partner browser customizations information asynchronously.
-        // We want to initialize early because when there are no tabs to restore, we should possibly
-        // show homepage, which might require reading PartnerBrowserCustomizations provider.
-        PartnerBrowserCustomizations.getInstance()
-                .initializeAsync(mActivity.getApplicationContext());
-
-        boolean isCustomTabIntent = isCustomTabIntent(mIntent);
-
-        int tabId = IntentHandler.getBringTabToFrontId(mIntent);
-        boolean incognito =
-                mIntent.getBooleanExtra(IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_TAB, false);
-
-        String url = IntentHandler.getUrlFromIntent(mIntent);
-
-        // Check if a web search Intent is being handled.
-        if (url == null
-                && tabId == Tab.INVALID_TAB_ID
-                && !incognito
-                && processWebSearchIntent(mIntent)) {
-            return Action.FINISH_ACTIVITY;
-        }
-
-        // Check if a LIVE WebappActivity has to be brought back to the foreground.  We can't
-        // check for a dead WebappActivity because we don't have that information without a global
-        // TabManager.  If that ever lands, code to bring back any Tab could be consolidated
-        // here instead of being spread between ChromeTabbedActivity and ChromeLauncherActivity.
-        // https://crbug.com/443772, https://crbug.com/522918
-        if (WebappLauncherActivity.bringWebappToFront(tabId)) {
-            return Action.FINISH_ACTIVITY_REMOVE_TASK;
-        }
-
-        // The notification settings cog on the flipped side of Notifications and in the Android
-        // Settings "App Notifications" view will open us with a specific category.
-        if (mIntent.hasCategory(Notification.INTENT_CATEGORY_NOTIFICATION_PREFERENCES)) {
-            NotificationPlatformBridge.launchNotificationPreferences(mIntent);
-            return Action.FINISH_ACTIVITY;
-        }
-
-        // Check if we should push the user through First Run.
-        if (FirstRunFlowSequencer.launch(mActivity, mIntent)) {
-            return Action.FINISH_ACTIVITY;
-        }
-
-        // Check if we should launch a Custom Tab.
-        if (isCustomTabIntent) {
-            launchCustomTabActivity();
-            return Action.FINISH_ACTIVITY;
-        }
-
-        // b(357902796): Handle fall-back path for unbound WebAPKs.
-        if (isWebApkIntent(mIntent) && launchWebApk()) {
-            return Action.FINISH_ACTIVITY;
-        }
-
-        return dispatchToTabbedActivity();
-    }
-
-    @SuppressWarnings(value = "UnsafeImplicitIntentLaunch")
-    private boolean processWebSearchIntent(Intent intent) {
-        if (intent == null) return false;
-
-        String query = null;
-        final String action = intent.getAction();
-        if (Intent.ACTION_SEARCH.equals(action)
-                || MediaStore.INTENT_ACTION_MEDIA_SEARCH.equals(action)) {
-            query = IntentUtils.safeGetStringExtra(intent, SearchManager.QUERY);
-        }
-        if (TextUtils.isEmpty(query)) return false;
-
-        // Only the ChromeLauncherActivity can handle search intents. Drop the intent and abort the
-        // launch.
-        if (!(mActivity instanceof ChromeLauncherActivity)) return true;
-
-        Intent searchIntent = new Intent(Intent.ACTION_WEB_SEARCH);
-        searchIntent.putExtra(SearchManager.QUERY, query);
-
-        if (PackageManagerUtils.canResolveActivity(
-                searchIntent, PackageManager.GET_RESOLVED_FILTER)) {
-            mActivity.startActivity(searchIntent);
-        } else {
-            // Phone doesn't have a WEB_SEARCH action handler, open Search Activity with
-            // the given query.
-            Intent searchActivityIntent = new Intent(Intent.ACTION_MAIN);
-            searchActivityIntent.setClass(
-                    ContextUtils.getApplicationContext(), SearchActivity.class);
-            searchActivityIntent.putExtra(SearchManager.QUERY, query);
-            mActivity.startActivity(searchActivityIntent);
-        }
-        return true;
+        boolean unparcelFds = ChromeFeatureList.sUnparcelIntentFileDescriptors.isEnabled();
+        mIntent = assertNonNull(IntentUtils.sanitizeIntent(intent, unparcelFds));
     }
 
     /** When started with an intent, maybe pre-resolve the domain. */
@@ -274,18 +212,21 @@ public class LaunchIntentDispatcher {
         return IntentHandler.getUrlFromIntent(intent) != null;
     }
 
-    private static boolean isWebApkIntent(Intent intent) {
-        return intent != null && intent.hasExtra(WebApkConstants.EXTRA_WEBAPK_PACKAGE_NAME);
-    }
-
     /** Creates an Intent that can be used to launch a {@link CustomTabActivity}. */
     public static Intent createCustomTabActivityIntent(Context context, Intent intent) {
         // Use the copy constructor to carry over the myriad of extras.
-        Uri uri = Uri.parse(IntentHandler.getUrlFromIntent(intent));
+        String uriString = IntentHandler.getUrlFromIntent(intent);
+        assumeNonNull(uriString);
+        Uri uri = Uri.parse(uriString);
 
         Intent newIntent = new Intent(intent);
-        newIntent.setAction(Intent.ACTION_VIEW);
-        newIntent.setData(uri);
+
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.CCT_DONT_OVERRIDE_INTENT_MIME_TYPE)) {
+            newIntent.setDataAndType(uri, intent.getType());
+        } else {
+            newIntent.setAction(Intent.ACTION_VIEW);
+            newIntent.setData(uri);
+        }
         newIntent.setClassName(context, CustomTabActivity.class.getName());
         // Make sure the result of the CustomTabActivity is forwarded to the client.
         newIntent.addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT);
@@ -322,7 +263,7 @@ public class LaunchIntentDispatcher {
                 context.grantUriPermission(packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
             } catch (Exception e) {
                 // SecurityException or UndeclaredThrowableException.
-                // https://crbug.com/1373209
+                // https://crbug.com/40871591
                 Log.w(TAG, "Unable to grant Uri permission", e);
             }
         }
@@ -373,8 +314,15 @@ public class LaunchIntentDispatcher {
             // The old way of delivering intents relies on calling the activity directly via a
             // static reference. It doesn't allow using CLEAR_TOP, and also doesn't work when an
             // intent brings the task to foreground. The condition above is a temporary safety net.
-            boolean handled = SessionDataHolder.getInstance().handleIntent(mIntent);
-            if (handled) return true;
+            SessionHandler handler =
+                    SessionDataHolder.getInstance().getActiveHandlerForIntent(mIntent);
+            if (handler != null && handler.handleIntent(mIntent)) {
+                // Bring the task to the foreground.
+                // This is necessary because LaunchIntentDispatcher bypasses startActivity (which
+                // usually handles foregrounding) when it delegates to this handler.
+                ApiCompatibilityUtils.moveTaskToFront(mActivity, handler.getTaskId(), 0);
+                return true;
+            }
         }
 
         // Should not be set by external apps, remove if present.
@@ -389,13 +337,18 @@ public class LaunchIntentDispatcher {
 
         // Create and fire a launch intent.
         Intent launchIntent = createCustomTabActivityIntent(mActivity, intent);
+
+        WebAppLaunchHandler.copyFilePermissions(mActivity, intent, launchIntent);
+        WebAppLaunchHandler.copyShareDataPermissions(mActivity, intent, launchIntent);
+
         Uri extraReferrer = mActivity.getReferrer();
+
         if (extraReferrer != null) {
             launchIntent.putExtra(IntentHandler.EXTRA_ACTIVITY_REFERRER, extraReferrer.toString());
         }
 
         // Allow disk writes during startActivity() to avoid strict mode violations on some
-        // Samsung devices, see https://crbug.com/796548.
+        // Samsung devices, see https://crbug.com/41361749.
         if (TwaSplashController.handleIntent(mActivity, launchIntent)) {
             return true;
         }
@@ -442,32 +395,6 @@ public class LaunchIntentDispatcher {
         return CustomTabsConnection.getInstance().startEarlyNavigationInHiddenTab(profile, mIntent);
     }
 
-    private boolean launchWebApk() {
-        // TODO(crbug.com/357902796): it may be possible to save 20ms or so by calling into
-        // WebappLauncherActivity code directly instead of sending an intent.
-
-        Intent webApkIntent = new Intent(WebappLauncherActivity.ACTION_START_WEBAPP);
-        webApkIntent.setPackage(mActivity.getPackageName());
-
-        webApkIntent.setFlags(mIntent.getFlags());
-
-        Bundle copiedExtras = mIntent.getExtras();
-        if (copiedExtras != null) {
-            webApkIntent.putExtras(copiedExtras);
-        }
-
-        try {
-            mActivity.startActivity(webApkIntent);
-        } catch (ActivityNotFoundException e) {
-            Log.w(TAG, "Unable to launch browser in WebAPK mode.");
-            RecordHistogram.recordBooleanHistogram("WebApk.LaunchFromViewIntent", false);
-            return false;
-        }
-
-        RecordHistogram.recordBooleanHistogram("WebApk.LaunchFromViewIntent", true);
-        return true;
-    }
-
     /**
      * Returns client package name obtained from {@link Activity#getLaunchedFromPackage()}. {@code
      * null} if the underlying OS doesn't support the feature.
@@ -478,7 +405,8 @@ public class LaunchIntentDispatcher {
 
     /** Handles launching a {@link ChromeTabbedActivity}. */
     @SuppressLint("InlinedApi")
-    @SuppressWarnings("checkstyle:SystemExitCheck") // Allowed due to https://crbug.com/847921#c17.
+    @SuppressWarnings(
+            "checkstyle:SystemExitCheck") // Allowed due to https://crbug.com/40578549#comment18.
     private @Action int dispatchToTabbedActivity() {
         maybePrefetchDnsInBackground();
 
@@ -542,7 +470,7 @@ public class LaunchIntentDispatcher {
             return Action.CONTINUE;
         }
 
-        // This system call is often modified by OEMs and not actionable. http://crbug.com/619646.
+        // This system call is often modified by OEMs and not actionable. http://crbug.com/41258613.
         try {
             mActivity.startActivity(newIntent);
         } catch (SecurityException ex) {

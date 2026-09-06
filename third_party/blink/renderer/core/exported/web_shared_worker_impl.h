@@ -33,6 +33,7 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/single_thread_task_runner.h"
@@ -79,6 +80,8 @@ class CORE_EXPORT WebSharedWorkerImpl final : public WebSharedWorker {
   // WebSharedWorker methods:
   void Connect(int connection_request_id, MessagePortDescriptor port) override;
   void TerminateWorkerContext() override;
+  void Freeze() override;
+  void Resume() override;
 
   // Callback methods for SharedWorkerReportingProxy.
   void CountFeature(WebFeature);
@@ -131,7 +134,8 @@ class CORE_EXPORT WebSharedWorkerImpl final : public WebSharedWorker {
       CrossVariantMojoReceiver<mojom::blink::ReportingObserverInterfaceBase>
           coep_reporting_observer,
       CrossVariantMojoReceiver<mojom::blink::ReportingObserverInterfaceBase>
-          dip_reporting_observer);
+          dip_reporting_observer,
+      bool is_cross_origin_isolated);
 
   void DispatchPendingConnections();
   void ConnectToChannel(int connection_request_id,
@@ -149,7 +153,8 @@ class CORE_EXPORT WebSharedWorkerImpl final : public WebSharedWorker {
   mojo::Remote<mojom::blink::SharedWorkerHost> host_;
 
   // |client_| owns |this|.
-  WebSharedWorkerClient* client_;
+  raw_ptr<WebSharedWorkerClient, UnprotectedInRelease | DanglingUntriaged>
+      client_;
 
   using PendingChannel =
       std::pair<int /* connection_request_id */, blink::MessagePortChannel>;

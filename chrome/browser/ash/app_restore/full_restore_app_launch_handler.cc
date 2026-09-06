@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "ash/constants/ash_switches.h"
+#include "ash/constants/chrome_switches.h"
 #include "ash/metrics/login_unlock_throughput_recorder.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
@@ -32,7 +33,6 @@
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sessions/session_service_log.h"
 #include "chrome/browser/ui/startup/startup_tab.h"
-#include "chrome/common/chrome_switches.h"
 #include "components/app_constants/constants.h"
 #include "components/app_restore/features.h"
 #include "components/app_restore/full_restore_read_handler.h"
@@ -196,16 +196,17 @@ void FullRestoreAppLaunchHandler::OnAppTypeInitialized(apps::AppType app_type) {
   }
 }
 
-void FullRestoreAppLaunchHandler::OnGotSession(Profile* session_profile,
-                                               bool for_app,
-                                               int window_count) {
+void FullRestoreAppLaunchHandler::OnGotSession(
+    Profile* session_profile,
+    bool for_app,
+    const std::vector<const sessions::SessionWindow*>& windows) {
   if (session_profile != profile())
     return;
 
   if (for_app)
-    browser_app_window_count_ = window_count;
+    browser_app_window_count_ = windows.size();
   else
-    browser_window_count_ = window_count;
+    browser_window_count_ = windows.size();
 }
 
 void FullRestoreAppLaunchHandler::ForceLaunchBrowserForTesting() {
@@ -330,7 +331,7 @@ void FullRestoreAppLaunchHandler::LaunchBrowser() {
 
   if (IsLastSessionExitTypeCrashed()) {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        ::switches::kHideCrashRestoreBubble);
+        ash::chrome_switches::kHideCrashRestoreBubble);
   }
 
   MaybeStartSaveTimer();
@@ -346,7 +347,7 @@ void FullRestoreAppLaunchHandler::LaunchBrowser() {
 
   // Modify the command line to restore browser sessions.
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      ::switches::kRestoreLastSession);
+      ash::chrome_switches::kRestoreLastSession);
 
   UserSessionManager::GetInstance()->LaunchBrowser(profile());
   RecordLaunchBrowserResult();
@@ -515,8 +516,8 @@ void FullRestoreAppLaunchHandler::MaybeStartSaveTimer() {
     return;
   }
 
-  if (base::Contains(restore_data()->app_id_to_launch_list(),
-                     app_constants::kChromeAppId)) {
+  if (restore_data()->app_id_to_launch_list().contains(
+          app_constants::kChromeAppId)) {
     // If the browser hasn't been restored yet, Wait for the browser
     // restoration. LaunchBrowser will call this function again to start the
     // save timer after restore the browser sessions.

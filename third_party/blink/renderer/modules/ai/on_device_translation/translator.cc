@@ -7,6 +7,7 @@
 #include <limits>
 
 #include "base/functional/callback_helpers.h"
+#include "base/metrics/histogram_functions.h"
 #include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink.h"
 #include "third_party/blink/public/mojom/ai/model_streaming_responder.mojom-blink.h"
 #include "third_party/blink/public/mojom/on_device_translation/translator.mojom-blink.h"
@@ -17,7 +18,9 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/streams/readable_stream.h"
 #include "third_party/blink/renderer/modules/ai/ai_interface_proxy.h"
+#include "third_party/blink/renderer/modules/ai/ai_metrics.h"
 #include "third_party/blink/renderer/modules/ai/exception_helpers.h"
+#include "third_party/blink/renderer/modules/ai/feedback_helpers.h"
 #include "third_party/blink/renderer/modules/ai/model_execution_responder.h"
 #include "third_party/blink/renderer/modules/ai/on_device_translation/create_translator_client.h"
 #include "third_party/blink/renderer/modules/ai/on_device_translation/resolver_with_abort_signal.h"
@@ -142,6 +145,7 @@ ScriptPromise<V8Availability> Translator::availability(
 ScriptPromise<Translator> Translator::create(ScriptState* script_state,
                                              TranslatorCreateOptions* options,
                                              ExceptionState& exception_state) {
+  MaybeRequestFeedback(script_state, AIMetrics::AISessionType::kTranslator);
   // If `sourceLanguage` and `targetLanguage` are not passed, A TypeError should
   // be thrown before we get here.
   CHECK(options && options->sourceLanguage() && options->targetLanguage());
@@ -198,6 +202,10 @@ ScriptPromise<IDLString> Translator::translate(
     return EmptyPromise();
   }
 
+  base::UmaHistogramCounts1M(AIMetrics::GetAISessionRequestSizeMetricName(
+                                 AIMetrics::AISessionType::kTranslator),
+                             static_cast<int>(input.CharactersSizeInBytes()));
+
   CHECK(options);
   ScriptPromiseResolver<IDLString>* resolver =
       MakeGarbageCollected<ScriptPromiseResolver<IDLString>>(script_state);
@@ -209,6 +217,7 @@ ScriptPromise<IDLString> Translator::translate(
       AIMetrics::AISessionType::kTranslator,
       BindOnce(&ResolvePromiseOnCompletion<IDLString>,
                WrapPersistent(resolver)),
+      /*tool_call_callback=*/base::NullCallback(),
       /*overflow_callback=*/base::DoNothingWithBoundArgs(WrapPersistent(this)),
       BindOnce(&RejectPromiseOnError<IDLString>, WrapPersistent(resolver)),
       BindOnce(&RejectPromiseOnAbort<IDLString>, WrapPersistent(resolver),
@@ -239,6 +248,10 @@ ReadableStream* Translator::translateStreaming(
   if (HandleAbortSignal(composite_signal, script_state, exception_state)) {
     return nullptr;
   }
+
+  base::UmaHistogramCounts1M(AIMetrics::GetAISessionRequestSizeMetricName(
+                                 AIMetrics::AISessionType::kTranslator),
+                             static_cast<int>(input.length()));
 
   // Pass persistent refs to keep this instance alive during the response.
   auto [readable_stream, pending_remote] =

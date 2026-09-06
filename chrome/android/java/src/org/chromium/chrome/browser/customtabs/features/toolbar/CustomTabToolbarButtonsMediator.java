@@ -29,8 +29,9 @@ import androidx.annotation.ColorInt;
 
 import org.chromium.base.Callback;
 import org.chromium.base.metrics.RecordHistogram;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.OneshotSupplierImpl;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
@@ -76,7 +77,8 @@ class CustomTabToolbarButtonsMediator
 
     private boolean mMinimizeButtonEnabled;
     private @Nullable OptionalButtonCoordinator mOptionalButtonCoordinator;
-    private final ObservableSupplierImpl<Tracker> mTrackerSupplier = new ObservableSupplierImpl<>();
+    private final SettableMonotonicObservableSupplier<Tracker> mTrackerSupplier =
+            ObservableSuppliers.createMonotonic();
 
     CustomTabToolbarButtonsMediator(
             PropertyModel model,
@@ -200,7 +202,7 @@ class CustomTabToolbarButtonsMediator
             RecordHistogram.recordEnumeratedHistogram(
                     "CustomTabs.AdaptiveToolbarButton.Shown",
                     buttonVariant,
-                    AdaptiveToolbarButtonVariant.MAX_VALUE);
+                    AdaptiveToolbarButtonVariant.MAX_VALUE + 1);
         }
     }
 
@@ -287,9 +289,9 @@ class CustomTabToolbarButtonsMediator
     }
 
     @SuppressWarnings("NullAway")
-    private Supplier getProfileSupplier() {
+    private Supplier<@Nullable Profile> getProfileSupplier() {
         Tab tab = mTabProvider.get();
-        if (tab != null) return () -> tab.getProfile();
+        if (tab != null) return tab::getProfile;
 
         // Passing OneshotSupplier effectively delays UserEducationHelper#requestShowIph()
         // till Profile becomes reachable via the current Tab.
@@ -342,7 +344,6 @@ class CustomTabToolbarButtonsMediator
                         colorScheme == BrandedColorScheme.INCOGNITO,
                         /* isCustomTab= */ true);
         mOptionalButtonCoordinator.setBackgroundColorFilter(backgroundColor);
-        mOptionalButtonCoordinator.setIconForegroundColor(
-                ThemeUtils.getThemedToolbarIconTint(mActivity, colorScheme));
+        mOptionalButtonCoordinator.setBrandedColorScheme(colorScheme);
     }
 }

@@ -15,8 +15,6 @@ declare global {
         email: string;
         isSyncEnabledForAutofillProfiles: boolean;
         isEligibleForAddressAccountStorage: boolean;
-        isAutofillSyncToggleEnabled: boolean;
-        isAutofillSyncToggleAvailable: boolean;
       }
 
       /**
@@ -88,8 +86,6 @@ declare global {
         ADDRESS_HOME_HOUSE_NUMBER,
         ADDRESS_HOME_SUBPREMISE,
         ADDRESS_HOME_OTHER_SUBUNIT,
-        NAME_LAST_PREFIX,
-        NAME_LAST_CORE,
         NAME_LAST_FIRST,
         NAME_LAST_CONJUNCTION,
         NAME_LAST_SECOND,
@@ -157,6 +153,11 @@ declare global {
         FLIGHT_RESERVATION_DEPARTURE_AIRPORT,
         FLIGHT_RESERVATION_ARRIVAL_AIRPORT,
         FLIGHT_RESERVATION_DEPARTURE_DATE,
+        ADDRESS_HOME_ZIP_AND_CITY,
+        ORDER_ID,
+        ORDER_DATE,
+        ORDER_MERCHANT_NAME,
+        SHIPMENT_TRACKING_NUMBER,
       }
 
       export enum AddressRecordType {
@@ -171,6 +172,23 @@ declare global {
         COUNTRY = 'COUNTRY',
         DATE = 'DATE',
         STRING = 'STRING',
+      }
+
+      export enum EntityPassType {
+        PUBLIC_PASS = 'PUBLIC_PASS',
+        PRIVATE_PASS = 'PRIVATE_PASS',
+      }
+
+      export enum UserDataProcessingConsentState {
+        UNDEFINED = 'UNDEFINED',
+        UNKNOWN = 'UNKNOWN',
+        ENABLED = 'ENABLED',
+        DISABLED = 'DISABLED',
+      }
+
+      export interface UserDataProcessingConsentStates {
+        commsApps: UserDataProcessingConsentState;
+        googleApps: UserDataProcessingConsentState;
       }
 
       export interface AutofillMetadata {
@@ -255,6 +273,7 @@ declare global {
         editEntityTypeString: string;
         deleteEntityTypeString: string;
         supportsWalletStorage: boolean;
+        passType?: EntityPassType;
       }
 
       export interface DateValue {
@@ -273,6 +292,9 @@ declare global {
         attributeInstances: AttributeInstance[];
         guid: string;
         nickname: string;
+        shouldAuthenticateToView?: boolean;
+        storedInWallet?: boolean;
+        isReadOnly?: boolean;
       }
 
       export interface EntityInstanceWithLabels {
@@ -281,6 +303,8 @@ declare global {
         entityInstanceLabel: string;
         entityInstanceSubLabel: string;
         storedInWallet: boolean;
+        walletEntityUrl?: string;
+        isReadOnly?: boolean;
       }
 
       export interface PayOverTimeIssuerEntry {
@@ -312,12 +336,14 @@ declare global {
       export function getPayOverTimeIssuerList():
           Promise<PayOverTimeIssuerEntry[]>;
       export function authenticateUserAndFlipMandatoryAuthToggle(): void;
+      export function authenticateUserBeforeViewingEntityData():
+          Promise<boolean>;
+      export function toggleAutofillAiReauthRequirement(): void;
       export function getLocalCard(guid: string): Promise<CreditCardEntry|null>;
       export function checkIfDeviceAuthAvailable(): Promise<boolean>;
       export function bulkDeleteAllCvcs(): void;
-      export function setAutofillSyncToggleEnabled(enabled: boolean): void;
       export function addOrUpdateEntityInstance(entityInstance: EntityInstance):
-          void;
+          Promise<void>;
       export function removeEntityInstance(guid: string): void;
       export function loadEntityInstances():
           Promise<EntityInstanceWithLabels[]>;
@@ -326,12 +352,16 @@ declare global {
       export function getWritableEntityTypes(): Promise<EntityType[]>;
       export function getAllAttributeTypesForEntityTypeName(
           entityTypeName: number): Promise<AttributeType[]>;
+      export function getRequiredAttributeTypesForEntityTypeName(
+          entityTypeName: number): Promise<AttributeType[]>;
       export function getAutofillAiOptInStatus(): Promise<boolean>;
       export function setAutofillAiOptInStatus(optedIn: boolean):
           Promise<boolean>;
       export function getWalletablePassDetectionOptInStatus(): Promise<boolean>;
       export function setWalletablePassDetectionOptInStatus(optedIn: boolean):
           Promise<boolean>;
+      export function fetchUserDataProcessingConsent():
+          Promise<UserDataProcessingConsentStates>;
       export const onPersonalDataChanged: ChromeEvent<
           (addresses: AddressEntry[], creditCards: CreditCardEntry[],
            ibans: IbanEntry[], payOverTimeIssuers: PayOverTimeIssuerEntry[],

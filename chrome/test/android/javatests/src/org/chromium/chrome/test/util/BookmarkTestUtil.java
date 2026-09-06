@@ -7,11 +7,13 @@ package org.chromium.chrome.test.util;
 import static androidx.test.espresso.Espresso.onView;
 import static androidx.test.espresso.action.ViewActions.click;
 import static androidx.test.espresso.matcher.ViewMatchers.hasDescendant;
+import static androidx.test.espresso.matcher.ViewMatchers.isDescendantOfA;
 import static androidx.test.espresso.matcher.ViewMatchers.withEffectiveVisibility;
 import static androidx.test.espresso.matcher.ViewMatchers.withId;
 import static androidx.test.espresso.matcher.ViewMatchers.withText;
 
 import static org.hamcrest.Matchers.allOf;
+import static org.hamcrest.Matchers.startsWith;
 
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.test.espresso.ViewInteraction;
@@ -79,7 +81,7 @@ public class BookmarkTestUtil {
             BookmarkModel bookmarkModel) {
         openRootFolder(recyclerView, bookmarkDelegate, bookmarkModel);
 
-        onView(withText("Mobile bookmarks")).perform(click());
+        onView(withText(startsWith("Mobile bookmarks"))).perform(click());
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
 
@@ -91,7 +93,7 @@ public class BookmarkTestUtil {
             BookmarkModel bookmarkModel) {
         openRootFolder(recyclerView, bookmarkDelegate, bookmarkModel);
 
-        onView(withText("Reading list")).perform(click());
+        onView(withText(startsWith("Reading list"))).perform(click());
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
     }
 
@@ -156,6 +158,14 @@ public class BookmarkTestUtil {
             throw new RuntimeException(ex);
         }
         BookmarkTestUtil.waitForBookmarkModelLoaded();
+    }
+
+    public static ViewInteraction getSearchBoxViewInteraction() {
+        return onView(
+                allOf(
+                        withId(R.id.search_text),
+                        isDescendantOfA(withId(R.id.search_box)),
+                        isDescendantOfA(withId(R.id.bookmark_toolbar))));
     }
 
     public static ChromeTabbedActivity waitForTabbedActivity() {
@@ -227,7 +237,7 @@ public class BookmarkTestUtil {
         return onView(
                 allOf(
                         withId(R.id.container),
-                        hasDescendant(withText(text)),
+                        hasDescendant(withText(startsWith(text))),
                         hasDescendant(
                                 allOf(
                                         withId(R.id.local_bookmark_image),

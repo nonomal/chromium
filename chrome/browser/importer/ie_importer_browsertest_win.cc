@@ -21,9 +21,12 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/containers/span.h"
+#include "base/containers/span_writer.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/functional/bind.h"
+#include "base/numerics/byte_conversions.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -35,7 +38,7 @@
 #include "chrome/browser/importer/external_process_importer_host.h"
 #include "chrome/browser/importer/importer_progress_observer.h"
 #include "chrome/browser/importer/importer_unittest_utils.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/importer/ie_importer_utils_win.h"
 #include "chrome/common/importer/importer_bridge.h"
@@ -120,8 +123,9 @@ const FaviconGroup kIEFaviconGroup[2] = {
 bool CreateOrderBlob(const base::FilePath& favorites_folder,
                      const std::wstring& path,
                      const std::vector<std::wstring>& entries) {
-  if (entries.size() > 255)
+  if (entries.size() > 255) {
     return false;
+  }
 
   // Create a binary sequence for setting a specific order of favorites.
   // The format depends on the version of Shell32.dll, so we cannot embed
@@ -137,30 +141,38 @@ bool CreateOrderBlob(const base::FilePath& favorites_folder,
     // element array.
     size_t id_list_size = id_list->mkid.cb + sizeof(id_list->mkid.cb);
 
-    blob.resize(blob.size() + 8);
-    uint32_t total_size = id_list_size + 8;
-    UNSAFE_TODO(memcpy(&blob[blob.size() - 8], &total_size, 4));
-    uint32_t sort_index = i;
-    UNSAFE_TODO(memcpy(&blob[blob.size() - 4], &sort_index, 4));
-    blob.resize(blob.size() + id_list_size);
-    UNSAFE_TODO(
-        memcpy(&blob[blob.size() - id_list_size], id_list, id_list_size));
-    ILFree(id_list_full);
+    // Expand the vector for the new entry: 8 bytes (metadata) + id_list_size.
+    size_t entry_total_size = 8 + id_list_size;
+    size_t write_offset = blob.size();
+    blob.resize(write_offset + entry_total_size);
+
+    auto writer = base::SpanWriter(base::span(blob).subspan(write_offset));
+
+    writer.WriteU32LittleEndian(static_cast<uint32_t>(entry_total_size));
+    writer.WriteU32LittleEndian(static_cast<uint32_t>(i));
+
+    // SAFETY: This part is safe because we are trusting Win32's
+    // id_list_size calculation.
+    auto data_src_span = UNSAFE_BUFFERS(
+        base::span(reinterpret_cast<const uint8_t*>(id_list), id_list_size));
+
+    writer.Write(data_src_span);
+    ::ILFree(id_list_full);
   }
 
   std::wstring key_path(importer::GetIEFavoritesOrderKey());
-  if (!path.empty())
+  if (!path.empty()) {
     key_path += L"\\" + path;
+  }
+
   base::win::RegKey key;
   if (key.Create(HKEY_CURRENT_USER, key_path.c_str(), KEY_WRITE) !=
       ERROR_SUCCESS) {
     return false;
   }
-  if (key.WriteValue(L"Order", &blob[0], blob.size(), REG_BINARY) !=
-      ERROR_SUCCESS) {
-    return false;
-  }
-  return true;
+
+  return key.WriteValue(L"Order", blob.data(), static_cast<DWORD>(blob.size()),
+                        REG_BINARY) == ERROR_SUCCESS;
 }
 
 bool CreateUrlFileWithFavicon(const base::FilePath& file,
@@ -297,12 +309,11 @@ class TestObserver : public ProfileWriter,
 
   void AddFavicons(const favicon_base::FaviconUsageDataList& usage) override {
     // Importer should group the favicon information for each favicon URL.
-    for (size_t i = 0; i < std::size(kIEFaviconGroup); ++i) {
-      GURL favicon_url(UNSAFE_TODO(kIEFaviconGroup[i]).favicon_url);
+    for (const FaviconGroup& favicon_group : kIEFaviconGroup) {
+      GURL favicon_url(favicon_group.favicon_url);
       std::set<GURL> urls;
-      for (size_t j = 0;
-           j < std::size(UNSAFE_TODO(kIEFaviconGroup[i]).site_url); ++j) {
-        urls.insert(GURL(UNSAFE_TODO(kIEFaviconGroup[i].site_url[j])));
+      for (const char16_t* site_url : favicon_group.site_url) {
+        urls.insert(GURL(site_url));
       }
 
       SCOPED_TRACE(testing::Message() << "Expected Favicon: " << favicon_url);
@@ -480,7 +491,7 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest, IEImporter) {
   source_profile.source_path = temp_dir_.GetPath();
 
   host->StartImportSettings(
-      source_profile, browser()->profile(),
+      source_profile, browser()->GetProfile(),
       user_data_importer::HISTORY | user_data_importer::FAVORITES, observer);
   loop.Run();
 
@@ -535,14 +546,13 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest,
 
   // Verify malformed registry data are safely ignored and alphabetical
   // sort is performed.
-  for (size_t i = 0; i < std::size(kBadBinary); ++i) {
+  for (const BadBinaryData& bad_binary : kBadBinary) {
     std::wstring key_path(importer::GetIEFavoritesOrderKey());
     base::win::RegKey key;
     ASSERT_EQ(ERROR_SUCCESS,
               key.Create(HKEY_CURRENT_USER, key_path.c_str(), KEY_WRITE));
-    ASSERT_EQ(ERROR_SUCCESS,
-              key.WriteValue(L"Order", UNSAFE_TODO(kBadBinary[i]).data,
-                             UNSAFE_TODO(kBadBinary[i]).length, REG_BINARY));
+    ASSERT_EQ(ERROR_SUCCESS, key.WriteValue(L"Order", bad_binary.data,
+                                            bad_binary.length, REG_BINARY));
 
     // Starts to import the above settings.
     // Deletes itself.
@@ -556,7 +566,7 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest,
     source_profile.importer_type = user_data_importer::TYPE_IE;
     source_profile.source_path = temp_dir_.GetPath();
 
-    host->StartImportSettings(source_profile, browser()->profile(),
+    host->StartImportSettings(source_profile, browser()->GetProfile(),
                               user_data_importer::FAVORITES, observer);
     loop.Run();
   }
@@ -581,7 +591,7 @@ IN_PROC_BROWSER_TEST_F(IEImporterBrowserTest, IEImporterHomePageTest) {
   source_profile.importer_type = user_data_importer::TYPE_IE;
   source_profile.source_path = temp_dir_.GetPath();
 
-  host->StartImportSettings(source_profile, browser()->profile(),
+  host->StartImportSettings(source_profile, browser()->GetProfile(),
                             user_data_importer::HOME_PAGE, observer);
   loop.Run();
 }

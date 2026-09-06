@@ -19,8 +19,6 @@
 #include "components/prefs/pref_change_registrar.h"
 #include "components/sessions/core/serialized_navigation_entry.h"
 #include "components/supervised_user/core/browser/supervised_user_error_page.h"
-#include "components/supervised_user/core/browser/supervised_user_service_observer.h"
-#include "components/supervised_user/core/browser/supervised_user_url_filter.h"
 #include "components/supervised_user/core/browser/supervised_user_utils.h"
 #include "components/supervised_user/core/common/supervised_users.h"
 #include "content/public/browser/render_frame_host_receiver_set.h"
@@ -29,6 +27,7 @@
 
 namespace supervised_user {
 class SupervisedUserService;
+class SupervisedUserUrlFilteringService;
 class SupervisedUserInterstitial;
 }  // namespace supervised_user
 
@@ -44,7 +43,7 @@ using OnInterstitialResultCallback = base::RepeatingCallback<
 class SupervisedUserNavigationObserver
     : public content::WebContentsUserData<SupervisedUserNavigationObserver>,
       public content::WebContentsObserver,
-      public SupervisedUserServiceObserver,
+      public supervised_user::SupervisedUserUrlFilteringService::Observer,
       public supervised_user::mojom::SupervisedUserCommands {
  public:
   SupervisedUserNavigationObserver(const SupervisedUserNavigationObserver&) =
@@ -66,8 +65,7 @@ class SupervisedUserNavigationObserver
 
   // Called when a network request to |url| is blocked.
   static void OnRequestBlocked(content::WebContents* web_contents,
-                               const GURL& url,
-                               supervised_user::FilteringBehaviorReason reason,
+                               supervised_user::WebFilteringResult result,
                                int64_t navigation_id,
                                content::FrameTreeNodeId frame_id,
                                const OnInterstitialResultCallback& callback);
@@ -79,8 +77,8 @@ class SupervisedUserNavigationObserver
   void DidFinishLoad(content::RenderFrameHost* render_frame_host,
                      const GURL& validated_url) override;
 
-  // SupervisedUserServiceObserver:
-  void OnURLFilterChanged() override;
+  // SupervisedUserUrlFilteringService::Observer:
+  void OnUrlFilteringServiceChanged() override;
 
   // Called when interstitial error page is no longer being shown in the main
   // frame.
@@ -101,26 +99,29 @@ class SupervisedUserNavigationObserver
 
   explicit SupervisedUserNavigationObserver(content::WebContents* web_contents);
 
-  void OnRequestBlockedInternal(const GURL& url,
-                                supervised_user::FilteringBehaviorReason reason,
-                                int64_t navigation_id,
-                                content::FrameTreeNodeId frame_id,
-                                const OnInterstitialResultCallback& callback);
+  void OnRequestBlockedInternal(
+      supervised_user::WebFilteringResult filtering_result,
+      int64_t navigation_id,
+      content::FrameTreeNodeId frame_id,
+      const OnInterstitialResultCallback& callback);
 
-  void URLFilterCheckCallback(
-      int render_frame_process_id,
-      int render_frame_routing_id,
-      supervised_user::SupervisedUserURLFilter::Result result);
+  void URLFilterCheckCallback(int render_frame_process_id,
+                              int render_frame_routing_id,
+                              supervised_user::WebFilteringResult result);
 
-  void MaybeShowInterstitial(const GURL& url,
-                             supervised_user::FilteringBehaviorReason reason,
-                             bool initial_page_load,
-                             int64_t navigation_id,
-                             content::FrameTreeNodeId frame_id,
-                             const OnInterstitialResultCallback& callback);
+  void MaybeShowInterstitial(
+      supervised_user::WebFilteringResult filtering_result,
+      bool initial_page_load,
+      int64_t navigation_id,
+      content::FrameTreeNodeId frame_id,
+      const OnInterstitialResultCallback& callback);
 
   // Filters the RenderFrameHost if render frame is live.
   void FilterRenderFrame(content::RenderFrameHost* render_frame_host);
+
+  // Returns the active (showing) interstitial for the current frame, or nullptr
+  // if there is no active interstitial.
+  supervised_user::SupervisedUserInterstitial* GetInterstitialForFrame();
 
   // supervised_user::mojom::SupervisedUserCommands implementation. Should not
   // be called when an interstitial is no longer showing. This should be
@@ -144,9 +145,9 @@ class SupervisedUserNavigationObserver
 
   void RecordPageLoadUKM(content::RenderFrameHost* render_frame_host);
 
-  content::FrameTreeNodeId frame_tree_node_id();
-
   supervised_user::SupervisedUserService* supervised_user_service() const;
+  supervised_user::SupervisedUserUrlFilteringService*
+  supervised_user_url_filtering_service() const;
 
 #if BUILDFLAG(IS_ANDROID)
   // Observes changes to the force google safe search pref and reloads the
@@ -154,9 +155,10 @@ class SupervisedUserNavigationObserver
   void OnForceGoogleSafeSearchChanged(std::string_view safe_search_pref_name);
 #endif  // BUILDFLAG(IS_ANDROID)
 
-  base::ScopedObservation<supervised_user::SupervisedUserService,
-                          SupervisedUserServiceObserver>
-      supervised_user_service_observation_{this};
+  base::ScopedObservation<
+      supervised_user::SupervisedUserUrlFilteringService,
+      supervised_user::SupervisedUserUrlFilteringService::Observer>
+      url_filtering_service_observation_{this};
 
   // Keeps track of the blocked frames. It maps the frame's globally unique
   // id to its corresponding |SupervisedUserInterstitial| instance.

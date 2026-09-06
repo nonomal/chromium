@@ -8,10 +8,12 @@
 
 #import "base/functional/bind.h"
 #import "base/json/values_util.h"
+#import "base/test/metrics/histogram_tester.h"
 #import "base/test/scoped_feature_list.h"
 #import "base/test/task_environment.h"
 #import "base/time/clock.h"
 #import "base/time/time.h"
+#import "base/values.h"
 #import "components/desktop_to_mobile_promos/features.h"
 #import "components/desktop_to_mobile_promos/pref_names.h"
 #import "components/desktop_to_mobile_promos/promos_types.h"
@@ -28,10 +30,11 @@
 #import "ios/chrome/browser/shared/model/browser/test/test_browser.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/shared/model/profile/test/test_profile_ios.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
 #import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/credential_provider_promo_commands.h"
+#import "ios/chrome/browser/shared/public/commands/promos_manager_commands.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/sync/model/device_info_sync_service_factory.h"
 #import "ios/web/public/test/web_task_environment.h"
 #import "testing/gtest/include/gtest/gtest.h"
@@ -106,9 +109,9 @@ class CrossPlatformPromosServiceTest : public PlatformTest {
   }
 
   // Stubs the `-prepareToPresentModalWithSnackbarDismissal:` method from
-  // `ApplicationCommands` so that it immediately calls the completion block.
+  // `SceneCommands` so that it immediately calls the completion block.
   void StubPrepareToPresentModal() {
-    id mock_application_handler = MockHandler(@protocol(ApplicationCommands));
+    id mock_application_handler = MockHandler(@protocol(SceneCommands));
     OCMStub([mock_application_handler
         prepareToPresentModalWithSnackbarDismissal:NO
                                         completion:[OCMArg invokeBlock]]);
@@ -117,6 +120,7 @@ class CrossPlatformPromosServiceTest : public PlatformTest {
  protected:
   web::WebTaskEnvironment task_environment_{
       web::WebTaskEnvironment::TimeSource::MOCK_TIME};
+  base::HistogramTester histogram_tester_;
   std::unique_ptr<TestProfileIOS> profile_;
   raw_ptr<PrefService> prefs_;
   raw_ptr<syncer::FakeDeviceInfoSyncService> device_info_sync_service_;
@@ -131,7 +135,7 @@ class CrossPlatformPromosServiceTest : public PlatformTest {
 // Tests that foregrounding the app records a new active day.
 TEST_F(CrossPlatformPromosServiceTest, RecordActiveDay_AddNewDay) {
   SimulateAppForegrounded();
-  const base::Value::List& active_days =
+  const base::ListValue& active_days =
       prefs_->GetList(prefs::kCrossPlatformPromosActiveDays);
   EXPECT_EQ(1u, active_days.size());
 }
@@ -146,7 +150,7 @@ TEST_F(CrossPlatformPromosServiceTest, RecordActiveDay_AddDuplicateDay) {
   SimulateAppForegrounded();
   task_environment_.FastForwardBy(base::Seconds(1));
   SimulateAppForegrounded();
-  const base::Value::List& active_days =
+  const base::ListValue& active_days =
       prefs_->GetList(prefs::kCrossPlatformPromosActiveDays);
   EXPECT_EQ(1u, active_days.size());
 }
@@ -156,7 +160,7 @@ TEST_F(CrossPlatformPromosServiceTest, RecordActiveDay_PruneOldDays) {
   SimulateAppForegrounded();
   task_environment_.FastForwardBy(base::Days(30));
   SimulateAppForegrounded();
-  const base::Value::List& active_days =
+  const base::ListValue& active_days =
       prefs_->GetList(prefs::kCrossPlatformPromosActiveDays);
   EXPECT_EQ(1u, active_days.size());
   std::optional<base::Time> stored_time = base::ValueToTime(active_days[0]);
@@ -188,7 +192,7 @@ TEST_F(CrossPlatformPromosServiceTest, MaybeShowPromo_Lens) {
   id mock_handler = MockHandler(@protocol(BrowserCoordinatorCommands));
   OCMExpect([mock_handler showLensPromo]);
 
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set(prefs::kIOSPromoReminderPromoType,
            static_cast<int>(desktop_to_mobile_promos::PromoType::kLens));
   dict.Set(prefs::kIOSPromoReminderDeviceGUID, local_device_guid_);
@@ -198,6 +202,9 @@ TEST_F(CrossPlatformPromosServiceTest, MaybeShowPromo_Lens) {
   service_->MaybeShowPromo();
 
   EXPECT_OCMOCK_VERIFY(mock_handler);
+  histogram_tester_.ExpectUniqueSample(
+      "IOS.CrossPlatformPromos.Promo.Shown.FromAppForeground",
+      desktop_to_mobile_promos::PromoType::kLens, 1);
 }
 
 // Tests that the Enhanced Browsing promo is triggered when the pref changes.
@@ -205,7 +212,7 @@ TEST_F(CrossPlatformPromosServiceTest, MaybeShowPromo_ESB) {
   id mock_handler = MockHandler(@protocol(BrowserCoordinatorCommands));
   OCMExpect([mock_handler showEnhancedSafeBrowsingPromo]);
 
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set(
       prefs::kIOSPromoReminderPromoType,
       static_cast<int>(desktop_to_mobile_promos::PromoType::kEnhancedBrowsing));
@@ -216,16 +223,19 @@ TEST_F(CrossPlatformPromosServiceTest, MaybeShowPromo_ESB) {
   service_->MaybeShowPromo();
 
   EXPECT_OCMOCK_VERIFY(mock_handler);
+  histogram_tester_.ExpectUniqueSample(
+      "IOS.CrossPlatformPromos.Promo.Shown.FromAppForeground",
+      desktop_to_mobile_promos::PromoType::kEnhancedBrowsing, 1);
 }
 
 // Tests that the Password promo is triggered when the pref changes.
 TEST_F(CrossPlatformPromosServiceTest, MaybeShowPromo_Password) {
-  id mock_handler = MockHandler(@protocol(CredentialProviderPromoCommands));
+  id mock_handler = MockHandler(@protocol(PromosManagerCommands));
   OCMExpect(
       [mock_handler showCredentialProviderPromoWithTrigger:
                         CredentialProviderPromoTrigger::TipsNotification]);
 
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set(prefs::kIOSPromoReminderPromoType,
            static_cast<int>(desktop_to_mobile_promos::PromoType::kPassword));
   dict.Set(prefs::kIOSPromoReminderDeviceGUID, local_device_guid_);
@@ -235,6 +245,9 @@ TEST_F(CrossPlatformPromosServiceTest, MaybeShowPromo_Password) {
   service_->MaybeShowPromo();
 
   EXPECT_OCMOCK_VERIFY(mock_handler);
+  histogram_tester_.ExpectUniqueSample(
+      "IOS.CrossPlatformPromos.Promo.Shown.FromAppForeground",
+      desktop_to_mobile_promos::PromoType::kPassword, 1);
 }
 
 // Tests that the promo type pref is cleared after showing a promo.
@@ -242,7 +255,7 @@ TEST_F(CrossPlatformPromosServiceTest, MaybeShowPromo_ClearsPref) {
   id mock_handler = MockHandler(@protocol(BrowserCoordinatorCommands));
   OCMStub([mock_handler showLensPromo]);
 
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set(prefs::kIOSPromoReminderPromoType,
            static_cast<int>(desktop_to_mobile_promos::PromoType::kLens));
   dict.Set(prefs::kIOSPromoReminderDeviceGUID, local_device_guid_);
@@ -252,7 +265,7 @@ TEST_F(CrossPlatformPromosServiceTest, MaybeShowPromo_ClearsPref) {
   service_->MaybeShowPromo();
 
   // Verify the pref is cleared.
-  const base::Value::Dict& promo_reminder =
+  const base::DictValue& promo_reminder =
       prefs_->GetDict(prefs::kIOSPromoReminder);
   EXPECT_FALSE(promo_reminder.FindInt(prefs::kIOSPromoReminderPromoType));
 }
@@ -262,7 +275,7 @@ TEST_F(CrossPlatformPromosServiceTest, MaybeShowPromo_WrongGUID) {
   id mock_handler = MockHandler(@protocol(BrowserCoordinatorCommands));
   OCMReject([mock_handler showLensPromo]);
 
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set(prefs::kIOSPromoReminderPromoType,
            static_cast<int>(desktop_to_mobile_promos::PromoType::kLens));
   dict.Set(prefs::kIOSPromoReminderDeviceGUID, "wrong_guid");
@@ -272,4 +285,58 @@ TEST_F(CrossPlatformPromosServiceTest, MaybeShowPromo_WrongGUID) {
   service_->MaybeShowPromo();
 
   EXPECT_OCMOCK_VERIFY(mock_handler);
+  histogram_tester_.ExpectTotalCount(
+      "IOS.CrossPlatformPromos.Promo.Shown.FromAppForeground", 0);
+}
+
+// Tests that the trigger ID is consumed after showing a promo.
+TEST_F(CrossPlatformPromosServiceTest, MaybeShowPromo_ConsumeTriggerId) {
+  id mock_handler = MockHandler(@protocol(BrowserCoordinatorCommands));
+  OCMStub([mock_handler showLensPromo]);
+
+  std::string trigger_id = "test-trigger-id-123";
+
+  base::DictValue dict;
+  dict.Set(prefs::kIOSPromoReminderPromoType,
+           static_cast<int>(desktop_to_mobile_promos::PromoType::kLens));
+  dict.Set(prefs::kIOSPromoReminderDeviceGUID, local_device_guid_);
+  dict.Set(prefs::kIOSPromoReminderTriggerId, trigger_id);
+  prefs_->SetDict(prefs::kIOSPromoReminder, std::move(dict));
+
+  // Trigger the promo.
+  service_->MaybeShowPromo();
+
+  // Verify the consumed trigger ID pref is set.
+  EXPECT_EQ(trigger_id,
+            prefs_->GetString(prefs::kCrossPlatformPromosConsumedTriggerId));
+}
+
+// Tests that the promo is NOT shown if the trigger ID has already been
+// consumed.
+TEST_F(CrossPlatformPromosServiceTest,
+       MaybeShowPromo_IgnoresConsumedTriggerId) {
+  id mock_handler = MockHandler(@protocol(BrowserCoordinatorCommands));
+  OCMReject([mock_handler showLensPromo]);
+
+  std::string trigger_id = "test-trigger-id-123";
+  prefs_->SetString(prefs::kCrossPlatformPromosConsumedTriggerId, trigger_id);
+
+  base::DictValue dict;
+  dict.Set(prefs::kIOSPromoReminderPromoType,
+           static_cast<int>(desktop_to_mobile_promos::PromoType::kLens));
+  dict.Set(prefs::kIOSPromoReminderDeviceGUID, local_device_guid_);
+  dict.Set(prefs::kIOSPromoReminderTriggerId, trigger_id);
+  prefs_->SetDict(prefs::kIOSPromoReminder, std::move(dict));
+
+  // Trigger the promo.
+  service_->MaybeShowPromo();
+
+  EXPECT_OCMOCK_VERIFY(mock_handler);
+  histogram_tester_.ExpectTotalCount(
+      "IOS.CrossPlatformPromos.Promo.Shown.FromAppForeground", 0);
+
+  // Verify the pref is still cleared even when ignored.
+  const base::DictValue& promo_reminder =
+      prefs_->GetDict(prefs::kIOSPromoReminder);
+  EXPECT_FALSE(promo_reminder.FindInt(prefs::kIOSPromoReminderPromoType));
 }

@@ -7,7 +7,7 @@
 
 #include <memory>
 
-#include "base/byte_count.h"
+#include "base/byte_size.h"
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
 #include "base/scoped_observation.h"
@@ -43,11 +43,20 @@ class UserPerformanceTuningManager {
     virtual ~MemorySaverModeDelegate() = default;
   };
 
+  class TabFreezingDelegate {
+   public:
+    virtual void SetFreezingEnabledByUser(bool enabled) = 0;
+    virtual ~TabFreezingDelegate() = default;
+  };
+
   class Observer : public base::CheckedObserver {
    public:
     // Raised when the memory saver mode setting is changed. Get the new
     // state using `UserPerformanceTuningManager::IsMemorySaverModeActive()`
     virtual void OnMemorySaverModeChanged() {}
+
+    // Raised when the tab freezing setting is changed.
+    virtual void OnTabFreezingModeChanged() {}
 
     // Raised when the total memory footprint reaches X%.
     // Can be used by the UI to show a promo
@@ -66,17 +75,17 @@ class UserPerformanceTuningManager {
       : public content::WebContentsUserData<PreDiscardResourceUsage> {
    public:
     PreDiscardResourceUsage(content::WebContents* contents,
-                            base::ByteCount memory_footprint_estimate,
+                            base::ByteSize memory_footprint_estimate,
                             ::mojom::LifecycleUnitDiscardReason discard_reason);
     ~PreDiscardResourceUsage() override;
 
     void UpdateDiscardInfo(
-        base::ByteCount memory_footprint_estimate,
+        base::ByteSize memory_footprint_estimate,
         ::mojom::LifecycleUnitDiscardReason discard_reason,
         base::LiveTicks discard_live_ticks = base::LiveTicks::Now());
 
     // Returns the resource usage estimate.
-    base::ByteCount memory_footprint_estimate() const {
+    base::ByteSize memory_footprint_estimate() const {
       return memory_footprint_estimate_;
     }
 
@@ -90,7 +99,7 @@ class UserPerformanceTuningManager {
     friend WebContentsUserData;
     WEB_CONTENTS_USER_DATA_KEY_DECL();
 
-    base::ByteCount memory_footprint_estimate_;
+    base::ByteSize memory_footprint_estimate_;
     ::mojom::LifecycleUnitDiscardReason discard_reason_;
     base::LiveTicks discard_live_ticks_;
   };
@@ -119,6 +128,20 @@ class UserPerformanceTuningManager {
   // Enables memory saver mode and sets the relevant prefs accordingly.
   void SetMemorySaverModeEnabled(bool enabled);
 
+  // Returns true if Tab Freezing is currently enabled.
+  bool IsTabFreezingActive() const;
+
+  // Returns true if the pref underlying Tab Freezing is managed by an
+  // enterprise policy.
+  bool IsTabFreezingManaged() const;
+
+  // Returns true if the pref underlying Tab Freezing is still in the default
+  // state.
+  bool IsTabFreezingDefault() const;
+
+  // Enables or disables tab freezing and sets the relevant pref accordingly.
+  void SetTabFreezingEnabled(bool enabled);
+
   // Discards the given WebContents with the same mechanism as one that is
   // discarded through a natural timeout
   void DiscardPageForTesting(content::WebContents* web_contents);
@@ -127,6 +150,7 @@ class UserPerformanceTuningManager {
   friend class ::ChromeBrowserMainExtraPartsPerformanceManager;
   friend class ::PerformanceManagerMetricsProviderTest;
   friend class UserPerformanceTuningManagerTest;
+  friend class UserPerformanceTuningManagerTabFreezingTest;
   friend class TestUserPerformanceTuningManagerEnvironment;
 
   // An implementation of UserPerformanceTuningNotifier::Receiver that
@@ -145,7 +169,8 @@ class UserPerformanceTuningManager {
       PrefService* local_state,
       std::unique_ptr<UserPerformanceTuningNotifier> notifier = nullptr,
       std::unique_ptr<MemorySaverModeDelegate> memory_saver_mode_delegate =
-          nullptr);
+          nullptr,
+      std::unique_ptr<TabFreezingDelegate> tab_freezing_delegate = nullptr);
 
   void Start();
 
@@ -153,11 +178,15 @@ class UserPerformanceTuningManager {
   void OnMemorySaverModePrefChanged();
   void OnMemorySaverAggressivenessPrefChanged();
 
+  void UpdateTabFreezingState();
+  void OnTabFreezingPrefChanged();
+
   void NotifyTabCountThresholdReached();
   void NotifyMemoryThresholdReached();
   void NotifyMemoryMetricsRefreshed();
 
   std::unique_ptr<MemorySaverModeDelegate> memory_saver_mode_delegate_;
+  std::unique_ptr<TabFreezingDelegate> tab_freezing_delegate_;
 
   PrefChangeRegistrar pref_change_registrar_;
   base::ObserverList<Observer> observers_;

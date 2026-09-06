@@ -9,7 +9,7 @@ import static org.chromium.build.NullUtil.assumeNonNull;
 import org.chromium.build.annotations.Initializer;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
-import org.chromium.chrome.browser.customtabs.CustomTabDelegateFactory;
+import org.chromium.chrome.browser.app.tabmodel.HeadlessTabDelegateFactory;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabBuilder;
@@ -21,6 +21,8 @@ import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.url.GURL;
+
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Creates tabs for the archived tab model selector during restore. This only creates frozen tabs.
@@ -72,8 +74,7 @@ public class ArchivedTabCreator implements TabCreator, NeedsTabModel {
                         .setLaunchType(TabLaunchType.FROM_RESTORE)
                         .setTabResolver(mTabModel::getTabById)
                         .setInitiallyHidden(true)
-                        .setDelegateFactory(CustomTabDelegateFactory.createEmpty())
-                        .setArchived(true)
+                        .setDelegateFactory(new HeadlessTabDelegateFactory(TabModelType.ARCHIVED))
                         .build();
         mTabModel.addTab(
                 tab, index, TabLaunchType.FROM_RESTORE, TabCreationState.FROZEN_FOR_LAZY_LOAD);
@@ -91,8 +92,7 @@ public class ArchivedTabCreator implements TabCreator, NeedsTabModel {
                         .setTabResolver(mTabModel::getTabById)
                         .setInitiallyHidden(true)
                         .setTabState(state)
-                        .setDelegateFactory(CustomTabDelegateFactory.createEmpty())
-                        .setArchived(true)
+                        .setDelegateFactory(new HeadlessTabDelegateFactory(TabModelType.ARCHIVED))
                         .build();
         mTabModel.addTab(
                 tab, index, TabLaunchType.FROM_RESTORE, TabCreationState.FROZEN_FOR_LAZY_LOAD);
@@ -113,7 +113,7 @@ public class ArchivedTabCreator implements TabCreator, NeedsTabModel {
             @TabLaunchType int type,
             GURL url,
             int index,
-            boolean addTabToModel) {
+            CompletableFuture<Boolean> addTabToModel) {
         assert false : "Not reached.";
         return null;
     }

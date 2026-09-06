@@ -15,6 +15,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "components/prefs/pref_service.h"
 #include "components/version_info/channel.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -33,6 +34,7 @@
 #include "net/base/net_errors.h"
 #include "net/dns/mock_host_resolver.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "ui/base/page_transition_types.h"
 
 static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
@@ -129,6 +131,117 @@ IN_PROC_BROWSER_TEST_F(WebAccessibleResourcesBrowserTest,
   ASSERT_TRUE(content::EvalJs(web_contents, script).ExtractBool());
 }
 
+// Verifies that web accessible resource matching is case-sensitive, so
+// requests using case-variant paths to allowed resources are blocked, and
+// unlisted resources remain inaccessible.
+IN_PROC_BROWSER_TEST_F(WebAccessibleResourcesBrowserTest,
+                       WebAccessibleResourcesAreCaseSensitive) {
+  static constexpr char kManifest[] = R"({
+    "name": "Case Sensitive WAR Test",
+    "version": "0.1",
+    "manifest_version": 3,
+    "web_accessible_resources": [
+      {
+        "resources": [ "accessible.html", "café.html" ],
+        "matches": [ "<all_urls>" ]
+      }
+    ]
+  })";
+
+  TestExtensionDir extension_dir;
+  extension_dir.WriteManifest(kManifest);
+  // Write the case-variant files first so that on case-sensitive filesystems
+  // (like Linux) the files exist to be loaded, but on case-preserving/case-
+  // insensitive filesystems (macOS, Windows) the canonical lowercase files
+  // are written second.
+  extension_dir.WriteFile(FILE_PATH_LITERAL("Accessible.html"),
+                          "accessible content");
+  extension_dir.WriteFile(FILE_PATH_LITERAL("accessible.html"),
+                          "accessible content");
+  extension_dir.WriteFile(FILE_PATH_LITERAL("CAFÉ.html"), "café content");
+  extension_dir.WriteFile(FILE_PATH_LITERAL("café.html"), "café content");
+  extension_dir.WriteFile(FILE_PATH_LITERAL("Private.html"), "private content");
+  extension_dir.WriteFile(FILE_PATH_LITERAL("private.html"), "private content");
+  const Extension* extension = LoadExtension(extension_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  GURL web_page = embedded_test_server()->GetURL("example.com", "/simple.html");
+  auto* web_contents = GetActiveWebContents();
+  ASSERT_TRUE(content::NavigateToURL(web_contents, web_page));
+
+  static constexpr char kFetchScript[] = R"(
+    window.fetchResource = async function(url) {
+      try {
+        const response = await fetch(url);
+        return await response.text();
+      } catch (e) {
+        return 'FETCH_FAILED';
+      }
+    };
+  )";
+  ASSERT_TRUE(content::ExecJs(web_contents, kFetchScript));
+
+  // Note: in this test, we deliberately don't use Extension::GetResourceURL(),
+  // which goes through additional sanitization checks.
+
+  // 1. Exact-case declared resource can be fetched.
+  GURL accessible_url = extension->url().Resolve("accessible.html");
+  EXPECT_EQ("accessible content",
+            content::EvalJs(web_contents,
+                            content::JsReplace("window.fetchResource($1)",
+                                               accessible_url)));
+
+  // 2. Case-variant declared resource is blocked because web-accessible
+  // resources are case-sensitive.
+  GURL uppercase_accessible_url = extension->url().Resolve("Accessible.html");
+  EXPECT_EQ("FETCH_FAILED",
+            content::EvalJs(web_contents,
+                            content::JsReplace("window.fetchResource($1)",
+                                               uppercase_accessible_url)));
+
+  // 3. UTF-8 declared resource cannot be fetched because URLPattern matching
+  // does not currently unescape percent-encoded paths in case-sensitive mode
+  // ("caf%C3%A9.html" vs "café.html").
+  GURL cafe_url = extension->url().Resolve("café.html");
+  EXPECT_EQ(
+      "café content",
+      content::EvalJs(web_contents, content::JsReplace(
+                                        "window.fetchResource($1)", cafe_url)));
+
+  // Same as above, but using a simple construction of the extension URL.
+  // GURL::Resolve() handles the unicode escaping directly; this more closely
+  // emulates a page just requesting café.html.
+  // As above, this fails because we internally *do* still escape unicode
+  // characters (so the handling is the same).
+  std::string cafe_url_simple =
+      base::StringPrintf("%scafé.html", extension->url().spec().c_str());
+  EXPECT_EQ("café content",
+            content::EvalJs(web_contents,
+                            content::JsReplace("window.fetchResource($1)",
+                                               cafe_url_simple)));
+
+  // 4. UTF-8 case-variant declared resource is also blocked.
+  GURL uppercase_cafe_url = extension->url().Resolve("CAFÉ.html");
+  EXPECT_EQ("FETCH_FAILED",
+            content::EvalJs(web_contents,
+                            content::JsReplace("window.fetchResource($1)",
+                                               uppercase_cafe_url)));
+
+  // 5. Unlisted resource (private.html) is blocked.
+  GURL private_url = extension->url().Resolve("private.html");
+  EXPECT_EQ("FETCH_FAILED",
+            content::EvalJs(
+                web_contents,
+                content::JsReplace("window.fetchResource($1)", private_url)));
+
+  // 6. Case-variant of unlisted resource (Private.html) is also blocked.
+  GURL uppercase_private_url = extension->url().Resolve("Private.html");
+  EXPECT_EQ("FETCH_FAILED",
+            content::EvalJs(web_contents,
+                            content::JsReplace("window.fetchResource($1)",
+                                               uppercase_private_url)));
+}
+
 // Exercise these resources being used in iframes in a web page. The navigation
 // flow goes through a different path than resource fetching.
 IN_PROC_BROWSER_TEST_F(WebAccessibleResourcesBrowserTest,
@@ -165,7 +278,7 @@ IN_PROC_BROWSER_TEST_F(WebAccessibleResourcesBrowserTest,
     EXPECT_EQ(expected, EvalJs(iframe, "document.body.innerText;"));
   };
 
-  static struct {
+  struct {
     const char* title;
     const GURL target;
     const GURL commit;
@@ -241,7 +354,7 @@ IN_PROC_BROWSER_TEST_F(
   //   is a renderer-initiated navigation, and should be limited to
   //   web-accessible resource checks.
   // * Verify where the navigation reached.
-  static struct {
+  struct {
     // The url to navigate the browser tab to.
     GURL site_url;
     // The url to navigate to via `document.location.replace()` (an extension
@@ -580,6 +693,46 @@ IN_PROC_BROWSER_TEST_F(WebAccessibleResourcesBrowserTest, DNRRedirect) {
   EXPECT_EQ("dnr redirect success", result.ExtractString());
 }
 
+// Succeed when DNR redirects a script to a WAR where the redirect URL contains
+// both a query and a ref.
+// Regression test for crbug.com/461824106.
+// TODO(crbug.com/512084385): Flaky on Android.
+#if BUILDFLAG(IS_ANDROID)
+#define MAYBE_DNRRedirectWithQueryAndRef DISABLED_DNRRedirectWithQueryAndRef
+#else
+#define MAYBE_DNRRedirectWithQueryAndRef DNRRedirectWithQueryAndRef
+#endif
+IN_PROC_BROWSER_TEST_F(WebAccessibleResourcesBrowserTest,
+                       MAYBE_DNRRedirectWithQueryAndRef) {
+  auto file_path = test_data_dir_.AppendASCII(
+      "web_accessible_resources/dnr/redirect_query_and_ref");
+  const Extension* extension = LoadExtension(file_path);
+  ASSERT_TRUE(extension);
+
+  // Navigate to a non-extension page (main frame).
+  content::WebContents* web_contents = GetActiveWebContents();
+  GURL url =
+      embedded_test_server()->GetURL("example.com", "/simple_with_script.html");
+  GURL expected_commit_url = extension->url().Resolve("ok.html?foo=bar#baz");
+
+  // Track the navigation event and allow us to wait for it to complete.
+  content::TestNavigationObserver navigation_observer(web_contents);
+
+  // Start the navigation to the initial URL.
+  ASSERT_TRUE(content::NavigateToURL(web_contents, url, expected_commit_url));
+
+  // Wait for the navigation.
+  navigation_observer.WaitForNavigationFinished();
+
+  // Ensure the navigation was successful and check the final redirected URL.
+  EXPECT_EQ(navigation_observer.last_net_error_code(), net::Error::OK);
+  EXPECT_EQ(expected_commit_url, web_contents->GetLastCommittedURL());
+
+  // Verify that the body content of the main frame changes due to DNR redirect.
+  auto result = EvalJs(web_contents, "document.body.textContent");
+  EXPECT_EQ("ok\n", result.ExtractString());
+}
+
 class WebAccessibleResourcesServiceWorkerBrowserTest
     : public WebAccessibleResourcesBrowserTest {
  public:
@@ -623,9 +776,9 @@ IN_PROC_BROWSER_TEST_F(WebAccessibleResourcesServiceWorkerBrowserTest,
                        DISABLED_DNRRedirect) {
   // Register a service worker and navigate to a page it controls.
   RegisterServiceWorker("example.com", "fetch_event_pass_through.js",
-                        std::nullopt);
-  EXPECT_TRUE(NavigateToURL(
-      browser_window_interface(),
+                        /*scope=*/std::nullopt);
+  ASSERT_TRUE(NavigateToURL(
+      GetActiveWebContents(),
       embedded_test_server()->GetURL("example.com",
                                      "/service_worker/fetch_from_page.html")));
 
@@ -644,6 +797,33 @@ IN_PROC_BROWSER_TEST_F(WebAccessibleResourcesServiceWorkerBrowserTest,
   EXPECT_TRUE(result.ExtractString().find(expected_content) !=
               std::string::npos)
       << expected_content << " not found in " << result.ExtractString();
+}
+
+// Test that DNR redirects to the extension's web accessible resource work when
+// the page has a service worker and the extension uses dynamic URLs.
+// Regression test for crbug.com/479743219.
+IN_PROC_BROWSER_TEST_F(WebAccessibleResourcesServiceWorkerBrowserTest,
+                       DNRRedirectDynamicUrl) {
+  const Extension* extension = LoadExtension(test_data_dir_.AppendASCII(
+      "web_accessible_resources/dnr/redirect_dynamic_url"));
+  ASSERT_TRUE(extension);
+
+  // Register a service worker and navigate to a page it controls.
+  RegisterServiceWorker("example.com", "fetch_event_pass_through.js",
+                        /*scope=*/std::nullopt);
+  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(),
+                            embedded_test_server()->GetURL(
+                                "example.com", "/service_worker/blank.html")));
+
+  // Fetch the page with no-cors. It should be redirected to the extension's
+  // dynamic web accessible resource.
+  auto result = EvalJs(GetActiveWebContents(),
+                       "fetch('/english_page.html', {mode: 'no-cors'}).then("
+                       "  () => 'SUCCESS',"
+                       "  (e) => `FAILED: ${e.message}`"
+                       ");");
+
+  EXPECT_EQ("SUCCESS", result.ExtractString());
 }
 
 // Test server redirect to a web accessible or extension resource.
@@ -884,6 +1064,11 @@ class DynamicOriginBrowserTest : public ExtensionBrowserTest {
     InstallExtension();
   }
 
+  void TearDownOnMainThread() override {
+    extension_ = nullptr;
+    ExtensionBrowserTest::TearDownOnMainThread();
+  }
+
  protected:
   const Extension* GetExtension() { return extension_; }
 
@@ -911,7 +1096,7 @@ class DynamicOriginBrowserTest : public ExtensionBrowserTest {
     DCHECK(extension_);
   }
 
-  raw_ptr<const Extension, DanglingUntriaged> extension_ = nullptr;
+  raw_ptr<const Extension> extension_ = nullptr;
   TestExtensionDir dir_;
 };
 

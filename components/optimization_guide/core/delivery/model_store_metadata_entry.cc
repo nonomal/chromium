@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/json/values_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -13,7 +14,6 @@
 #include "components/optimization_guide/core/delivery/model_util.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
 #include "components/optimization_guide/core/optimization_guide_prefs.h"
-#include "components/optimization_guide/core/optimization_guide_switches.h"
 #include "components/optimization_guide/core/optimization_guide_util.h"
 #include "components/optimization_guide/proto/models.pb.h"
 #include "components/prefs/pref_service.h"
@@ -21,6 +21,18 @@
 namespace optimization_guide {
 
 namespace {
+
+// Purges the store containing prediction models and host model features on
+// startup, so that it's guaranteed to be using fresh data.
+constexpr char kPurgeModelAndFeaturesStoreSwitch[] =
+    "purge-model-and-features-store";
+
+// Returns whether all entries within the store should be purged during startup
+// if the explicit purge switch exists.
+bool ShouldPurgeModelAndFeaturesStoreOnStartup() {
+  base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
+  return cmd_line->HasSwitch(kPurgeModelAndFeaturesStoreSwitch);
+}
 
 // Key names for the metadata entries.
 const char kKeyModelBaseDir[] = "mbd";
@@ -73,7 +85,7 @@ ClientCacheKey ClientCacheKey::FromLocale(std::string locale) {
 }
 
 ModelStoreMetadataEntry::ModelStoreMetadataEntry(
-    const base::Value::Dict* metadata_entry)
+    const base::DictValue* metadata_entry)
     : metadata_entry_(metadata_entry) {}
 
 ModelStoreMetadataEntry::~ModelStoreMetadataEntry() = default;
@@ -229,7 +241,7 @@ std::vector<base::FilePath> ModelStoreLedger::PurgeAllInactiveMetadata() {
         continue;
       }
       bool should_remove_model =
-          switches::ShouldPurgeModelAndFeaturesStoreOnStartup();
+          ShouldPurgeModelAndFeaturesStoreOnStartup();
 
       // Check if the model expired.
       auto metadata =
@@ -275,7 +287,7 @@ void ModelStoreLedger::AddPathToDelete(base::FilePath path) {
   pref_update->Set(FilePathToString(path), true);
 }
 
-const base::Value::Dict& ModelStoreLedger::GetPathsToDelete() const {
+const base::DictValue& ModelStoreLedger::GetPathsToDelete() const {
   return local_state_->GetDict(prefs::localstate::kStoreFilePathsToDelete);
 }
 

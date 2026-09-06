@@ -14,6 +14,7 @@
 #include "base/check_op.h"
 #include "base/functional/bind.h"
 #include "base/hash/hash.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -26,6 +27,7 @@
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "components/os_crypt/async/browser/os_crypt_async.h"
+#include "components/os_crypt/async/common/encryptor.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/pref_store.h"
@@ -67,11 +69,11 @@ std::vector<const char*>* GetDeprecatedPrefs() {
 }
 
 void CleanupDeprecatedTrackedPreferences(
-    base::Value::Dict& pref_store_contents,
+    base::DictValue& pref_store_contents,
     PrefHashStoreTransaction* hash_store_transaction) {
   for (const char* key : *GetDeprecatedPrefs()) {
     pref_store_contents.RemoveByDottedPath(key);
-    hash_store_transaction->ClearHash(key);
+    hash_store_transaction->ClearAuthenticators(key);
   }
 }
 
@@ -129,6 +131,9 @@ PrefHashFilter::PrefHashFilter(
               base::SequencedTaskRunner::GetCurrentDefault())),
       encrypted_hashing_enabled_(
           base::FeatureList::IsEnabled(tracked::kEncryptedPrefHashing)) {
+  // For base::UmaHistogramExactLinear, number of tracked histograms must 100 or
+  // below.
+  CHECK_LE(reporting_ids_count_, 100u);
   DCHECK(pref_hash_store_);
   DCHECK_GE(reporting_ids_count, tracked_preferences.size());
   // Verify that, if |external_validation_hash_store_pair_| is present, both its
@@ -230,20 +235,17 @@ void PrefHashFilter::SetResetTimeForTesting(PrefService* user_prefs,
                         base::NumberToString(time.ToInternalValue()));
 }
 
-void PrefHashFilter::Initialize(base::Value::Dict& pref_store_contents) {
+void PrefHashFilter::Initialize(base::DictValue& pref_store_contents) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DictionaryHashStoreContents dictionary_contents(pref_store_contents);
   std::unique_ptr<PrefHashStoreTransaction> hash_store_transaction(
       pref_hash_store_->BeginTransaction(&dictionary_contents));
-  for (auto it = tracked_paths_.begin(); it != tracked_paths_.end(); ++it) {
-    const std::string& initialized_path = it->first;
-    const TrackedPreference* initialized_preference = it->second.get();
-    const base::Value* value =
-        pref_store_contents.FindByDottedPath(initialized_path);
+  for (const auto& [path, pref] : tracked_paths_) {
+    const base::Value* value = pref_store_contents.FindByDottedPath(path);
     // Initialize calls the 2-arg compatibility overload of
     // TrackedPreference::OnNewValue. Because at this point, the encryptor is
     // highly likely not ready yet.
-    initialized_preference->OnNewValue(value, hash_store_transaction.get());
+    pref->OnNewValue(value, hash_store_transaction.get());
   }
 }
 
@@ -251,14 +253,16 @@ void PrefHashFilter::Initialize(base::Value::Dict& pref_store_contents) {
 // will be stored for it the next time FilterSerializeData() is invoked.
 void PrefHashFilter::FilterUpdate(std::string_view path) {
   auto it = tracked_paths_.find(path);
-  if (it != tracked_paths_.end())
+  if (it != tracked_paths_.end()) {
     changed_paths_.insert(std::make_pair(path, it->second.get()));
+  }
 }
 
-void PrefHashFilter::OnEncryptorReceived(os_crypt_async::Encryptor encryptor) {
+void PrefHashFilter::OnEncryptorReceived(
+    scoped_refptr<os_crypt_async::Encryptor> encryptor) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   CHECK(encrypted_hashing_enabled_ && deferred_task_runner_);
-  encryptor_.emplace(std::move(encryptor));
+  encryptor_ = encryptor;
   deferred_task_runner_->Start();
 }
 
@@ -266,29 +270,25 @@ void PrefHashFilter::OnEncryptorReceived(os_crypt_async::Encryptor encryptor) {
 // disk. This is required as storing the hash everytime a pref's value changes
 // is too expensive (see perf regression @ http://crbug.com/331273).
 PrefFilter::OnWriteCallbackPair PrefHashFilter::FilterSerializeData(
-    base::Value::Dict& pref_store_contents) {
+    base::DictValue& pref_store_contents) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   PrefFilter::OnWriteCallbackPair callback_pair =
       GetOnWriteSynchronousCallbacks(pref_store_contents);
 
   if (!changed_paths_.empty()) {
-    const os_crypt_async::Encryptor* current_encryptor_ptr =
-        encryptor_.has_value() ? &encryptor_.value() : nullptr;
-
     DictionaryHashStoreContents dictionary_contents(pref_store_contents);
     std::unique_ptr<PrefHashStoreTransaction> hash_store_transaction(
-        pref_hash_store_->BeginTransaction(&dictionary_contents,
-                                           current_encryptor_ptr));
+        pref_hash_store_->BeginTransaction(&dictionary_contents, encryptor_));
 
     std::unique_ptr<PrefHashStoreTransaction>
         external_validation_hash_store_transaction;
     if (external_validation_hash_store_pair_) {
       external_validation_hash_store_transaction =
           external_validation_hash_store_pair_->first->BeginTransaction(
-              external_validation_hash_store_pair_->second.get(),
-              current_encryptor_ptr);
+              external_validation_hash_store_pair_->second.get(), encryptor_);
     }
 
+    const os_crypt_async::Encryptor* current_encryptor_ptr = encryptor_.get();
     auto process_paths = [&](const auto& paths_container) {
       for (const auto& [path, preference] : paths_container) {
         const base::Value* value = pref_store_contents.FindByDottedPath(path);
@@ -299,13 +299,13 @@ PrefFilter::OnWriteCallbackPair PrefHashFilter::FilterSerializeData(
     // If the encryptor is available, we must re-hash all tracked preferences to
     // ensure they have an encrypted hash. This is the fallback step for
     // profiles that were created before this feature was enabled.
-    if (current_encryptor_ptr) {
+    if (encryptor_) {
       process_paths(tracked_paths_);
     } else {
       // If the feature is disabled/encryptor is not available, clear any
       // existing encrypted hashes.
-      for (const auto& tracked_path : tracked_paths_) {
-        hash_store_transaction->ClearEncryptedHash(tracked_path.first);
+      for (const auto& [tracked_path, _] : tracked_paths_) {
+        hash_store_transaction->ClearEncryptedHash(tracked_path);
       }
       // If the encryptor isn't available, fall back to the old behavior of only
       // processing paths that have changed.
@@ -331,7 +331,7 @@ void PrefHashFilter::OnStoreDeletionFromDisk() {
 
 void PrefHashFilter::FinalizeFilterOnLoad(
     PostFilterOnLoadCallback post_filter_on_load_callback,
-    base::Value::Dict pref_store_contents,
+    base::DictValue pref_store_contents,
     bool prefs_altered) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   std::set<std::string> reset_paths;
@@ -355,17 +355,18 @@ void PrefHashFilter::FinalizeFilterOnLoad(
     CleanupDeprecatedTrackedPreferences(pref_store_contents,
                                         hash_store_transaction.get());
 
-    for (auto it = tracked_paths_.begin(); it != tracked_paths_.end(); ++it) {
-      if (it->second->EnforceAndReport(
+    for (const auto& [path, pref] : tracked_paths_) {
+      if (pref->EnforceAndReport(
               pref_store_contents, hash_store_transaction.get(),
               external_validation_hash_store_transaction.get())) {
         did_reset = true;
-        reset_paths.insert(it->first);
+        reset_paths.insert(path);
         prefs_altered = true;
       }
     }
-    if (hash_store_transaction->StampSuperMac())
+    if (hash_store_transaction->StampSuperHmac()) {
       prefs_altered = true;
+    }
   }
 
   if (did_reset) {
@@ -378,8 +379,9 @@ void PrefHashFilter::FinalizeFilterOnLoad(
     // validation will skip it. This prevents the "double reset" side effect.
     reset_paths.insert(user_prefs::kPreferenceResetTime);
 
-    if (reset_on_load_observer_)
+    if (reset_on_load_observer_) {
       reset_on_load_observer_->OnResetOnLoad();
+    }
   }
   reset_on_load_observer_.reset();
 
@@ -421,16 +423,15 @@ void PrefHashFilter::FinalizeFilterOnLoad(
 }
 
 void PrefHashFilter::DeferredEncryptorRevalidation(
-    base::Value::Dict pref_store_contents_at_load,
+    base::DictValue pref_store_contents_at_load,
     const std::set<std::string>& already_reset_paths) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  CHECK(encryptor_.has_value());
-  const os_crypt_async::Encryptor* encryptor = &encryptor_.value();
+  CHECK(encryptor_);
 
   // The transaction operates on our cloned dictionary from load time.
   DictionaryHashStoreContents dictionary_contents(pref_store_contents_at_load);
   std::unique_ptr<PrefHashStoreTransaction> transaction(
-      pref_hash_store_->BeginTransaction(&dictionary_contents, encryptor));
+      pref_hash_store_->BeginTransaction(&dictionary_contents, encryptor_));
 
   // Schedule a write to disk by updating a tracked preference. This is done to
   // ensure the newly computed encrypted hashes are flushed to the pref store.
@@ -460,26 +461,11 @@ void PrefHashFilter::DeferredEncryptorRevalidation(
       base::UmaHistogramExactLinear(
           histogram_name, preference->GetReportingId(), reporting_ids_count_);
       continue;
-    } else {
-      const base::Value* current_value = pref_service_->GetUserPrefValue(path);
-
-      // Compare the current value from pref service and the value from the copy
-      // of the loaded store. If the pref has been modified, we skip the
-      // encryption hash check.
-      if (current_value && value_at_load) {
-        // Both values exist. Check if they are different.
-        if (*current_value != *value_at_load) {
-          continue;
-        }
-      } else if (current_value != value_at_load) {
-        continue;
-      }  // If we fall through eventually, this means both values are valid and
-         // equal.
     }
 
-    if (preference->EnforceAndReport(pref_store_contents_at_load,
-                                     transaction.get(),
-                                     nullptr /* external_tx */, encryptor)) {
+    if (preference->EnforceAndReport(
+            pref_store_contents_at_load, transaction.get(),
+            nullptr /* external_tx */, encryptor_.get())) {
       // The preference was invalid. Update the *live* preference with the
       // corrected value from the in-memory `pref_store_contents_at_load`
       // dictionary, which `EnforceAndReport` has already modified.
@@ -518,7 +504,7 @@ base::WeakPtr<InterceptablePrefFilter> PrefHashFilter::AsWeakPtr() {
 }
 
 void PrefHashFilter::UpdateTrackedPreferencesResetListInPrefStore(
-    const base::Value::Dict& pref_store_contents_at_load) {
+    const base::DictValue& pref_store_contents_at_load) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // This task should only run after PrefService is created.
   if (!pref_service_) {
@@ -528,7 +514,7 @@ void PrefHashFilter::UpdateTrackedPreferencesResetListInPrefStore(
     return;
   }
 
-  const base::Value::List* reset_list = pref_store_contents_at_load.FindList(
+  const base::ListValue* reset_list = pref_store_contents_at_load.FindList(
       user_prefs::kTrackedPreferencesReset);
   if (reset_list) {
     pref_service_->SetList(user_prefs::kTrackedPreferencesReset,
@@ -541,78 +527,74 @@ void PrefHashFilter::UpdateTrackedPreferencesResetListInPrefStore(
 // static
 void PrefHashFilter::ClearFromExternalStore(
     HashStoreContents* external_validation_hash_store_contents,
-    const base::Value::Dict* changed_paths_and_macs) {
+    const base::DictValue* changed_paths_and_macs) {
   DCHECK(changed_paths_and_macs);
   DCHECK(!changed_paths_and_macs->empty());
 
-  for (const auto item : *changed_paths_and_macs) {
-    external_validation_hash_store_contents->RemoveEntry(item.first);
+  for (const auto [changed_path, _] : *changed_paths_and_macs) {
+    external_validation_hash_store_contents->RemoveAuthenticator(changed_path);
   }
 }
 
 // static
 void PrefHashFilter::FlushToExternalStore(
     std::unique_ptr<HashStoreContents> external_validation_hash_store_contents,
-    std::unique_ptr<base::Value::Dict> changed_paths_and_macs,
+    std::unique_ptr<base::DictValue> changed_paths_and_macs,
     bool write_success) {
   DCHECK(changed_paths_and_macs);
   DCHECK(!changed_paths_and_macs->empty());
   DCHECK(external_validation_hash_store_contents);
-  if (!write_success)
+  if (!write_success) {
     return;
+  }
 
-  for (const auto item : *changed_paths_and_macs) {
-    const std::string& changed_path = item.first;
-
-    if (item.second.is_dict()) {
-      const base::Value::Dict& split_values = item.second.GetDict();
-      for (const auto inner_item : split_values) {
-        const std::string* mac = inner_item.second.GetIfString();
-        bool is_string = !!mac;
+  for (const auto [changed_path, auth_data] : *changed_paths_and_macs) {
+    if (auth_data.is_dict()) {
+      const base::DictValue& split_values = auth_data.GetDict();
+      for (const auto [split_path, split_authenticator_value] : split_values) {
+        const std::string* split_authenticator =
+            split_authenticator_value.GetIfString();
+        bool is_string = !!split_authenticator;
         DCHECK(is_string);
 
-        external_validation_hash_store_contents->SetSplitMac(
-            changed_path, inner_item.first, *mac);
+        external_validation_hash_store_contents->SetSplitPrefAuthenticator(
+            changed_path, split_path, *split_authenticator);
       }
     } else {
-      DCHECK(item.second.is_string());
-      external_validation_hash_store_contents->SetMac(changed_path,
-                                                      item.second.GetString());
+      DCHECK(auth_data.is_string());
+      external_validation_hash_store_contents->SetAtomicPrefAuthenticator(
+          changed_path, auth_data.GetString());
     }
   }
 }
 
 PrefFilter::OnWriteCallbackPair PrefHashFilter::GetOnWriteSynchronousCallbacks(
-    base::Value::Dict& pref_store_contents) {
+    base::DictValue& pref_store_contents) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (changed_paths_.empty() || !external_validation_hash_store_pair_) {
     return std::make_pair(base::OnceClosure(),
                           base::OnceCallback<void(bool success)>());
   }
 
-  auto changed_paths_macs = std::make_unique<base::Value::Dict>();
+  auto changed_paths_macs = std::make_unique<base::DictValue>();
 
-  for (ChangedPathsMap::const_iterator it = changed_paths_.begin();
-       it != changed_paths_.end(); ++it) {
-    const std::string& changed_path = it->first;
-    const TrackedPreference* changed_preference = it->second;
-
+  for (const auto& [changed_path, changed_preference] : changed_paths_) {
     switch (changed_preference->GetType()) {
       case TrackedPreferenceType::ATOMIC: {
         const base::Value* new_value =
             pref_store_contents.FindByDottedPath(changed_path);
         changed_paths_macs->Set(
             changed_path,
-            external_validation_hash_store_pair_->first->ComputeMac(
+            external_validation_hash_store_pair_->first->ComputeHmac(
                 changed_path, new_value));
         break;
       }
       case TrackedPreferenceType::SPLIT: {
-        const base::Value::Dict* dict =
+        const base::DictValue* dict =
             pref_store_contents.FindDictByDottedPath(changed_path);
         changed_paths_macs->Set(
             changed_path,
-            external_validation_hash_store_pair_->first->ComputeSplitMacs(
+            external_validation_hash_store_pair_->first->ComputeSplitHmacs(
                 changed_path, dict));
         break;
       }
@@ -630,7 +612,7 @@ PrefFilter::OnWriteCallbackPair PrefHashFilter::GetOnWriteSynchronousCallbacks(
   // copies as it will be executed in sequence before the second callback,
   // which owns the pointers.
   HashStoreContents* raw_contents = hash_store_contents_copy.get();
-  base::Value::Dict* raw_changed_paths_macs = changed_paths_macs.get();
+  base::DictValue* raw_changed_paths_macs = changed_paths_macs.get();
 
   return std::make_pair(
       base::BindOnce(&ClearFromExternalStore, base::Unretained(raw_contents),
@@ -646,11 +628,11 @@ void PrefHashFilter::SetOnDeferredRevalidationCompleteForTesting(
 }
 
 void PrefHashFilter::MaybeRecordTrackedPreferenceResetCount(
-    const base::Value::Dict& pref_store_contents) {
+    const base::DictValue& pref_store_contents) {
   if (reset_metric_recorded_) {
     return;
   }
-  const base::Value::List* reset_list =
+  const base::ListValue* reset_list =
       pref_store_contents.FindList(user_prefs::kTrackedPreferencesReset);
   UMA_HISTOGRAM_COUNTS_100("Settings.TrackedPreferenceResets.Count",
                            reset_list ? reset_list->size() : 0);

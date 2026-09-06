@@ -4,7 +4,6 @@
 
 #include "chrome/browser/enterprise/connectors/analysis/analysis_service_settings.h"
 
-#include "base/containers/contains.h"
 #include "build/build_config.h"
 #include "components/enterprise/buildflags/buildflags.h"
 #include "components/enterprise/connectors/core/common.h"
@@ -42,68 +41,6 @@ AnalysisServiceSettings::AnalysisServiceSettings(
   ParseSourceDestinationPatternSettings(settings_dict.FindList(kKeyDisable),
                                         false);
 #endif
-
-#if BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
-  ParseVerificationSignatures(settings_value.GetDict());
-#endif
-}
-
-#if BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
-void AnalysisServiceSettings::ParseVerificationSignatures(
-    const base::Value::Dict& settings_dict) {
-#if BUILDFLAG(IS_WIN)
-  const char* verification_key = kKeyWindowsVerification;
-#elif BUILDFLAG(IS_MAC)
-  const char* verification_key = kKeyMacVerification;
-#elif BUILDFLAG(IS_LINUX)
-  const char* verification_key = kKeyLinuxVerification;
-#endif
-
-  const base::Value::List* signatures =
-      settings_dict.FindListByDottedPath(verification_key);
-  if (!signatures) {
-    return;
-  }
-
-  for (auto& v : *signatures) {
-    if (v.is_string()) {
-      verification_signatures_.push_back(v.GetString());
-    }
-  }
-}
-#endif
-
-std::optional<AnalysisSettings> AnalysisServiceSettings::GetAnalysisSettings(
-    const GURL& url,
-    DataRegion data_region) const {
-  auto settings =
-      AnalysisServiceSettingsBase::GetAnalysisSettings(url, data_region);
-  // If this is a cloud analysis (in which case the base class already
-  // initialized the cloud-specific settings), return the settings as is.
-  if (!settings.has_value() || is_cloud_analysis()) {
-    return settings;
-  }
-
-  settings->cloud_or_local_settings =
-      CloudOrLocalAnalysisSettings(GetLocalAnalysisSettings());
-
-  return settings;
-}
-
-LocalAnalysisSettings AnalysisServiceSettings::GetLocalAnalysisSettings()
-    const {
-  CHECK(is_local_analysis());
-
-  LocalAnalysisSettings local_settings;
-  local_settings.local_path = analysis_config_->local_path;
-  local_settings.user_specific = analysis_config_->user_specific;
-  local_settings.subject_names = analysis_config_->subject_names;
-  // We assume all support_tags structs have the same max file size.
-  local_settings.max_file_size =
-      analysis_config_->supported_tags[0].max_file_size;
-  local_settings.verification_signatures = verification_signatures_;
-
-  return local_settings;
 }
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -142,14 +79,14 @@ std::optional<AnalysisSettings> AnalysisServiceSettings::GetAnalysisSettings(
 }
 
 void AnalysisServiceSettings::ParseSourceDestinationPatternSettings(
-    const base::Value::List* pattern_settings_list,
+    const base::ListValue* pattern_settings_list,
     bool is_enabled_pattern) {
   if (!pattern_settings_list || pattern_settings_list->empty()) {
     return;
   }
 
   for (const base::Value& pattern_setting : *pattern_settings_list) {
-    const base::Value::Dict* pattern_dict = pattern_setting.GetIfDict();
+    const base::DictValue* pattern_dict = pattern_setting.GetIfDict();
     if (!pattern_dict) {
       continue;
     }
@@ -168,7 +105,7 @@ void AnalysisServiceSettings::ParseSourceDestinationPatternSettings(
 }
 
 void AnalysisServiceSettings::AddSourceDestinationSettings(
-    const base::Value::Dict& source_destination_settings_value,
+    const base::DictValue& source_destination_settings_value,
     bool enabled) {
   CHECK(analysis_config_);
   CHECK(source_destination_matcher_);
@@ -180,7 +117,7 @@ void AnalysisServiceSettings::AddSourceDestinationSettings(
 
   URLPatternSettings setting;
 
-  const base::Value::List* tags =
+  const base::ListValue* tags =
       source_destination_settings_value.FindList(kKeyTags);
   if (!tags) {
     return;
@@ -198,7 +135,7 @@ void AnalysisServiceSettings::AddSourceDestinationSettings(
 
   // Add the source destination rules to the source_destination_matcher and
   // store the condition set IDs.
-  const base::Value::List* source_destination_list =
+  const base::ListValue* source_destination_list =
       source_destination_settings_value.FindList(kKeySourceDestinationList);
   if (!source_destination_list) {
     return;

@@ -29,6 +29,7 @@
 #import "components/policy/core/common/configuration_policy_provider.h"
 #import "components/policy/core/common/policy_bundle.h"
 #import "components/policy/core/common/policy_loader_ios_constants.h"
+#import "components/policy/core/common/policy_logger.h"
 #import "components/policy/core/common/policy_map.h"
 #import "components/policy/core/common/policy_namespace.h"
 #import "components/policy/core/common/policy_types.h"
@@ -145,10 +146,19 @@ std::optional<base::Value> DeserializeValue(NSString* json_value) {
 }
 
 + (BOOL)isURLBlocked:(NSString*)URL {
+  return [self isURLBlocked:URL inIncognito:NO];
+}
+
++ (BOOL)isURLBlocked:(NSString*)URL inIncognito:(BOOL)incognito {
   GURL gurl = GURL(base::SysNSStringToUTF8(URL));
+  ProfileIOS* profile = incognito
+                            ? chrome_test_util::GetCurrentIncognitoProfile()
+                            : chrome_test_util::GetOriginalProfile();
+  if (!profile) {
+    return NO;
+  }
   PolicyBlocklistService* service =
-      PolicyBlocklistServiceFactory::GetForProfile(
-          chrome_test_util::GetOriginalProfile());
+      PolicyBlocklistServiceFactory::GetForProfile(profile);
   return service->GetURLBlocklistState(gurl) ==
          policy::URLBlocklist::URLBlocklistState::URL_IN_BLOCKLIST;
 }
@@ -256,6 +266,14 @@ std::optional<base::Value> DeserializeValue(NSString* json_value) {
       base::SysNSStringToUTF8(policyName), base::Value::Type::INTEGER);
 
   return value && value->GetInt() == expectedValue;
+}
+
++ (void)logErrorPolicy:(NSString*)message {
+  LOG_POLICY(ERROR, PLATFORM_POLICY) << base::SysNSStringToUTF8(message);
+}
+
++ (void)clearPolicyLogs {
+  policy::PolicyLogger::GetInstance()->ResetLoggerForTesting();
 }
 
 @end

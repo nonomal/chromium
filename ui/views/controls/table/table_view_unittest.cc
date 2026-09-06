@@ -13,6 +13,7 @@
 
 #include "base/feature_list.h"
 #include "base/i18n/rtl.h"
+#include "base/i18n/test/scoped_rtl_for_testing.h"
 #include "base/memory/raw_ptr.h"
 #include "base/scoped_observation.h"
 #include "base/strings/string_number_conversions.h"
@@ -28,6 +29,7 @@
 #include "ui/display/test/test_screen.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
+#include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/text_utils.h"
 #include "ui/views/accessibility/ax_virtual_view.h"
 #include "ui/views/accessibility/view_accessibility.h"
@@ -174,7 +176,7 @@ class TableViewTestHelper {
   }
 
   gfx::Transform GetHoverLayerTransform() const {
-    return table_->hover_layer_.transform();
+    return table_->hover_view_->layer()->transform();
   }
 
   void SetHover(gfx::Point view_coordinates) {
@@ -183,7 +185,13 @@ class TableViewTestHelper {
 
   void ClearHover() { table_->ClearHover(); }
 
-  gfx::Point GetScrollOffset() { return table_->scroll_offset_; }
+  gfx::Point GetScrollOffset() {
+    if (auto* scroll_view = ScrollView::GetScrollViewForContents(table_);
+        scroll_view) {
+      return gfx::ToFlooredPoint(scroll_view->CurrentOffset());
+    }
+    return gfx::Point();
+  }
 
   void ScrollTableTo(gfx::PointF offset) {
     ScrollView* scroll_view = ScrollView::GetScrollViewForContents(table_);
@@ -243,11 +251,11 @@ class TestTableModel2 : public ui::TableModel {
   void SetTooltip(const std::u16string& tooltip);
 
   // ui::TableModel:
-  size_t RowCount() override;
-  std::u16string GetText(size_t row, int column_id) override;
-  std::u16string GetTooltip(size_t row) override;
+  size_t RowCount() const override;
+  std::u16string GetText(size_t row, int column_id) const override;
+  std::u16string GetTooltip(size_t row) const override;
   void SetObserver(ui::TableModelObserver* observer) override;
-  int CompareValues(size_t row1, size_t row2, int column_id) override;
+  int CompareValues(size_t row1, size_t row2, int column_id) const override;
 
  private:
   raw_ptr<ui::TableModelObserver> observer_ = nullptr;
@@ -343,15 +351,15 @@ void TestTableModel2::SetTooltip(const std::u16string& tooltip) {
   tooltip_ = tooltip;
 }
 
-size_t TestTableModel2::RowCount() {
+size_t TestTableModel2::RowCount() const {
   return rows_.size();
 }
 
-std::u16string TestTableModel2::GetText(size_t row, int column_id) {
+std::u16string TestTableModel2::GetText(size_t row, int column_id) const {
   return base::NumberToString16(rows_[row][column_id]);
 }
 
-std::u16string TestTableModel2::GetTooltip(size_t row) {
+std::u16string TestTableModel2::GetTooltip(size_t row) const {
   return tooltip_ ? *tooltip_ : u"Tooltip" + base::NumberToString16(row);
 }
 
@@ -359,7 +367,9 @@ void TestTableModel2::SetObserver(ui::TableModelObserver* observer) {
   observer_ = observer;
 }
 
-int TestTableModel2::CompareValues(size_t row1, size_t row2, int column_id) {
+int TestTableModel2::CompareValues(size_t row1,
+                                   size_t row2,
+                                   int column_id) const {
   return rows_[row1][column_id] - rows_[row2][column_id];
 }
 
@@ -2126,8 +2136,9 @@ TEST_P(TableViewTest, KeyUpDownHorizontalScrollbarStability) {
     GTEST_SKIP() << "platform doesn't support table keyboard navigation";
   }
   EXPECT_FALSE(base::i18n::IsRTL());
+  std::optional<base::i18n::ScopedRTLForTesting> scoped_rtl;
   if (use_rtl()) {
-    base::i18n::SetRTLForTesting(true);
+    scoped_rtl.emplace(true);
     EXPECT_TRUE(base::i18n::IsRTL());
   }
   table_->RequestFocus();
@@ -2144,9 +2155,7 @@ TEST_P(TableViewTest, KeyUpDownHorizontalScrollbarStability) {
   PressKey(ui::VKEY_UP);
   EXPECT_EQ(1u, table_->ViewToModel(1));
   EXPECT_EQ(visible_bounds, table_->GetVisibleBounds());
-  if (use_rtl()) {
-    base::i18n::SetRTLForTesting(false);
-  }
+  scoped_rtl.reset();
   EXPECT_FALSE(base::i18n::IsRTL());
 }
 
@@ -2155,8 +2164,9 @@ TEST_P(TableViewTest, KeyUpDownHorizontalScrollbarStability) {
 // testing the RTL layout and false for testing the LTR layout
 TEST_P(TableViewTest, ClickRowHorizontalScrollbarStability) {
   EXPECT_FALSE(base::i18n::IsRTL());
+  std::optional<base::i18n::ScopedRTLForTesting> scoped_rtl;
   if (use_rtl()) {
-    base::i18n::SetRTLForTesting(true);
+    scoped_rtl.emplace(true);
     EXPECT_TRUE(base::i18n::IsRTL());
   }
   table_->RequestFocus();
@@ -2173,9 +2183,7 @@ TEST_P(TableViewTest, ClickRowHorizontalScrollbarStability) {
   ClickOnRow(3, 0);
   EXPECT_EQ(3u, table_->ViewToModel(3));
   EXPECT_EQ(visible_bounds, table_->GetVisibleBounds());
-  if (use_rtl()) {
-    base::i18n::SetRTLForTesting(false);
-  }
+  scoped_rtl.reset();
   EXPECT_FALSE(base::i18n::IsRTL());
 }
 
@@ -2407,6 +2415,36 @@ TEST_P(TableViewTest, MoveRowsWithMultipleSelectionAndSort) {
   VerifyTableViewAndAXOrder(kViewOrder);
 }
 
+// Regression test for crbug.com/472547108. The model size decreases but the
+// selection model was not updated, causing an out-of-bounds CHECK during
+// layout.
+TEST_P(TableViewTest, OnItemsChangedWithSmallerModel) {
+  // Enable sorting to ensure ModelToView checks bounds.
+  table_->ToggleSortOrder(0);
+  ASSERT_TRUE(table_->GetIsSorted());
+
+  // Select the last row.
+  table_->Select(3);
+  EXPECT_EQ(3u, table_->GetFirstSelectedRow());
+
+  // Shrink the model without notifying the table yet.
+  model_->SetObserver(nullptr);
+  model_->RemoveRows(2, 2);  // Removes row 2 and 3. Size is now 2.
+  model_->SetObserver(table_);
+  EXPECT_EQ(2u, model_->RowCount());
+
+  // Notify the table via OnItemsChanged.
+  // This simulates the behavior of TaskManagerTableModel before the fix.
+  table_->OnItemsChanged(0, 2);
+
+  // Triggering layout should not crash.
+  table_->DeprecatedLayoutImmediately();
+
+  // Verify that the selection is valid to avoid CHECK failure.
+  // Explicitly calling GetActiveCellBounds to trigger the potential CHECK path.
+  helper_->GetActiveCellBounds();
+}
+
 // Verifies we don't crash after removing the selected row when there is
 // sorting and the anchor/active index also match the selected row.
 TEST_P(TableViewTest, FocusAfterRemovingAnchor) {
@@ -2420,6 +2458,41 @@ TEST_P(TableViewTest, FocusAfterRemovingAnchor) {
   helper_->SetSelectionModel(new_selection);
   model_->RemoveRow(0);
   table_->RequestFocus();
+}
+
+TEST_P(TableViewTest, SelectOnFocus) {
+  // Set select_on_focus to true.
+  table_->SetSelectOnFocus(true);
+
+  // Initially no selection.
+  EXPECT_EQ("active=<none> anchor=<none> selection=", SelectionStateAsString());
+
+  // Focus the table.
+  table_->RequestFocus();
+
+  // The first row should be automatically selected.
+  EXPECT_EQ("active=0 anchor=0 selection=0", SelectionStateAsString());
+
+  // Clear focus, then set selection to row 1.
+  table_->GetFocusManager()->ClearFocus();
+  table_->Select(1);
+  EXPECT_EQ("active=1 anchor=1 selection=1", SelectionStateAsString());
+
+  // Re-focus the table. It should NOT change the selection because there
+  // already was a selection.
+  table_->RequestFocus();
+  EXPECT_EQ("active=1 anchor=1 selection=1", SelectionStateAsString());
+
+  // Clear focus, clear selection, and set select_on_focus to false.
+  table_->GetFocusManager()->ClearFocus();
+  table_->Select(std::nullopt);
+  table_->SetSelectOnFocus(false);
+  EXPECT_EQ("active=<none> anchor=<none> selection=", SelectionStateAsString());
+
+  // Focus the table again. It should NOT select the first row because
+  // select_on_focus is false.
+  table_->RequestFocus();
+  EXPECT_EQ("active=<none> anchor=<none> selection=", SelectionStateAsString());
 }
 
 // OnItemsRemoved() should ensure view-model mappings are updated in response to
@@ -2458,10 +2531,10 @@ TEST_P(TableViewTest, TableHeaderRowAccessibleViewFocusable) {
   RunPendingMessages();
 
   // If no table body row has selection the TableView itself is focused and
-  // there is no focused virtual view.
+  // there is no active descendant.
   EXPECT_TRUE(table_->HasFocus());
   EXPECT_FALSE(table_->header_row_is_active());
-  EXPECT_EQ(nullptr, table_->GetViewAccessibility().FocusedVirtualChild());
+  EXPECT_EQ(nullptr, table_->GetViewAccessibility().GetActiveDescendantView());
 
   // Hitting the up arrow key should give the header focus and make it active.
   PressKey(ui::VKEY_UP);
@@ -2469,7 +2542,7 @@ TEST_P(TableViewTest, TableHeaderRowAccessibleViewFocusable) {
   EXPECT_TRUE(table_->HasFocus());
   EXPECT_TRUE(table_->header_row_is_active());
   EXPECT_EQ(helper_->GetVirtualAccessibilityHeaderRow(),
-            table_->GetViewAccessibility().FocusedVirtualChild());
+            table_->GetViewAccessibility().GetActiveDescendantView());
 
   // Hitting the down arrow key should move focus back into the body.
   PressKey(ui::VKEY_DOWN);
@@ -2477,7 +2550,7 @@ TEST_P(TableViewTest, TableHeaderRowAccessibleViewFocusable) {
   EXPECT_TRUE(table_->HasFocus());
   EXPECT_FALSE(table_->header_row_is_active());
   EXPECT_NE(helper_->GetVirtualAccessibilityHeaderRow(),
-            table_->GetViewAccessibility().FocusedVirtualChild());
+            table_->GetViewAccessibility().GetActiveDescendantView());
 }
 
 // Ensure that the TableView's header columns are keyboard accessible.
@@ -2498,7 +2571,7 @@ TEST_P(TableViewTest, TableHeaderColumnAccessibleViewsFocusable) {
   EXPECT_TRUE(table_->HasFocus());
   EXPECT_TRUE(table_->header_row_is_active());
   EXPECT_EQ(helper_->GetVirtualAccessibilityHeaderRow(),
-            view_accessibility.FocusedVirtualChild());
+            view_accessibility.GetActiveDescendantView());
 
   // Navigating with arrow keys should move focus between TableView header
   // columns.
@@ -2506,19 +2579,19 @@ TEST_P(TableViewTest, TableHeaderColumnAccessibleViewsFocusable) {
   RunPendingMessages();
   ASSERT_EQ(0u, helper_->GetActiveVisibleColumnIndex());
   EXPECT_EQ(helper_->GetVirtualAccessibilityHeaderCell(0),
-            view_accessibility.FocusedVirtualChild());
+            view_accessibility.GetActiveDescendantView());
 
   PressKey(ui::VKEY_RIGHT);
   RunPendingMessages();
   ASSERT_EQ(1u, helper_->GetActiveVisibleColumnIndex());
   EXPECT_EQ(helper_->GetVirtualAccessibilityHeaderCell(1),
-            view_accessibility.FocusedVirtualChild());
+            view_accessibility.GetActiveDescendantView());
 
   PressKey(ui::VKEY_LEFT);
   RunPendingMessages();
   ASSERT_EQ(0u, helper_->GetActiveVisibleColumnIndex());
   EXPECT_EQ(helper_->GetVirtualAccessibilityHeaderCell(0),
-            view_accessibility.FocusedVirtualChild());
+            view_accessibility.GetActiveDescendantView());
 }
 
 class TableViewFocusTest : public TableViewTest {
@@ -2627,7 +2700,7 @@ class TestTableModel3 : public TestTableModel2 {
 
   TestTableModel3(const TestTableModel3&) = delete;
   TestTableModel3& operator=(const TestTableModel3&) = delete;
-  ui::ImageModel GetIcon(size_t row) override {
+  ui::ImageModel GetIcon(size_t row) const override {
     return ui::ImageModel::FromImageSkia(
         gfx::ImageSkia::CreateFrom1xBitmap(icon_));
   }
@@ -2920,7 +2993,7 @@ TEST_F(TableViewMouseHoverTest, TestScrollingHoverInteraction) {
   helper_->ScrollTableTo(gfx::PointF(0, table_->GetRowHeight()));
   EXPECT_SCROLL_OFFSET(0, table_->GetRowHeight());
   EXPECT_HOVERED_ROWS(GroupRange(1, 1));
-  EXPECT_HOVERED_TRANSFORM(/*x=*/0, /*y=*/0,
+  EXPECT_HOVERED_TRANSFORM(/*x=*/0, /*y=*/table_->GetRowHeight(),
                            /*width=*/table_->GetLocalBounds().width(),
                            /*height=*/table_->GetRowHeight());
 }
@@ -3071,7 +3144,7 @@ TEST_F(TableViewPaintIconBoundsTest, TestPaintIconBoundsForNormally) {
     EXPECT_EQ(src_image_bounds, gfx::Rect(image.size()));
   }
   {
-    base::i18n::SetRTLForTesting(true);
+    base::i18n::ScopedRTLForTesting scoped_rtl(true);
     EXPECT_TRUE(base::i18n::IsRTL());
     gfx::Rect dest_image_bounds =
         helper_->GetPaintIconDestBounds(cell_bounds, text_bounds.x());
@@ -3089,7 +3162,6 @@ TEST_F(TableViewPaintIconBoundsTest, TestPaintIconBoundsForNormally) {
     gfx::Rect src_image_bounds =
         helper_->GetPaintIconSrcBounds(image.size(), dest_image_bounds.width());
     EXPECT_EQ(src_image_bounds, gfx::Rect(image.size()));
-    base::i18n::SetRTLForTesting(false);
   }
 }
 
@@ -3145,7 +3217,7 @@ TEST_F(TableViewPaintIconBoundsTest, TestPaintIconBoundsForClipped) {
   }
   {
     // When the layout is RTL.
-    base::i18n::SetRTLForTesting(true);
+    base::i18n::ScopedRTLForTesting scoped_rtl(true);
     EXPECT_TRUE(base::i18n::IsRTL());
     gfx::Rect dest_image_bounds =
         helper_->GetPaintIconDestBounds(cell_bounds, text_bounds.x());
@@ -3170,7 +3242,6 @@ TEST_F(TableViewPaintIconBoundsTest, TestPaintIconBoundsForClipped) {
     EXPECT_EQ(src_image_bounds,
               gfx::Rect(image.width() - src_image_bounds.width(), 0,
                         image.width() / 2, image.height()));
-    base::i18n::SetRTLForTesting(false);
   }
 }
 
@@ -3204,12 +3275,11 @@ TEST_F(TableViewPaintIconBoundsTest, TestPaintIconBoundsNotNeedDisplay) {
     EXPECT_TRUE(dest_image_bounds.IsEmpty());
   }
   {
-    base::i18n::SetRTLForTesting(true);
+    base::i18n::ScopedRTLForTesting scoped_rtl(true);
     EXPECT_TRUE(base::i18n::IsRTL());
     gfx::Rect dest_image_bounds =
         helper_->GetPaintIconDestBounds(cell_bounds, text_bounds.x());
     EXPECT_TRUE(dest_image_bounds.IsEmpty());
-    base::i18n::SetRTLForTesting(false);
   }
 }
 }  // namespace views

@@ -17,13 +17,12 @@
 #include "base/power_monitor/power_monitor.h"
 #include "base/power_monitor/power_monitor_device_source.h"
 #include "base/run_loop.h"
-#include "base/task/sequence_manager/sequence_manager.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "build/build_config.h"
 #include "content/child/child_process.h"
-#include "content/common/process_visibility_tracker.h"
+#include "content/common/process_priority_tracker.h"
 #include "content/gpu/browser_exposed_gpu_interfaces.h"
 #include "content/gpu/gpu_service_factory.h"
 #include "content/public/common/content_client.h"
@@ -44,6 +43,7 @@
 #include "services/metrics/public/mojom/ukm_interface.mojom.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/viz/privileged/mojom/gl/gpu_service.mojom.h"
+#include "services/webnn/public/mojom/webnn_browser_host.mojom.h"
 #include "third_party/skia/include/core/SkGraphics.h"
 
 #if BUILDFLAG(IS_ANDROID)
@@ -109,6 +109,17 @@ viz::VizMainImpl::ExternalDependencies CreateVizMainDependencies() {
   mojo::Remote<ukm::mojom::UkmRecorderFactory> factory;
   ChildThread::Get()->BindHostReceiver(factory.BindNewPipeAndPassReceiver());
   deps.ukm_recorder = ukm::MojoUkmRecorder::Create(*factory);
+
+  // Provide a callback that binds the interface the WebNN service uses to
+  // broker operations through the browser process (see
+  // webnn::mojom::WebNNBrowserHost). It is invoked on demand when WebNN is
+  // first used, rather than at process startup, so the browser only creates a
+  // content::WebNNBrowserHostImpl (in GpuProcessHost::BindHostReceiver) for GPU
+  // processes that actually use WebNN.
+  deps.bind_webnn_browser_host = base::BindOnce(
+      [](mojo::PendingReceiver<webnn::mojom::WebNNBrowserHost> receiver) {
+        ChildThread::Get()->BindHostReceiver(std::move(receiver));
+      });
   return deps;
 }
 
@@ -142,9 +153,7 @@ GpuChildThread::GpuChildThread(base::RepeatingClosure quit_closure,
 
 GpuChildThread::~GpuChildThread() = default;
 
-void GpuChildThread::Init(
-    const base::TimeTicks& process_start_time,
-    base::sequence_manager::SequenceManager* sequence_manager) {
+void GpuChildThread::Init(const base::TimeTicks& process_start_time) {
   if (!in_process_gpu())
     mojo::SetDefaultProcessErrorHandler(base::BindRepeating(&HandleBadMessage));
 
@@ -171,15 +180,6 @@ void GpuChildThread::Init(
         sk_make_sp<font_service::FontLoader>(std::move(font_service)));
   }
 #endif
-
-  memory_pressure_listener_registration_ =
-      std::make_unique<base::AsyncMemoryPressureListenerRegistration>(
-          FROM_HERE, base::MemoryPressureListenerTag::kGpuChildThread, this);
-  if (sequence_manager &&
-      base::FeatureList::IsEnabled(
-          features::kBoostThreadsPriorityDuringInputScenario)) {
-    sequence_manager->AddTaskObserver(this);
-  }
 }
 
 bool GpuChildThread::in_process_gpu() const {
@@ -201,10 +201,10 @@ void GpuChildThread::OnGpuServiceConnection(viz::GpuServiceImpl* gpu_service) {
 #endif
 
   if (!IsInBrowserProcess()) {
-    gpu_service->SetVisibilityChangedCallback(
-        base::BindRepeating([](bool visible) {
-          ProcessVisibilityTracker::GetInstance()->OnProcessVisibilityChanged(
-              visible);
+    gpu_service->SetPriorityChangedCallback(
+        base::BindRepeating([](base::Process::Priority priority) {
+          ProcessPriorityTracker::GetInstance()->OnProcessPriorityChanged(
+              priority);
         }));
   }
 
@@ -242,34 +242,16 @@ void GpuChildThread::PostCompositorThreadCreated(
     gpu_client->PostCompositorThreadCreated(task_runner);
 }
 
+void GpuChildThread::PostDisplayCompositorGpuThreadCreated(
+    base::SingleThreadTaskRunner* task_runner) {
+  auto* gpu_client = GetContentClient()->gpu();
+  if (gpu_client) {
+    gpu_client->PostDisplayCompositorGpuThreadCreated(task_runner);
+  }
+}
+
 void GpuChildThread::QuitMainMessageLoop() {
   quit_closure_.Run();
-}
-
-void GpuChildThread::WillProcessTask(const base::PendingTask& pending_task,
-                                     bool was_blocked_or_low_priority) {
-  performance_scenarios::InputScenario input_scenario =
-      performance_scenarios::GetInputScenario(
-          performance_scenarios::ScenarioScope::kGlobal)
-          ->load(std::memory_order_relaxed);
-
-  // Post a task to the IO thread if the input scenario has changed. This is
-  // used to make sure the IO thread checks the scenarios in time.
-  if (input_scenario != last_input_scenario_) {
-    last_input_scenario_ = input_scenario;
-    ChildProcess::current()->io_task_runner()->PostTask(FROM_HERE,
-                                                        base::DoNothing());
-  }
-}
-
-void GpuChildThread::OnMemoryPressure(base::MemoryPressureLevel level) {
-  if (level != base::MEMORY_PRESSURE_LEVEL_CRITICAL) {
-    return;
-  }
-
-  if (viz_main_.discardable_shared_memory_manager())
-    viz_main_.discardable_shared_memory_manager()->ReleaseFreeMemory();
-  SkGraphics::PurgeAllCaches();
 }
 
 void GpuChildThread::QuitSafelyHelper(

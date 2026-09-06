@@ -17,14 +17,13 @@
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
-class Profile;
-
 namespace network {
 class SimpleURLLoader;
 class SharedURLLoaderFactory;
 }  // namespace network
 
 namespace signin {
+class IdentityManager;
 class PrimaryAccountAccessTokenFetcher;
 }  // namespace signin
 
@@ -65,9 +64,11 @@ class PasswordSyncTokenFetcher final {
     virtual void OnApiCallFailed(ErrorType error_type) = 0;
   };
 
+  // `identity_manager` may be nullptr for the use of verification.
+  // If it is non-null, it must outlive this.
   PasswordSyncTokenFetcher(
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-      Profile* profile,
+      signin::IdentityManager* identity_manager,
       Consumer* consumer);
   ~PasswordSyncTokenFetcher();
 
@@ -84,10 +85,10 @@ class PasswordSyncTokenFetcher final {
                                   signin::AccessTokenInfo token_info);
   void FetchSyncToken(const std::string& access_token);
   void OnSimpleLoaderComplete(std::optional<std::string> response_body);
-  void ProcessValidTokenResponse(base::Value::Dict json_response);
+  void ProcessValidTokenResponse(base::DictValue json_response);
 
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
-  const raw_ptr<Profile> profile_;
+  const raw_ptr<signin::IdentityManager> identity_manager_;
   // `consumer_` to call back when this request completes.
   const raw_ptr<Consumer> consumer_;
 

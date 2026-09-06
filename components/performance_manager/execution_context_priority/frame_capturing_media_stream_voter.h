@@ -11,8 +11,8 @@
 
 namespace performance_manager::execution_context_priority {
 
-// This voter casts a TaskPriority::USER_BLOCKING vote to all frames that are
-// capturing a media stream (audio or video), and a TaskPriority::LOWEST vote
+// This voter casts a ProcessPriority::USER_BLOCKING vote to all frames that are
+// capturing a media stream (audio or video), and a ProcessPriority::LOWEST vote
 // otherwise.
 // Note: This FrameNodeObserver can affect the initial priority of a frame and
 // thus uses `OnBeforeFrameNodeAdded`.
@@ -46,6 +46,8 @@ class FrameCapturingMediaStreamVoter : public PriorityVoter,
   VoterId voter_id() const { return voting_channel_.voter_id(); }
 
  private:
+  void SetVoteForFrame(const FrameNode* frame_node);
+
   VotingChannel voting_channel_;
 };
 

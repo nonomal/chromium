@@ -9,11 +9,9 @@
 
 #include "base/test/run_until.h"
 #include "base/test/test_future.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/web_applications/test/isolated_web_app_test_utils.h"
 #include "chrome/browser/ui/web_applications/test/web_app_browsertest_util.h"
 #include "chrome/browser/ui/web_applications/web_app_browsertest_base.h"
-#include "chrome/browser/web_applications/isolated_web_apps/runtime_data/chrome_iwa_runtime_data_provider.h"
 #include "chrome/browser/web_applications/isolated_web_apps/test/fake_iwa_runtime_data_provider_mixin.h"
 #include "chrome/browser/web_applications/isolated_web_apps/test/isolated_web_app_builder.h"
 #include "chrome/browser/web_applications/isolated_web_apps/test/isolated_web_app_test_update_server.h"
@@ -24,6 +22,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/prefs/pref_service.h"
+#include "components/webapps/isolated_web_apps/public/iwa_runtime_data_provider.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -59,10 +58,7 @@ bool CheckAppSizesNotNull(WebAppProvider& provider,
 }
 }  // namespace
 
-class ComputeAppSizeCommandForWebAppBrowserTest : public WebAppBrowserTestBase {
- private:
-  base::test::ScopedFeatureList feature_list_{features::kWebAppUsePrimaryIcon};
-};
+using ComputeAppSizeCommandForWebAppBrowserTest = WebAppBrowserTestBase;
 
 IN_PROC_BROWSER_TEST_F(ComputeAppSizeCommandForWebAppBrowserTest,
                        RetrieveWebAppSize) {
@@ -100,18 +96,13 @@ class ComputeAppSizeCommandForIsolatedWebAppBrowserTest
       const ComputeAppSizeCommandForIsolatedWebAppBrowserTest&) = delete;
 
  protected:
-  void SetIwaForceInstallPolicy(base::Value::List update_manifest_entries) {
+  void SetIwaForceInstallPolicy(base::ListValue update_manifest_entries) {
     profile()->GetPrefs()->SetList(prefs::kIsolatedWebAppInstallForceList,
                                    std::move(update_manifest_entries));
   }
 
   IsolatedWebAppTestUpdateServer iwa_test_update_server_;
   FakeIwaRuntimeDataProviderMixin data_provider_{&mixin_host_};
-
-#if !BUILDFLAG(IS_CHROMEOS)
- private:
-  base::test::ScopedFeatureList feature_list_{features::kWebAppUsePrimaryIcon};
-#endif  // !BUILDFLAG(IS_CHROMEOS)
 };
 
 IN_PROC_BROWSER_TEST_F(ComputeAppSizeCommandForIsolatedWebAppBrowserTest,
@@ -124,7 +115,7 @@ IN_PROC_BROWSER_TEST_F(ComputeAppSizeCommandForIsolatedWebAppBrowserTest,
           .app_id();
 
   WebAppTestInstallObserver install_observer(profile());
-  SetIwaForceInstallPolicy(base::Value::List().Append(
+  SetIwaForceInstallPolicy(base::ListValue().Append(
       iwa_test_update_server_.CreateForceInstallPolicyEntry(kWebBundleId1)));
   ASSERT_EQ(install_observer.BeginListeningAndWait({app_id}), app_id);
 

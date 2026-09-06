@@ -6,10 +6,10 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <utility>
 
 #include "ash/constants/ash_features.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/files/file_enumerator.h"
 #include "base/functional/bind.h"
@@ -22,7 +22,6 @@
 #include "base/task/thread_pool.h"
 #include "chrome/browser/ash/os_feedback/chrome_os_feedback_delegate.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
-#include "chrome/common/chrome_switches.h"
 #include "chromeos/ash/components/cryptohome/cryptohome_parameters.h"
 #include "chromeos/ash/components/dbus/debug_daemon/debug_daemon_client.h"
 #include "components/feedback/feedback_util.h"
@@ -245,7 +244,7 @@ void DebugDaemonLogSource::OnGetLogs(const base::TimeTicks get_start_time,
   // debug info as we can even if we failed partway through parsing, and if we
   // couldn't fetch any of it, none of the fields will even appear.
   for (const auto& log : logs) {
-    if (base::Contains(kExcludeList, log.first)) {
+    if (std::ranges::contains(kExcludeList, log.first)) {
       continue;
     }
     response_->insert(log);

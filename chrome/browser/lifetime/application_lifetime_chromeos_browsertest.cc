@@ -10,12 +10,13 @@
 #include "base/run_loop.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime_chromeos.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/ash/components/dbus/session_manager/fake_session_manager_client.h"
 #include "chromeos/ash/components/dbus/update_engine/fake_update_engine_client.h"
 #include "chromeos/ash/components/dbus/update_engine/update_engine_client.h"
+#include "chromeos/ash/components/login/session/session_termination_manager.h"
 #include "chromeos/dbus/power/fake_power_manager_client.h"
 #include "components/keep_alive_registry/keep_alive_registry.h"
 #include "components/prefs/pref_service.h"
@@ -88,7 +89,8 @@ IN_PROC_BROWSER_TEST_F(ApplicationLifetimeTest,
   AttemptRestart();
 
   // Session Manager is not going to stop session.
-  EXPECT_FALSE(IsSendingStopRequestToSessionManager());
+  EXPECT_FALSE(
+      ash::SessionTerminationManager::IsSendingStopRequestToSessionManager());
   auto* fake_session_manager_client = ash::FakeSessionManagerClient::Get();
   EXPECT_FALSE(fake_session_manager_client->session_stopped());
 
@@ -109,7 +111,8 @@ IN_PROC_BROWSER_TEST_F(ApplicationLifetimeTest,
   AttemptRestart();
 
   // Session Manager is not going to stop session.
-  EXPECT_FALSE(IsSendingStopRequestToSessionManager());
+  EXPECT_FALSE(
+      ash::SessionTerminationManager::IsSendingStopRequestToSessionManager());
   auto* fake_session_manager_client = ash::FakeSessionManagerClient::Get();
   EXPECT_FALSE(fake_session_manager_client->session_stopped());
 
@@ -130,7 +133,8 @@ IN_PROC_BROWSER_TEST_F(ApplicationLifetimeTest, AttemptRelaunchRelaunchesOs) {
   AttemptRelaunch();
 
   // Session Manager is not going to stop session.
-  EXPECT_FALSE(IsSendingStopRequestToSessionManager());
+  EXPECT_FALSE(
+      ash::SessionTerminationManager::IsSendingStopRequestToSessionManager());
   auto* fake_session_manager_client = ash::FakeSessionManagerClient::Get();
   EXPECT_FALSE(fake_session_manager_client->session_stopped());
 
@@ -149,7 +153,8 @@ IN_PROC_BROWSER_TEST_F(ApplicationLifetimeTest,
   AttemptExit();
 
   // Session Manager has received stop session request.
-  EXPECT_TRUE(IsSendingStopRequestToSessionManager());
+  EXPECT_TRUE(
+      ash::SessionTerminationManager::IsSendingStopRequestToSessionManager());
   auto* fake_session_manager_client = ash::FakeSessionManagerClient::Get();
   EXPECT_TRUE(fake_session_manager_client->session_stopped());
 

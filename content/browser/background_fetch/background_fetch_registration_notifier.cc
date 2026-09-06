@@ -7,7 +7,6 @@
 #include <map>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "content/common/background_fetch/background_fetch_types.h"
 #include "content/public/common/content_switches.h"
@@ -65,7 +64,7 @@ void BackgroundFetchRegistrationNotifier::AddObservedUrl(
     const std::string& unique_id,
     const GURL& url) {
   // Ensure we have an observer for this unique_id.
-  if (!base::Contains(observers_, unique_id)) {
+  if (!observers_.contains(unique_id)) {
     return;
   }
 
@@ -97,7 +96,7 @@ void BackgroundFetchRegistrationNotifier::NotifyRequestCompleted(
 void BackgroundFetchRegistrationNotifier::OnConnectionError(
     const std::string& unique_id,
     blink::mojom::BackgroundFetchRegistrationObserver* observer) {
-  DCHECK_GE(observers_.count(unique_id), 1u);
+  CHECK_GE(observers_.count(unique_id), 1u, base::NotFatalUntil::M158);
   std::erase_if(observers_,
                 [observer](const auto& unique_id_observer_ptr_pair) {
                   return unique_id_observer_ptr_pair.second.get() == observer;

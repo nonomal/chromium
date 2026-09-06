@@ -12,7 +12,6 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/buildflags/buildflags.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -25,6 +24,10 @@
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 namespace {
+
+constexpr int kMaxDeviceStatusTrayIcons = 40;
+constexpr int IDC_DEVICE_SYSTEM_TRAY_ICON_LAST =
+    IDC_DEVICE_SYSTEM_TRAY_ICON_FIRST + kMaxDeviceStatusTrayIcons - 1;
 
 // Returns profile username.
 std::u16string GetProfileUserName(Profile* profile) {
@@ -83,7 +86,8 @@ void DeviceStatusIconRenderer::AddProfile(Profile* profile) {
   if (device_system_tray_icon_->profiles().size() == 1) {
     auto* profile_manager = g_browser_process->profile_manager();
     CHECK(profile_manager);
-    profile_manager->GetProfileAttributesStorage().AddObserver(this);
+    profile_attributes_storage_observation_.Observe(
+        &profile_manager->GetProfileAttributesStorage());
   }
   RefreshIcon();
 }
@@ -91,9 +95,7 @@ void DeviceStatusIconRenderer::AddProfile(Profile* profile) {
 void DeviceStatusIconRenderer::RemoveProfile(Profile* profile) {
   RefreshIcon();
   if (device_system_tray_icon_->profiles().empty()) {
-    auto* profile_manager = g_browser_process->profile_manager();
-    CHECK(profile_manager);
-    profile_manager->GetProfileAttributesStorage().RemoveObserver(this);
+    profile_attributes_storage_observation_.Reset();
   }
 }
 
@@ -158,8 +160,8 @@ void DeviceStatusIconRenderer::RefreshIcon() {
   // |---------------Separator----------------------|
   // |ProfileN section                              |
   auto menu = std::make_unique<StatusIconMenuModel>(this);
-  int total_connection_count = 0;
-  int total_origin_count = 0;
+  size_t total_connection_count = 0;
+  size_t total_origin_count = 0;
   // Title will be updated after looping through profiles below.
   menu->AddTitle(u"");
   AddItem(menu.get(), GetAboutDeviceLabel(),
@@ -220,7 +222,6 @@ void DeviceStatusIconRenderer::AddItem(StatusIconMenuModel* menu,
   if (index > IDC_DEVICE_SYSTEM_TRAY_ICON_LAST) {
     // This case should be fairly rare, but if we have more items than
     // pre-defined command ids, we don't put those in the status icon menu.
-    // TODO(crbug.com/40264386): Add a metric to capture this.
     return;
   }
   menu->AddItem(index, label);

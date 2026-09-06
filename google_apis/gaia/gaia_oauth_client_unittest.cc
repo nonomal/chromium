@@ -14,11 +14,9 @@
 #include "base/json/json_reader.h"
 #include "base/memory/raw_ptr.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/time/tick_clock.h"
 #include "base/values.h"
-#include "google_apis/gaia/gaia_features.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
@@ -206,11 +204,10 @@ class MockGaiaOAuthClientDelegate : public gaia::GaiaOAuthClient::Delegate {
                void(const std::string& access_token, int expires_in_seconds));
   MOCK_METHOD1(OnGetUserEmailResponse, void(const std::string& user_email));
   MOCK_METHOD1(OnGetUserIdResponse, void(const std::string& user_id));
-  MOCK_METHOD1(OnGetUserInfoResponse, void(const base::Value::Dict& user_info));
-  MOCK_METHOD1(OnGetTokenInfoResponse,
-               void(const base::Value::Dict& token_info));
+  MOCK_METHOD1(OnGetUserInfoResponse, void(const base::DictValue& user_info));
+  MOCK_METHOD1(OnGetTokenInfoResponse, void(const base::DictValue& token_info));
   MOCK_METHOD1(OnGetAccountCapabilitiesResponse,
-               void(const base::Value::Dict& account_capabilities));
+               void(const base::DictValue& account_capabilities));
   MOCK_METHOD0(OnOAuthError, void());
   MOCK_METHOD1(OnNetworkError, void(int response_code));
 };
@@ -246,17 +243,7 @@ class GaiaOAuthClientTest : public testing::Test {
 };
 
 class GaiaOAuthClientGetAccountCapabilitiesTest
-    : public GaiaOAuthClientTest,
-      public testing::WithParamInterface<bool> {
- public:
-  GaiaOAuthClientGetAccountCapabilitiesTest() {
-    feature_list_.InitWithFeatureState(
-        gaia::features::kGetAccountCapabilitiesUsesGetAllVisibleUrl,
-        IsGetAllVisibleUrlEnabled());
-  }
-
-  bool IsGetAllVisibleUrlEnabled() const { return GetParam(); }
-
+    : public GaiaOAuthClientTest {
  protected:
   void TestAccountCapabilitiesUploadData(
       base::span<const std::string_view> capabilities_names,
@@ -270,9 +257,6 @@ class GaiaOAuthClientGetAccountCapabilitiesTest
 
     EXPECT_EQ(injector.GetUploadData(), expected_body);
   }
-
- private:
-  base::test::ScopedFeatureList feature_list_;
 };
 
 TEST_F(GaiaOAuthClientTest, NetworkFailure) {
@@ -451,11 +435,11 @@ TEST_F(GaiaOAuthClientTest, GetUserId) {
 }
 
 TEST_F(GaiaOAuthClientTest, GetUserInfo) {
-  base::Value::Dict captured_result;
+  base::DictValue captured_result;
 
   MockGaiaOAuthClientDelegate delegate;
   EXPECT_CALL(delegate, OnGetUserInfoResponse(_))
-      .WillOnce([&](const base::Value::Dict& result) {
+      .WillOnce([&](const base::DictValue& result) {
         captured_result = result.Clone();
       });
 
@@ -474,11 +458,11 @@ TEST_F(GaiaOAuthClientTest, GetUserInfo) {
 }
 
 TEST_F(GaiaOAuthClientTest, GetTokenInfo) {
-  base::Value::Dict captured_result;
+  base::DictValue captured_result;
 
   MockGaiaOAuthClientDelegate delegate;
   EXPECT_CALL(delegate, OnGetTokenInfoResponse(_))
-      .WillOnce([&](const base::Value::Dict& result) {
+      .WillOnce([&](const base::DictValue& result) {
         captured_result = result.Clone();
       });
 
@@ -495,11 +479,11 @@ TEST_F(GaiaOAuthClientTest, GetTokenInfo) {
 }
 
 TEST_F(GaiaOAuthClientTest, GetTokenHandleInfo) {
-  base::Value::Dict captured_result;
+  base::DictValue captured_result;
 
   MockGaiaOAuthClientDelegate delegate;
   EXPECT_CALL(delegate, OnGetTokenInfoResponse(_))
-      .WillOnce([&](const base::Value::Dict& result) {
+      .WillOnce([&](const base::DictValue& result) {
         captured_result = result.Clone();
       });
 
@@ -515,12 +499,12 @@ TEST_F(GaiaOAuthClientTest, GetTokenHandleInfo) {
   ASSERT_EQ("1234567890.apps.googleusercontent.com", *audience);
 }
 
-TEST_P(GaiaOAuthClientGetAccountCapabilitiesTest, GetAccountCapabilities) {
-  base::Value::Dict captured_result;
+TEST_F(GaiaOAuthClientGetAccountCapabilitiesTest, GetAccountCapabilities) {
+  base::DictValue captured_result;
 
   MockGaiaOAuthClientDelegate delegate;
   EXPECT_CALL(delegate, OnGetAccountCapabilitiesResponse(_))
-      .WillOnce([&](const base::Value::Dict& result) {
+      .WillOnce([&](const base::DictValue& result) {
         captured_result = result.Clone();
       });
 
@@ -533,31 +517,21 @@ TEST_P(GaiaOAuthClientGetAccountCapabilitiesTest, GetAccountCapabilities) {
                               {"capability1", "capability2", "capability3"}, 1,
                               &delegate);
 
-  GURL expected_url =
-      IsGetAllVisibleUrlEnabled()
-          ? GaiaUrls::GetInstance()->account_capabilities_get_all_visible_url()
-          : GaiaUrls::GetInstance()->account_capabilities_batch_get_url();
   EXPECT_EQ(url_loader_factory_.pending_requests()->front().request.url,
-            expected_url);
+            GaiaUrls::GetInstance()->account_capabilities_batch_get_url());
 
   EXPECT_THAT(injector.GetRequestHeaders().GetHeader("Authorization"),
               testing::Optional(std::string("Bearer some_token")));
-  if (IsGetAllVisibleUrlEnabled()) {
-    EXPECT_FALSE(
-        injector.GetRequestHeaders().HasHeader("X-HTTP-Method-Override"));
-    EXPECT_EQ(injector.GetUploadData(), "");
-  } else {
-    EXPECT_THAT(
-        injector.GetRequestHeaders().GetHeader("X-HTTP-Method-Override"),
-        testing::Optional(std::string("GET")));
-    EXPECT_EQ(injector.GetUploadData(),
-              "names=capability1&names=capability2&names=capability3");
-  }
+  EXPECT_THAT(
+      injector.GetRequestHeaders().GetHeader("X-HTTP-Method-Override"),
+      testing::Optional(std::string("GET")));
+  EXPECT_EQ(injector.GetUploadData(),
+            "names=capability1&names=capability2&names=capability3");
 
   injector.Finish();
   FlushNetwork();
 
-  const base::Value::List& capabilities =
+  const base::ListValue& capabilities =
       *captured_result.FindList("accountCapabilities");
   ASSERT_EQ(capabilities.size(), 2U);
   EXPECT_EQ(*capabilities[0].GetDict().FindString("name"),
@@ -568,25 +542,16 @@ TEST_P(GaiaOAuthClientGetAccountCapabilitiesTest, GetAccountCapabilities) {
   EXPECT_TRUE(*capabilities[1].GetDict().FindBool("booleanValue"));
 }
 
-TEST_P(GaiaOAuthClientGetAccountCapabilitiesTest,
+TEST_F(GaiaOAuthClientGetAccountCapabilitiesTest,
        GetAccountCapabilities_UploadData_OneCapabilityName) {
-  std::string expected_body =
-      IsGetAllVisibleUrlEnabled() ? "" : "names=capability";
-  TestAccountCapabilitiesUploadData({"capability"}, expected_body);
+  TestAccountCapabilitiesUploadData({"capability"}, "names=capability");
 }
 
-TEST_P(GaiaOAuthClientGetAccountCapabilitiesTest,
+TEST_F(GaiaOAuthClientGetAccountCapabilitiesTest,
        GetAccountCapabilities_UploadData_MultipleCapabilityNames) {
-  std::string expected_body =
-      IsGetAllVisibleUrlEnabled()
-          ? ""
-          : "names=capability1&names=capability2&names=capability3";
   TestAccountCapabilitiesUploadData(
-      {"capability1", "capability2", "capability3"}, expected_body);
+      {"capability1", "capability2", "capability3"},
+      "names=capability1&names=capability2&names=capability3");
 }
-
-INSTANTIATE_TEST_SUITE_P(,
-                         GaiaOAuthClientGetAccountCapabilitiesTest,
-                         testing::Bool());
 
 }  // namespace gaia

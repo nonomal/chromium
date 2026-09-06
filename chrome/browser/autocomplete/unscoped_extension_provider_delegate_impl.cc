@@ -25,6 +25,7 @@
 #include "components/omnibox/browser/unscoped_extension_provider.h"
 #include "components/omnibox/browser/vector_icons.h"  // nogncheck
 #include "extensions/browser/extension_util.h"
+#include "ui/base/page_transition_types.h"
 
 namespace {
 // Max number of unscoped extension suggestions to send per extension.
@@ -116,7 +117,7 @@ void UnscopedExtensionProviderDelegateImpl::OnOmniboxSuggestionsReady(
   //    it will only be done if the user closes the omnibox, arrows down in the
   //    omnibox, or if all extensions have returned suggestions.
   if (request_id != current_request_id_ ||
-      base::Contains(extension_id_to_group_id_map_, extension_id) ||
+      extension_id_to_group_id_map_.contains(extension_id) ||
       provider_->done() || suggestions.empty()) {
     return;
   }
@@ -154,8 +155,8 @@ void UnscopedExtensionProviderDelegateImpl::OnOmniboxSuggestionsReady(
   // than the allowed limit, only show the first `kMaxSuggestionsPerExtension`
   // suggestions .
   matches->insert(matches->end(), extension_suggest_matches_.begin(),
-                  std::min(extension_suggest_matches_.end(),
-                           extension_suggest_matches_.begin() +
+                  extension_suggest_matches_.begin() +
+                      std::min(extension_suggest_matches_.size(),
                                kMaxSuggestionsPerExtension));
   // The only case where done can be be true is when all extensions have
   // returned suggestions.
@@ -185,10 +186,12 @@ UnscopedExtensionProviderDelegateImpl::CreateAutocompleteMatch(
   std::u16string trimmed_suggestion_content;
   // Prevents DCHECK in `SplitKeywordFromInput` in AutocompleteInput which
   // assumes leading whitespace is trimmed.
-  base::TrimWhitespace(base::UTF8ToUTF16(suggestion.content),
-                       base::TRIM_LEADING, &trimmed_suggestion_content);
+  base::TrimWhitespace(
+      AutocompleteMatch::SanitizeString(base::UTF8ToUTF16(suggestion.content)),
+      base::TRIM_LEADING, &trimmed_suggestion_content);
   match.fill_into_edit = trimmed_suggestion_content;
-  match.contents = base::UTF8ToUTF16(suggestion.description);
+  match.contents = AutocompleteMatch::SanitizeString(
+      base::UTF8ToUTF16(suggestion.description));
   match.contents_class.emplace_back(0, ACMatchClassification::DIM);
   match.transition = ui::PAGE_TRANSITION_GENERATED;
 

@@ -9,6 +9,7 @@ import org.jni_zero.NativeMethods;
 import org.junit.Assert;
 
 import org.chromium.android_webview.common.variations.VariationsUtils;
+import org.chromium.android_webview.proto.AwVariationsSeedOuterClass.AwVariationsSeed;
 import org.chromium.components.variations.firstrun.VariationsSeedFetcher.SeedInfo;
 
 import java.io.File;
@@ -45,11 +46,19 @@ public class VariationsTestUtils {
         return seed;
     }
 
+    public static AwVariationsSeed readProtoFromFile(File file) throws IOException {
+        return AwVariationsSeed.parseFrom(java.nio.file.Files.readAllBytes(file.toPath()));
+    }
+
     public static void writeMockSeed(File dest) throws IOException {
         FileOutputStream stream = null;
         try {
             stream = new FileOutputStream(dest);
-            VariationsUtils.writeSeed(stream, createMockSeed());
+            VariationsUtils.writeSeed(
+                    stream,
+                    createMockSeed(),
+                    /* lowEntropySource= */ -1,
+                    /* limitedEntropyRandomizationSource= */ null);
         } finally {
             if (stream != null) stream.close();
         }

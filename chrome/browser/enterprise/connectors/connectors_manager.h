@@ -20,9 +20,14 @@
 #include "url/gurl.h"
 
 #if BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
-#include "chrome/browser/ui/browser_list_observer.h"
-#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+#include "base/scoped_observation.h"
+#include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"  // nogncheck crbug.com/40147906
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"  // nogncheck crbug.com/40147906
+#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"  // nogncheck crbug.com/40147906
 #endif  // BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
+
+class BrowserWindowInterface;
+class GlobalBrowserCollection;
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "content/public/browser/browser_context.h"
@@ -39,7 +44,7 @@ namespace enterprise_connectors {
 // profile.
 #if BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
 class ConnectorsManager : public ConnectorsManagerBase,
-                          public BrowserListObserver,
+                          public BrowserCollectionObserver,
                           public TabStripModelObserver {
 #else
 class ConnectorsManager : public ConnectorsManagerBase {
@@ -69,9 +74,8 @@ class ConnectorsManager : public ConnectorsManagerBase {
 
  private:
 #if BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
-  // BrowserListObserver overrides:
-  void OnBrowserAdded(Browser* browser) override;
-  void OnBrowserRemoved(Browser* browser) override;
+  // BrowserCollectionObserver overrides:
+  void OnBrowserCreated(BrowserWindowInterface* browser) override;
 
   // TabStripModelObserver overrides:
   void OnTabStripModelChanged(
@@ -80,8 +84,6 @@ class ConnectorsManager : public ConnectorsManagerBase {
       const TabStripSelectionChange& selection) override;
 #endif  // BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
 
-  void CacheAnalysisConnectorPolicy(AnalysisConnector connector) const override;
-
   // Get data location region from policy.
   DataRegion GetDataRegion(AnalysisConnector connector) const override;
 
@@ -89,18 +91,18 @@ class ConnectorsManager : public ConnectorsManagerBase {
   // Close connection with local agent if all the relevant connectors are turned
   // off for it.
   void MaybeCloseLocalContentAnalysisAgentConnection();
+
+  base::ScopedObservation<GlobalBrowserCollection, BrowserCollectionObserver>
+      browser_collection_observation_{this};
 #endif  // BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
 
   // Re-cache analysis connector policy and update local agent connection if
   // needed.
-  void OnPrefChanged(AnalysisConnector connector);
+  void OnAnalysisPrefChanged(AnalysisConnector connector) override;
 
-  // Sets up |pref_change_registrar_|. Used by the constructor and
-  // SetUpForTesting.
-  void StartObservingPref(AnalysisConnector connector);
-
-  // ConnectorsManagerBase overrides:
-  void StartObservingPrefs(PrefService* pref_service) override;
+  std::unique_ptr<AnalysisServiceSettingsBase> MakeAnalysisServiceSettings(
+      const base::Value& settings_value,
+      const ServiceProviderConfig& service_provider_config) const override;
 };
 
 }  // namespace enterprise_connectors

@@ -27,11 +27,13 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/task/sequenced_task_runner.h"
+#include "chromeos/ui/clipboard_history/clipboard_history_types.h"
 #include "components/vector_icons/vector_icons.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/base/mojom/menu_source_type.mojom-forward.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/chromeos/styles/cros_tokens_color_mappings.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/menus/simple_menu_model.h"
@@ -69,10 +71,9 @@ base::TimeDelta TimeSince(const base::Time& time) {
 }
 
 // Returns whether the clipboard history menu requires a footer.
-bool IsFooterRequired(
-    crosapi::mojom::ClipboardHistoryControllerShowSource show_source,
-    const std::optional<base::Time>& menu_last_time_shown,
-    const std::optional<base::Time>& nudge_last_time_shown) {
+bool IsFooterRequired(chromeos::clipboard_history::ShowSource show_source,
+                      const std::optional<base::Time>& menu_last_time_shown,
+                      const std::optional<base::Time>& nudge_last_time_shown) {
   // A footer is required if the menu hasn't been shown in the past 60 days.
   if (TimeSince(menu_last_time_shown.value_or(base::Time())) >=
       base::Days(60)) {
@@ -114,7 +115,7 @@ void InsertHeaderContent(views::MenuItemView* container) {
 // clipboard history menu. This method may only be called when clipboard history
 // refresh is enabled.
 void InsertFooterContentV2LabelStyledText(
-    crosapi::mojom::ClipboardHistoryControllerShowSource show_source,
+    chromeos::clipboard_history::ShowSource show_source,
     views::StyledLabel* styled_label) {
   // Create text style.
   views::StyledLabel::RangeStyleInfo text_style;
@@ -164,7 +165,7 @@ void InsertFooterContentV2LabelStyledText(
 // refresh is enabled.
 void InsertFooterContentV2(
     views::MenuItemView* container,
-    crosapi::mojom::ClipboardHistoryControllerShowSource show_source) {
+    chromeos::clipboard_history::ShowSource show_source) {
   // Cache `menu_padding`.
   const int menu_padding =
       views::MenuConfig::instance().vertical_touchable_menu_item_padding;
@@ -192,7 +193,9 @@ void InsertFooterContentV2(
           .AddChildren(
               views::Builder<views::ImageView>().SetImage(
                   ui::ImageModel::FromVectorIcon(
-                      vector_icons::kHelpOutlineIcon,
+                      ::features::IsRoundedIconsEnabled()
+                          ? vector_icons::kHelpIcon
+                          : vector_icons::kHelpOutlineOldIcon,
                       cros_tokens::kCrosSysOnSurfaceVariant,
                       ClipboardHistoryViews::kFooterContentV2IconSize)),
               views::Builder<views::StyledLabel>()
@@ -284,7 +287,7 @@ ClipboardHistoryMenuModelAdapter::~ClipboardHistoryMenuModelAdapter() = default;
 void ClipboardHistoryMenuModelAdapter::Run(
     const gfx::Rect& anchor_rect,
     ui::mojom::MenuSourceType source_type,
-    crosapi::mojom::ClipboardHistoryControllerShowSource show_source,
+    chromeos::clipboard_history::ShowSource show_source,
     const std::optional<base::Time>& menu_last_time_shown,
     const std::optional<base::Time>& nudge_last_time_shown) {
   DCHECK(!root_view_);
@@ -397,8 +400,7 @@ void ClipboardHistoryMenuModelAdapter::SelectMenuItemWithCommandId(
   views::MenuItemView* selected_menu_item =
       root_view_->GetMenuItemByID(command_id);
   DCHECK(IsRunning());
-  views::MenuController::GetActiveInstance()->SelectItemAndOpenSubmenu(
-      selected_menu_item);
+  root_view_->GetMenuController()->SelectItemAndOpenSubmenu(selected_menu_item);
 }
 
 void ClipboardHistoryMenuModelAdapter::SelectMenuItemHoveredByMouse() {
@@ -410,8 +412,7 @@ void ClipboardHistoryMenuModelAdapter::SelectMenuItemHoveredByMouse() {
   if (iter == item_views_by_command_id_.cend()) {
     // If no item is hovered by mouse, cancel the selection on the child menu
     // item by selecting the root menu item.
-    views::MenuController::GetActiveInstance()->SelectItemAndOpenSubmenu(
-        root_view_);
+    root_view_->GetMenuController()->SelectItemAndOpenSubmenu(root_view_);
   } else {
     SelectMenuItemWithCommandId(iter->first);
   }
@@ -436,8 +437,7 @@ void ClipboardHistoryMenuModelAdapter::RemoveMenuItemWithCommandId(
   if (new_selected_command_id.has_value()) {
     SelectMenuItemWithCommandId(*new_selected_command_id);
   } else {
-    views::MenuController::GetActiveInstance()->SelectItemAndOpenSubmenu(
-        root_view_);
+    root_view_->GetMenuController()->SelectItemAndOpenSubmenu(root_view_);
   }
 
   auto item_view_to_delete_iter = item_views_by_command_id_.find(command_id);

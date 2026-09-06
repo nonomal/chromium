@@ -6,7 +6,6 @@
 #include "base/values.h"
 #include "chrome/browser/policy/policy_test_utils.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/content_settings/core/common/content_settings.h"
@@ -69,7 +68,7 @@ class LegacyCookieScopePolicyBrowserTest
 
 IN_PROC_BROWSER_TEST_P(LegacyCookieScopePolicyBrowserTest,
                        TestLegacyCookieScopeEnabled) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
   // No cookies at startup
   ASSERT_TRUE(content::GetCookies(profile, example_port_80_).empty());
 
@@ -119,7 +118,7 @@ IN_PROC_BROWSER_TEST_P(LegacyCookieScopePolicyBrowserTest,
 
 IN_PROC_BROWSER_TEST_P(LegacyCookieScopePolicyBrowserTest,
                        TestLegacyCookieScopeEnabledForDomainList) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
 
   // No cookies at startup
   ASSERT_TRUE(content::GetCookies(profile, example_port_80_).empty());
@@ -146,7 +145,7 @@ IN_PROC_BROWSER_TEST_P(LegacyCookieScopePolicyBrowserTest,
   // Otherwise they are not aliasing and just overwrite.
   EXPECT_EQ(cookies.size(), AreFeaturesEnabled() ? 6u : 2u);
 
-  base::Value::List policy_value;
+  base::ListValue policy_value;
   // Set the policy to enable legacy cookie scope for the domains in the list.
   policy_value.Append("example.com");
   policy_value.Append("foo.com");
@@ -175,7 +174,7 @@ IN_PROC_BROWSER_TEST_P(LegacyCookieScopePolicyBrowserTest,
 
 IN_PROC_BROWSER_TEST_P(LegacyCookieScopePolicyBrowserTest,
                        TestLegacyCookieScopeEnabledForSingleDomain) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
 
   // No cookies at startup
   ASSERT_TRUE(content::GetCookies(profile, example_port_80_).empty());
@@ -204,7 +203,7 @@ IN_PROC_BROWSER_TEST_P(LegacyCookieScopePolicyBrowserTest,
     EXPECT_EQ(cookies.size(), 2u);
   }
 
-  base::Value::List policy_value;
+  base::ListValue policy_value;
   // Set the policy to enable legacy cookie scope for the example.com
   // Aliases under foo.com should not be deleted due to this.
   policy_value.Append("example.com");
@@ -250,7 +249,7 @@ IN_PROC_BROWSER_TEST_P(LegacyCookieScopePolicyBrowserTest,
 IN_PROC_BROWSER_TEST_P(
     LegacyCookieScopePolicyBrowserTest,
     TestLegacyCookieScopeEnabledForDomainListPartitionedCookies) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
 
   // No cookies at startup
   ASSERT_TRUE(content::GetCookies(profile, example_port_80_).empty());
@@ -299,7 +298,7 @@ IN_PROC_BROWSER_TEST_P(
   // Otherwise they are not aliasing and just overwrite.
   EXPECT_EQ(cookies.size(), AreFeaturesEnabled() ? 6u : 2u);
 
-  base::Value::List policy_value;
+  base::ListValue policy_value;
   // Set the policy to enable legacy cookie scope for the domains in the list.
   policy_value.Append("example.com");
   policy_value.Append("foo.com");
@@ -336,7 +335,7 @@ IN_PROC_BROWSER_TEST_P(
 
 IN_PROC_BROWSER_TEST_P(LegacyCookieScopePolicyBrowserTest,
                        TestLegacyCookieScopeEnabledPartitionedCookies) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
 
   // No cookies at startup
   ASSERT_TRUE(content::GetCookies(profile, example_port_80_).empty());
@@ -385,7 +384,7 @@ IN_PROC_BROWSER_TEST_P(LegacyCookieScopePolicyBrowserTest,
   // Otherwise they are not aliasing and just overwrite.
   EXPECT_EQ(cookies.size(), AreFeaturesEnabled() ? 6u : 2u);
 
-  base::Value::List policy_value;
+  base::ListValue policy_value;
   // Set the policy to enable legacy cookie scope for the domains in the list.
   policy_value.Append("example.com");
   policy_value.Append("foo.com");

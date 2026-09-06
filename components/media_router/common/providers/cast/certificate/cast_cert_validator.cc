@@ -13,7 +13,6 @@
 #include <utility>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/containers/span.h"
 #include "base/logging.h"
 #include "base/path_service.h"
@@ -166,7 +165,7 @@ void DetermineDeviceCertificatePolicy(
   for (const auto& cert : result_path->certs) {
     if (cert->has_policy_oids()) {
       const std::vector<bssl::der::Input>& policies = cert->policy_oids();
-      if (base::Contains(policies, AudioOnlyPolicyOid())) {
+      if (std::ranges::contains(policies, AudioOnlyPolicyOid())) {
         audio_only = true;
         break;
       }
@@ -209,22 +208,6 @@ void DetermineDeviceCertificatePolicy(
   *context = std::make_unique<CertVerificationContextImpl>(std::move(key),
                                                            common_name);
   return true;
-}
-
-// Returns the parsing options used for Cast certificates.
-bssl::ParseCertificateOptions GetCertParsingOptions() {
-  bssl::ParseCertificateOptions options;
-
-  // Some cast intermediate certificates contain serial numbers that are
-  // 21 octets long, and might also not use valid DER encoding for an
-  // INTEGER (non-minimal encoding).
-  //
-  // Allow these sorts of serial numbers.
-  //
-  // TODO(eroman): At some point in the future this workaround will no longer be
-  // necessary. Should revisit this for removal in 2017 if not earlier.
-  options.allow_invalid_serial_numbers = true;
-  return options;
 }
 
 // Returns the CastCertError for the failed path building.
@@ -361,7 +344,7 @@ CastCertError VerifyDeviceCertUsingCustomTrustStore(
     std::shared_ptr<const bssl::ParsedCertificate> cert(
         bssl::ParsedCertificate::Create(
             net::x509_util::CreateCryptoBuffer(cert_str),
-            GetCertParsingOptions(), &errors));
+            net::x509_util::DefaultParseCertificateOptions(), &errors));
     if (!cert) {
       return CastCertError::ERR_CERTS_PARSE;
     }
@@ -412,17 +395,20 @@ CastCertError VerifyDeviceCertUsingCustomTrustStore(
     return CastCertError::ERR_CERTS_RESTRICTIONS;
   }
 
-  if (!crl && (crl_policy == CRLPolicy::CRL_REQUIRED_WITH_FALLBACK ||
-               crl_policy == CRLPolicy::CRL_OPTIONAL_WITH_FALLBACK)) {
-    if (!fallback_crl) {
+  if (crl_policy == CRLPolicy::CRL_REQUIRED_WITH_FALLBACK ||
+      crl_policy == CRLPolicy::CRL_OPTIONAL_WITH_FALLBACK) {
+    if (fallback_crl) {
+      if (!fallback_crl->CheckRevocation(result.GetBestValidPath()->certs,
+                                         time)) {
+        return CastCertError::ERR_CERTS_REVOKED_BY_FALLBACK_CRL;
+      }
+    } else if (!crl) {
       return CastCertError::ERR_FALLBACK_CRL_INVALID;
     }
 
-    if (!fallback_crl->CheckRevocation(result.GetBestValidPath()->certs,
-                                       time)) {
-      return CastCertError::ERR_CERTS_REVOKED_BY_FALLBACK_CRL;
+    if (!crl) {
+      return CastCertError::OK_FALLBACK_CRL;
     }
-    return CastCertError::OK_FALLBACK_CRL;
   }
 
   // Check for revocation.

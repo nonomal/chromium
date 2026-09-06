@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "chrome/browser/actor/action_tracker_for_metrics.h"
+
 #include <memory>
 #include <optional>
 #include <utility>
@@ -14,8 +16,8 @@
 #include "chrome/browser/actor/tools/tools_test_util.h"
 #include "chrome/browser/actor/tools/wait_tool_request.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/common/actor.mojom.h"
+#include "components/actor/public/mojom/actor_types.mojom.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -38,20 +40,27 @@ class ActionTrackerForMetricsTest : public ActorToolsTest {
 
   void SetUpOnMainThread() override {
     ActorToolsTest::SetUpOnMainThread();
-    ASSERT_TRUE(embedded_test_server()->Start());
+    ASSERT_TRUE(embedded_https_test_server().Start());
   }
 
   ActorKeyedService* actor_keyed_service() {
-    return ActorKeyedService::Get(browser()->profile());
+    return ActorKeyedService::Get(browser()->GetProfile());
+  }
+
+  void StopAllTasks() {
+    actor_keyed_service()->ResetForTesting();
+    // Tasks are deleted asynchronously; return only when the task is deleted.
+    WaitForPostedTask();
   }
 };
 
 IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest, WaitAfterClick_Recorded) {
   base::HistogramTester histogram_tester;
 
-  const GURL url1 = embedded_test_server()->GetURL("/actor/blank.html");
-  const GURL url2 =
-      embedded_test_server()->GetURL("/actor/page_with_clickable_element.html");
+  const GURL url1 =
+      embedded_https_test_server().GetURL("example.com", "/actor/blank.html");
+  const GURL url2 = embedded_https_test_server().GetURL(
+      "example.com", "/actor/page_with_clickable_element.html");
 
   ASSERT_TRUE(NavigateToURL(web_contents(), url1));
 
@@ -75,7 +84,7 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest, WaitAfterClick_Recorded) {
   actor_task().Act(ToRequestList(MakeWaitRequest()), result3.GetCallback());
   ExpectOkResult(result3);
 
-  actor_keyed_service()->ResetForTesting();
+  StopAllTasks();
 
   histogram_tester.ExpectUniqueSample("Actor.Task.SubsequentWaits.Click",
                                       /*sample=*/1,
@@ -91,9 +100,10 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest, WaitAfterClick_Recorded) {
 IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest, TwoWaits_Recorded) {
   base::HistogramTester histogram_tester;
 
-  const GURL url1 = embedded_test_server()->GetURL("/actor/blank.html");
-  const GURL url2 =
-      embedded_test_server()->GetURL("/actor/page_with_clickable_element.html");
+  const GURL url1 =
+      embedded_https_test_server().GetURL("example.com", "/actor/blank.html");
+  const GURL url2 = embedded_https_test_server().GetURL(
+      "example.com", "/actor/page_with_clickable_element.html");
 
   ASSERT_TRUE(NavigateToURL(web_contents(), url1));
 
@@ -121,7 +131,7 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest, TwoWaits_Recorded) {
   actor_task().Act(ToRequestList(MakeWaitRequest()), result4.GetCallback());
   ExpectOkResult(result4);
 
-  actor_keyed_service()->ResetForTesting();
+  StopAllTasks();
 
   histogram_tester.ExpectUniqueSample("Actor.Task.SubsequentWaits.Click",
                                       /*sample=*/1,
@@ -138,9 +148,10 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
                        WaitAfterMultipleActions_Recorded) {
   base::HistogramTester histogram_tester;
 
-  const GURL url1 =
-      embedded_test_server()->GetURL("/actor/page_with_clickable_element.html");
-  const GURL url2 = embedded_test_server()->GetURL("/actor/blank.html");
+  const GURL url1 = embedded_https_test_server().GetURL(
+      "example.com", "/actor/page_with_clickable_element.html");
+  const GURL url2 =
+      embedded_https_test_server().GetURL("example.com", "/actor/blank.html");
 
   ASSERT_TRUE(NavigateToURL(web_contents(), url1));
 
@@ -161,7 +172,7 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
   actor_task().Act(ToRequestList(MakeWaitRequest()), result2.GetCallback());
   ExpectOkResult(result2);
 
-  actor_keyed_service()->ResetForTesting();
+  StopAllTasks();
 
   histogram_tester.ExpectUniqueSample("Actor.Task.SubsequentWaits.Navigate",
                                       /*sample=*/1,
@@ -178,14 +189,15 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
                        WaitAfterCreated_NotRecorded) {
   base::HistogramTester histogram_tester;
 
-  const GURL url = embedded_test_server()->GetURL("/actor/blank.html");
+  const GURL url =
+      embedded_https_test_server().GetURL("example.com", "/actor/blank.html");
   ASSERT_TRUE(NavigateToURL(web_contents(), url));
 
   ActResultFuture result;
   actor_task().Act(ToRequestList(MakeWaitRequest()), result.GetCallback());
   ExpectOkResult(result);
 
-  actor_keyed_service()->ResetForTesting();
+  StopAllTasks();
 
   histogram_tester.ExpectUniqueSample(kActorTaskSubsequentWaitsMetricName,
                                       /*sample=*/0,
@@ -196,9 +208,10 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
                        WaitAfterPaused_NotRecorded) {
   base::HistogramTester histogram_tester;
 
-  const GURL url1 = embedded_test_server()->GetURL("/actor/blank.html");
-  const GURL url2 =
-      embedded_test_server()->GetURL("/actor/page_with_clickable_element.html");
+  const GURL url1 =
+      embedded_https_test_server().GetURL("example.com", "/actor/blank.html");
+  const GURL url2 = embedded_https_test_server().GetURL(
+      "example.com", "/actor/page_with_clickable_element.html");
 
   ASSERT_TRUE(NavigateToURL(web_contents(), url1));
 
@@ -215,7 +228,7 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
   actor_task().Act(ToRequestList(MakeWaitRequest()), result2.GetCallback());
   ExpectOkResult(result2);
 
-  actor_keyed_service()->ResetForTesting();
+  StopAllTasks();
 
   histogram_tester.ExpectUniqueSample(kActorTaskSubsequentWaitsMetricName,
                                       /*sample=*/0,
@@ -225,8 +238,8 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
 IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest, ZeroDurationWait_Recorded) {
   base::HistogramTester histogram_tester;
 
-  const GURL url =
-      embedded_test_server()->GetURL("/actor/page_with_clickable_element.html");
+  const GURL url = embedded_https_test_server().GetURL(
+      "example.com", "/actor/page_with_clickable_element.html");
 
   ASSERT_TRUE(NavigateToURL(web_contents(), url));
 
@@ -247,7 +260,7 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest, ZeroDurationWait_Recorded) {
                    result2.GetCallback());
   ExpectOkResult(result2);
 
-  actor_keyed_service()->ResetForTesting();
+  StopAllTasks();
 
   histogram_tester.ExpectUniqueSample(kActorTaskSubsequentWaitsMetricName,
                                       /*sample=*/1,
@@ -258,8 +271,8 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
                        WaitInMultipleActions_NotRecorded) {
   base::HistogramTester histogram_tester;
 
-  const GURL url =
-      embedded_test_server()->GetURL("/actor/page_with_clickable_element.html");
+  const GURL url = embedded_https_test_server().GetURL(
+      "example.com", "/actor/page_with_clickable_element.html");
 
   ASSERT_TRUE(NavigateToURL(web_contents(), url));
 
@@ -275,7 +288,7 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
   actor_task().Act(std::move(actions), result.GetCallback());
   ExpectOkResult(result);
 
-  actor_keyed_service()->ResetForTesting();
+  StopAllTasks();
 
   histogram_tester.ExpectUniqueSample(kActorTaskSubsequentWaitsMetricName,
                                       /*sample=*/0,
@@ -286,8 +299,8 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
                        WaitAfterFailure_NotRecorded) {
   base::HistogramTester histogram_tester;
 
-  const GURL url =
-      embedded_test_server()->GetURL("/actor/page_with_clickable_element.html");
+  const GURL url = embedded_https_test_server().GetURL(
+      "example.com", "/actor/page_with_clickable_element.html");
 
   ASSERT_TRUE(NavigateToURL(web_contents(), url));
 
@@ -305,7 +318,7 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
   actor_task().Act(ToRequestList(MakeWaitRequest()), result2.GetCallback());
   ExpectOkResult(result2);
 
-  actor_keyed_service()->ResetForTesting();
+  StopAllTasks();
 
   histogram_tester.ExpectUniqueSample(kActorTaskSubsequentWaitsMetricName,
                                       /*sample=*/0,
@@ -316,8 +329,8 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
                        TwoWaitsAfterClick_Recorded) {
   base::HistogramTester histogram_tester;
 
-  const GURL url =
-      embedded_test_server()->GetURL("/actor/page_with_clickable_element.html");
+  const GURL url = embedded_https_test_server().GetURL(
+      "example.com", "/actor/page_with_clickable_element.html");
 
   ASSERT_TRUE(NavigateToURL(web_contents(), url));
 
@@ -339,7 +352,7 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
   actor_task().Act(ToRequestList(MakeWaitRequest()), result3.GetCallback());
   ExpectOkResult(result3);
 
-  actor_keyed_service()->ResetForTesting();
+  StopAllTasks();
 
   histogram_tester.ExpectUniqueSample("Actor.Task.SubsequentWaits.Click",
                                       /*sample=*/1,
@@ -351,6 +364,25 @@ IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
   histogram_tester.ExpectUniqueSample(kActorTaskSubsequentWaitsMetricName,
                                       /*sample=*/1,
                                       /*expected_bucket_count=*/1);
+}
+
+IN_PROC_BROWSER_TEST_F(ActionTrackerForMetricsTest,
+                       AutofillAttentionDialog_Recorded) {
+  base::HistogramTester histogram_tester;
+
+  actor_task()
+      .action_tracker_for_metrics()
+      .OnAutofillAttentionDialogPresented();
+  actor_task()
+      .action_tracker_for_metrics()
+      .OnAutofillAttentionDialogPresented();
+
+  StopAllTasks();
+
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.Actor.AutofillAttentionDialogsPerTask",
+      /*sample=*/2,
+      /*expected_bucket_count=*/1);
 }
 
 }  // namespace

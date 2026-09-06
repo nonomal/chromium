@@ -10,6 +10,7 @@
 #include "base/functional/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/task/common/task_annotator.h"
+#include "base/types/optional_ref.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/host_port_pair.h"
@@ -26,10 +27,11 @@ namespace content {
 ResolveHostClientImpl::ResolveHostClientImpl(
     const GURL& url,
     const net::NetworkAnonymizationKey& network_anonymization_key,
+    base::optional_ref<const base::UnguessableToken> network_restrictions_id,
     ResolveHostCallback callback,
     network::mojom::NetworkContext* network_context)
     : callback_(std::move(callback)) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  CHECK_CURRENTLY_ON(content::BrowserThread::UI, base::NotFatalUntil::M159);
 
   network::mojom::ResolveHostParametersPtr parameters =
       network::mojom::ResolveHostParameters::New();
@@ -37,6 +39,8 @@ ResolveHostClientImpl::ResolveHostClientImpl(
   parameters->is_speculative = true;
   parameters->purpose =
       network::mojom::ResolveHostParameters::Purpose::kPreconnect;
+  parameters->network_restrictions_id =
+      network_restrictions_id.CopyAsOptional();
   resolve_host_start_time_ = base::TimeTicks::Now();
   // Intentionally using a SchemeHostPort. Resolving http:// scheme host will
   // fail when a HTTPS resource record exists due to DNS-based scheme upgrade
@@ -69,7 +73,7 @@ void ResolveHostClientImpl::OnComplete(
   // As this method is executed as a callback from a Mojo call, it should be
   // executed via RunTask() and thus have a non-delayed PendingTask associated
   // with it.
-  DCHECK(!task || task->delayed_run_time.is_null());
+  CHECK(!task || task->delayed_run_time.is_null(), base::NotFatalUntil::M159);
 
   // The task will have a null |queue_time| if run synchronously (this happens
   // in unit tests, for example).

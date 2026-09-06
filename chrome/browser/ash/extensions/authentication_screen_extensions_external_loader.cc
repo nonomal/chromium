@@ -39,8 +39,7 @@ constexpr char kIdentityCardConnectorExtensionId[] =
 // Holds the ID to check instead of the prod ID when running tests.
 const char* g_test_extension_id_override = nullptr;
 
-base::Value::Dict GetForceInstalledExtensionsFromPrefs(
-    const PrefService* prefs) {
+base::DictValue GetForceInstalledExtensionsFromPrefs(const PrefService* prefs) {
   const PrefService::Preference* const login_screen_extensions_pref =
       prefs->FindPreference(extensions::pref_names::kInstallForceList);
   CHECK(login_screen_extensions_pref);
@@ -51,7 +50,7 @@ base::Value::Dict GetForceInstalledExtensionsFromPrefs(
     // Local State file trying to inject some extensions into the Login Screen.)
     LOG(WARNING) << "Ignoring untrusted value of the "
                  << extensions::pref_names::kInstallForceList << " pref";
-    return base::Value::Dict();
+    return base::DictValue();
   }
   const base::Value* login_screen_extensions_pref_value =
       login_screen_extensions_pref->GetValue();
@@ -62,7 +61,7 @@ base::Value::Dict GetForceInstalledExtensionsFromPrefs(
 // Returns true if the Identity Card Connector extension (or a test override)
 // is force-installed via policy.
 bool IsBadgeBasedAuthenticationEnabled(
-    const base::Value::Dict& force_installed_extensions) {
+    const base::DictValue& force_installed_extensions) {
   std::string target_id;
   if (g_test_extension_id_override) {
     CHECK_IS_TEST();
@@ -76,8 +75,7 @@ bool IsBadgeBasedAuthenticationEnabled(
 
 // Whether extensions should be loaded on the lock screen instead of the sign-in
 // profile.
-bool IsLockScreenTakingOver(
-    const base::Value::Dict& force_installed_extensions) {
+bool IsLockScreenTakingOver(const base::DictValue& force_installed_extensions) {
   const session_manager::SessionState session_state =
       session_manager::SessionManager::Get()->session_state();
   return chromeos::features::IsLockScreenBadgeAuthEnabled() &&
@@ -95,12 +93,15 @@ void AuthenticationScreenExtensionsExternalLoader::
 }
 
 AuthenticationScreenExtensionsExternalLoader::
-    AuthenticationScreenExtensionsExternalLoader(Profile* profile)
+    AuthenticationScreenExtensionsExternalLoader(
+        scoped_refptr<network::SharedURLLoaderFactory>
+            shared_url_loader_factory,
+        Profile* profile)
     : profile_(profile),
       // TODO(crbug.com/447583060): Separate cache for lock screen.
       external_cache_(
           base::PathService::CheckedGet(ash::DIR_SIGNIN_PROFILE_EXTENSIONS),
-          g_browser_process->shared_url_loader_factory(),
+          std::move(shared_url_loader_factory),
           base::ThreadPool::CreateSequencedTaskRunner(
               {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
                base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}),
@@ -135,7 +136,7 @@ void AuthenticationScreenExtensionsExternalLoader::StartLoading() {
 }
 
 void AuthenticationScreenExtensionsExternalLoader::OnExtensionListsUpdated(
-    const base::Value::Dict& prefs) {
+    const base::DictValue& prefs) {
   if (initial_load_finished_) {
     OnUpdated(prefs.Clone());
     return;
@@ -204,7 +205,7 @@ void AuthenticationScreenExtensionsExternalLoader::UpdateStateFromPrefs() {
 
   external_cache_.UpdateExtensionsList(
       should_load_extensions ? std::move(force_installed_extensions)
-                             : base::Value::Dict());
+                             : base::DictValue());
 }
 
 }  // namespace chromeos

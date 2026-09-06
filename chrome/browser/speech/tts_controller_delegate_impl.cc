@@ -9,7 +9,9 @@
 #include <string>
 #include <utility>
 
+#include "base/i18n/legacy_language_tag_helpers.h"
 #include "base/json/json_reader.h"
+#include "base/memory/singleton.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -23,10 +25,12 @@
 namespace {
 
 std::optional<content::TtsControllerDelegate::PreferredVoiceId>
-PreferredVoiceIdFromString(const base::Value::Dict& pref,
+PreferredVoiceIdFromString(const base::DictValue& pref,
                            std::string_view pref_key) {
-  const std::string* voice_id =
-      pref.FindStringByDottedPath(l10n_util::GetLanguage(pref_key));
+  if (pref_key.empty()) {
+    return std::nullopt;
+  }
+  const std::string* voice_id = pref.FindStringByDottedPath(pref_key);
   if (!voice_id || voice_id->empty())
     return std::nullopt;
 
@@ -35,7 +39,7 @@ PreferredVoiceIdFromString(const base::Value::Dict& pref,
   std::string name;
   std::string id;
   if (json && json->is_dict()) {
-    const base::Value::Dict& dict = json->GetDict();
+    const base::DictValue& dict = json->GetDict();
     const std::string* name_str = dict.FindString("name");
     if (name_str)
       name = *name_str;
@@ -66,7 +70,7 @@ TtsControllerDelegateImpl::~TtsControllerDelegateImpl() = default;
 std::unique_ptr<content::TtsControllerDelegate::PreferredVoiceIds>
 TtsControllerDelegateImpl::GetPreferredVoiceIdsForUtterance(
     content::TtsUtterance* utterance) {
-  const base::Value::Dict* lang_to_voice_pref = GetLangToVoicePref(utterance);
+  const base::DictValue* lang_to_voice_pref = GetLangToVoicePref(utterance);
   if (!lang_to_voice_pref)
     return nullptr;
 
@@ -75,12 +79,14 @@ TtsControllerDelegateImpl::GetPreferredVoiceIdsForUtterance(
 
   if (!utterance->GetLang().empty()) {
     preferred_ids->lang_voice_id = PreferredVoiceIdFromString(
-        *lang_to_voice_pref, l10n_util::GetLanguage(utterance->GetLang()));
+        *lang_to_voice_pref,
+        base::i18n::GetLanguageSubtagUsingLanguageTag(utterance->GetLang()));
   }
 
   const std::string app_lang = g_browser_process->GetApplicationLocale();
   preferred_ids->locale_voice_id = PreferredVoiceIdFromString(
-      *lang_to_voice_pref, l10n_util::GetLanguage(app_lang));
+      *lang_to_voice_pref,
+      base::i18n::GetLanguageSubtagUsingLanguageTag(app_lang));
 
   preferred_ids->any_locale_voice_id =
       PreferredVoiceIdFromString(*lang_to_voice_pref, "noLanguageCode");
@@ -120,7 +126,7 @@ const PrefService* TtsControllerDelegateImpl::GetPrefService(
   return profile ? profile->GetPrefs() : nullptr;
 }
 
-const base::Value::Dict* TtsControllerDelegateImpl::GetLangToVoicePref(
+const base::DictValue* TtsControllerDelegateImpl::GetLangToVoicePref(
     content::TtsUtterance* utterance) {
   const PrefService* prefs = GetPrefService(utterance);
   return prefs == nullptr

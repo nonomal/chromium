@@ -6,7 +6,9 @@ package org.chromium.chrome.browser.tabmodel;
 
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 
 import androidx.annotation.NonNull;
 
@@ -20,7 +22,6 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
-import org.robolectric.annotation.Config;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -34,7 +35,6 @@ import java.util.List;
 
 /** Unit tests for {@link PendingTabClosureManager}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
 public class PendingTabClosureManagerTest {
     @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
     private PendingTabClosureManager mPendingTabClosureManager;
@@ -476,5 +476,17 @@ public class PendingTabClosureManagerTest {
         delegateInOrder.verify(mDelegate).insertUndoneTabClosureAt(eq(tab1), eq(0));
         delegateInOrder.verify(mDelegate).insertUndoneTabClosureAt(eq(tab3), eq(2));
         checkRewoundState(mPendingTabClosureManager, tabList, true);
+    }
+
+    @Test
+    public void testNotifyTabAdded() {
+        Tab tab0 = new MockTab(0, mProfile);
+        mPendingTabClosureManager.notifyTabAdded(tab0, 0);
+
+        TabList rewoundList = mPendingTabClosureManager.getRewoundList();
+        Assert.assertEquals(1, rewoundList.getCount());
+        Assert.assertEquals(tab0, rewoundList.getTabAt(0));
+
+        verify(mDelegate, never()).getAllTabs();
     }
 }

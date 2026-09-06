@@ -25,17 +25,13 @@ class DnsConfigService;
 //
 // This class is thread and sequence safe except that RemoveObserver() must be
 // called on the same sequence as the matched AddObserver() call.
-//
-// TODO(crbug.com/40630884): Use this class in HostResolverManager.
 class NET_EXPORT_PRIVATE SystemDnsConfigChangeNotifier {
  public:
   class Observer {
    public:
     // Called on loading new config, including the initial read once the first
-    // valid config has been read. If a config read encounters errors or an
-    // invalid config is read, will be invoked with |std::nullopt|. Only
-    // invoked when |config| changes.
-    virtual void OnSystemDnsConfigChanged(std::optional<DnsConfig> config) = 0;
+    // config has been read. Only invoked when `config` changes.
+    virtual void OnSystemDnsConfigChanged(const DnsConfig& config) = 0;
   };
 
   SystemDnsConfigChangeNotifier();

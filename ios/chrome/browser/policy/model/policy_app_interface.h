@@ -32,6 +32,10 @@
 // URLAllowlist policies.
 + (BOOL)isURLBlocked:(NSString*)URL;
 
+// Returns YES if the given `URL` is blocked by the URLBlocklist and
+// URLAllowlist policies in the given mode.
++ (BOOL)isURLBlocked:(NSString*)URL inIncognito:(BOOL)incognito;
+
 // Sets the browser cloud policy data with a domain.
 + (void)setBrowserCloudPolicyDataWithDomain:(NSString*)domain;
 
@@ -58,6 +62,12 @@
 // policy with name `policyName` and of type integer is set to `expectedValue`.
 + (BOOL)hasUserPolicyInCurrentProfile:(NSString*)policyName
                      withIntegerValue:(int)expectedValue;
+
+// Logs a message using LOG_POLICY with ERROR severity from C++.
++ (void)logErrorPolicy:(NSString*)message;
+
+// Clears all policy logs in the PolicyLogger singleton.
++ (void)clearPolicyLogs;
 
 @end
 

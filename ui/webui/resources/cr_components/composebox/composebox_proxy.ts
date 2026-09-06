@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import {PageCallbackRouter as SearchboxPageCallbackRouter, PageHandlerRemote as SearchboxPageHandlerRemote} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
+import {PageCallbackRouter as SearchboxPageCallbackRouter, PageHandlerRemote as SearchboxPageHandlerRemote, SuggestStyle} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
 import type {AutocompleteMatch} from '//resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
 
-import {PageCallbackRouter, PageHandlerFactory, PageHandlerRemote} from './composebox.mojom-webui.js';
+import {PageHandlerFactory, PageHandlerRemote} from './composebox.mojom-webui.js';
 
-export function createAutocompleteMatch(): AutocompleteMatch {
+export function createAutocompleteMatch(
+    config: Partial<AutocompleteMatch> = {}): AutocompleteMatch {
   return {
     isHidden: false,
     a11yLabel: '',
@@ -16,53 +17,72 @@ export function createAutocompleteMatch(): AutocompleteMatch {
     isSearchType: false,
     isEnterpriseSearchAggregatorPeopleType: false,
     swapContentsAndDescription: false,
+    showContextualDescription: false,
     supportsDeletion: false,
     suggestionGroupId: -1,
     contents: '',
     contentsClass: [{offset: 0, style: 0}],
     description: '',
     descriptionClass: [{offset: 0, style: 0}],
-    destinationUrl: {url: ''},
+    destinationUrl: '',
     inlineAutocompletion: '',
     fillIntoEdit: '',
     iconPath: '',
-    iconUrl: {url: ''},
+    iconUrl: '',
     imageDominantColor: '',
     imageUrl: '',
     isNoncannedAimSuggestion: false,
     removeButtonA11yLabel: '',
     type: '',
-    isRichSuggestion: false,
-    isWeatherAnswerSuggestion: null,
-    answer: null,
+    isContextualSuggestion: false,
+    isTwoRowSuggestion: false,
     tailSuggestCommonPrefix: null,
-    hasInstantKeyword: false,
-    keywordChipHint: '',
-    keywordChipA11y: '',
+    keywordModel: null,
+    fuseboxAction: null,
+    suggestStyle: SuggestStyle.kUnspecified,
+    ...config,
   };
 }
 
 export interface ComposeboxProxy {
   handler: PageHandlerRemote;
-  callbackRouter: PageCallbackRouter;
   searchboxHandler: SearchboxPageHandlerRemote;
   searchboxCallbackRouter: SearchboxPageCallbackRouter;
+
+  // <if expr="not is_android">
+  getSmartTabSharingActive(): Promise<{active: boolean}>;
+  setSmartTabSharingActive(active: boolean): void;
+  observeSmartTabSharingActive(callback: (active: boolean) => void): number;
+  // </if>
 }
 
 export class ComposeboxProxyImpl implements ComposeboxProxy {
   handler: PageHandlerRemote;
-  callbackRouter: PageCallbackRouter;
   searchboxHandler: SearchboxPageHandlerRemote;
   searchboxCallbackRouter: SearchboxPageCallbackRouter;
   constructor(
-      handler: PageHandlerRemote, callbackRouter: PageCallbackRouter,
-      searchboxHandler: SearchboxPageHandlerRemote,
+      handler: PageHandlerRemote, searchboxHandler: SearchboxPageHandlerRemote,
       searchboxCallbackRouter: SearchboxPageCallbackRouter) {
     this.handler = handler;
-    this.callbackRouter = callbackRouter;
     this.searchboxHandler = searchboxHandler;
     this.searchboxCallbackRouter = searchboxCallbackRouter;
   }
+
+  // <if expr="not is_android">
+  getSmartTabSharingActive(): Promise<{active: boolean}> {
+    return this.searchboxHandler.getSmartTabSharingActive();
+  }
+
+  setSmartTabSharingActive(active: boolean): void {
+    this.searchboxHandler.setSmartTabSharingActive(active);
+  }
+
+  observeSmartTabSharingActive(callback: (active: boolean) => void): number {
+    return this.searchboxCallbackRouter.updateSmartTabSharingActive.addListener(
+        callback);
+  }
+
+  // </if>
 
   static getInstance(): ComposeboxProxyImpl {
     if (instance) {
@@ -70,19 +90,17 @@ export class ComposeboxProxyImpl implements ComposeboxProxy {
     }
 
     // Composebox connection variables.
-    const callbackRouter = new PageCallbackRouter();
     const handler = new PageHandlerRemote();
     const factory = PageHandlerFactory.getRemote();
     // Searchbox connection variables.
     const searchboxHandler = new SearchboxPageHandlerRemote();
     const searchboxCallbackRouter = new SearchboxPageCallbackRouter();
     factory.createPageHandler(
-        callbackRouter.$.bindNewPipeAndPassRemote(),
         handler.$.bindNewPipeAndPassReceiver(),
         searchboxCallbackRouter.$.bindNewPipeAndPassRemote(),
         searchboxHandler.$.bindNewPipeAndPassReceiver());
     instance = new ComposeboxProxyImpl(
-        handler, callbackRouter, searchboxHandler, searchboxCallbackRouter);
+        handler, searchboxHandler, searchboxCallbackRouter);
     return instance;
   }
 

@@ -26,6 +26,7 @@ import org.junit.runners.Parameterized.UseParametersRunnerFactory;
 import org.chromium.android_webview.AwConsoleMessage;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwSettings;
+import org.chromium.android_webview.AwWebResourceError;
 import org.chromium.android_webview.AwWebResourceRequest;
 import org.chromium.android_webview.test.AwActivityTestRule.TestDependencyFactory;
 import org.chromium.base.Log;
@@ -106,7 +107,7 @@ public class WebExposedTest extends AwParameterizedTest {
                         mResultFuture.setException(
                                 new AssertionError(
                                         "onReceivedError: "
-                                                + error.description
+                                                + error.getDescription()
                                                 + ", "
                                                 + request.getUrl()
                                                 + "\n"));
@@ -129,10 +130,10 @@ public class WebExposedTest extends AwParameterizedTest {
                     }
                 };
 
-        AwTestContainerView mTestContainerView =
+        AwTestContainerView testContainerView =
                 mRule.createAwTestContainerViewOnMainSync(
                         mContentsClient, false, new TestDependencyFactory());
-        mAwContents = mTestContainerView.getAwContents();
+        mAwContents = testContainerView.getAwContents();
 
         ThreadUtils.runOnUiThreadBlocking(
                 () -> {
@@ -214,7 +215,7 @@ public class WebExposedTest extends AwParameterizedTest {
      * @param testUri URI to load to execute the test.
      * @param deviceExpectationPath On-device expectation file to compare result to.
      * @param repoExpectationPath The path to use in any output unified diff headers.
-     * @returns If result matches expectation, empty string. If not, a unified diff that can be used
+     * @return If result matches expectation, empty string. If not, a unified diff that can be used
      *     to update the expectation file in a Chromium checkout.
      */
     private String runTestAndDiff(

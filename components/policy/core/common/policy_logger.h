@@ -10,11 +10,14 @@
 #include <string>
 #include <string_view>
 
+#include "base/functional/callback_forward.h"
 #include "base/logging.h"
-#include "base/memory/weak_ptr.h"
+#include "base/synchronization/lock.h"
+#include "base/thread_annotations.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "components/policy/policy_export.h"
+#include "components/policy/resources/webui/mojom/policy.mojom-forward.h"
 
 // Note: the DLOG_POLICY macro has no "#if DCHECK_IS_ON()" check because some
 // messages logged with DLOG are still important to be seen on the
@@ -30,27 +33,27 @@
   ::policy::PolicyLogger::LogHelper(                                  \
       ::policy::PolicyLogger::LogHelper::LogType::kVLog,              \
       ::policy::PolicyLogger::Log::Severity::kVerbose, log_verbosity, \
-      log_source, std::string_view(__FILE__, std::size(__FILE__)), __LINE__)
+      log_source, std::string_view(__FILE__), __LINE__)
 #define DVLOG_POLICY(log_verbosity, log_source)                       \
   ::policy::PolicyLogger::LogHelper(                                  \
       ::policy::PolicyLogger::LogHelper::LogType::kDLog,              \
       ::policy::PolicyLogger::Log::Severity::kVerbose, log_verbosity, \
-      log_source, std::string_view(__FILE__, std::size(__FILE__)), __LINE__)
+      log_source, std::string_view(__FILE__), __LINE__)
 #define LOG_POLICY_INFO(log_type, log_source)                       \
   ::policy::PolicyLogger::LogHelper(                                \
       log_type, ::policy::PolicyLogger::Log::Severity::kInfo,       \
       ::policy::PolicyLogger::LogHelper::kNoVerboseLog, log_source, \
-      std::string_view(__FILE__, std::size(__FILE__)), __LINE__)
+      std::string_view(__FILE__), __LINE__)
 #define LOG_POLICY_WARNING(log_type, log_source)                    \
   ::policy::PolicyLogger::LogHelper(                                \
       log_type, ::policy::PolicyLogger::Log::Severity::kWarning,    \
       ::policy::PolicyLogger::LogHelper::kNoVerboseLog, log_source, \
-      std::string_view(__FILE__, std::size(__FILE__)), __LINE__)
+      std::string_view(__FILE__), __LINE__)
 #define LOG_POLICY_ERROR(log_type, log_source)                      \
   ::policy::PolicyLogger::LogHelper(                                \
       log_type, ::policy::PolicyLogger::Log::Severity::kError,      \
       ::policy::PolicyLogger::LogHelper::kNoVerboseLog, log_source, \
-      std::string_view(__FILE__, std::size(__FILE__)), __LINE__)
+      std::string_view(__FILE__), __LINE__)
 
 #define POLICY_AUTH ::policy::PolicyLogger::Log::Source::kAuthentication
 #define POLICY_PROCESSING ::policy::PolicyLogger::Log::Source::kPolicyProcessing
@@ -103,7 +106,9 @@ class POLICY_EXPORT PolicyLogger {
     int line() const { return line_; }
     base::Time timestamp() const { return timestamp_; }
 
-    base::Value::Dict GetAsDict() const;
+    base::DictValue GetAsDict() const;
+
+    policy::mojom::LogPtr GetAsMojoLog() const;
 
    private:
     Severity log_severity_;
@@ -156,59 +161,40 @@ class POLICY_EXPORT PolicyLogger {
     int line_;
   };
 
-  static constexpr base::TimeDelta kTimeToLive = base::Minutes(30);
-  static constexpr size_t kMaxLogsSize = 200;
+  using GetAsListCallback = base::OnceCallback<void(base::ListValue)>;
+  using GetAsMojoListCallback =
+      base::OnceCallback<void(std::vector<policy::mojom::LogPtr>)>;
+
+  static constexpr size_t kMaxLogCount = 200;
 
   static PolicyLogger* GetInstance();
+
+  static bool IsPolicyLoggingEnabled();
 
   PolicyLogger();
   PolicyLogger(const PolicyLogger&) = delete;
   PolicyLogger& operator=(const PolicyLogger&) = delete;
   ~PolicyLogger();
 
-  // Returns the logs list as base::Value::List to send to UI.
-  base::Value::List GetAsList();
+  // Returns the logs list as base::ListValue to send to UI asynchronously.
+  void GetAsList(GetAsListCallback callback);
 
-  // Checks if browser is running on Android.
-  bool IsPolicyLoggingEnabled() const;
+  // Returns the logs in the mojo format asynchronously.
+  void GetAsMojoList(GetAsMojoListCallback callback);
 
-  // Sets `is_log_deletion_enabled_` to allow scheduling old log deletion.
-  void EnableLogDeletion();
+  // Records memory usage and log count UMA metrics.
+  void RecordPerformanceMetrics();
 
-  // Returns the logs size for testing purposes.
-  size_t GetPolicyLogsSizeForTesting();
-
-  // Clears `logs_` and sets `is_log_deletion_scheduled_` as cleanup after every
-  // test.
+  // Clears `logs_` as cleanup after every test.
   void ResetLoggerForTesting();
 
  private:
-  // Adds a new log to the logs_ list and calls `ScheduleOldLogsDeletion` if
-  // there is no deletion task scheduled.
+  // Adds a new log to the logs_ list.
   void AddLog(Log&& new_log);
-
-  // Deletes logs in the list that have been in the list for `kTimeToLive`
-  // minutes to an hour.
-  void DeleteOldLogs();
-
-  // Posts a new log deletion task and sets the `is_log_deletion_scheduled_`
-  // flag.
-  void ScheduleOldLogsDeletion();
-
-  // Log deletion scheduling fails in unit tests when there is no task
-  // environment (See crbug.com/1434241). To avoid having  a task environment in
-  // every existing and new unit test that calls a function with logs, this flag
-  // is disabled in unit tests, and enabled everywhere else early in the policy
-  // stack initialization from `BrowserPolicyConnector::Init`.
-  bool is_log_deletion_enabled_{false};
-
-  bool is_log_deletion_scheduled_{false};
 
   base::Lock lock_;
 
   std::deque<Log> logs_ GUARDED_BY(lock_);
-
-  base::WeakPtrFactory<PolicyLogger> weak_factory_{this};
 };
 
 }  // namespace policy

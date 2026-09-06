@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.tab;
 
 import androidx.annotation.VisibleForTesting;
 
+import org.jni_zero.JniType;
 import org.jni_zero.NativeMethods;
 
 import org.chromium.base.UnownedUserDataKey;
@@ -115,7 +116,7 @@ public class TrustedCdn extends TabWebContentsUserData {
     private TrustedCdn(Tab tab) {
         super(tab);
         mTab = tab;
-        mNativeTrustedCdn = TrustedCdnJni.get().init(this);
+        mNativeTrustedCdn = TrustedCdnJni.get().init();
     }
 
     @Override
@@ -146,21 +147,23 @@ public class TrustedCdn extends TabWebContentsUserData {
             return null;
         }
         int level = SecurityStateModel.getSecurityLevelForWebContents(mTab.getWebContents());
-        if (level == ConnectionSecurityLevel.DANGEROUS) return null;
+        if (level != ConnectionSecurityLevel.SECURE) return null;
         GURL publisherUrl = TrustedCdnJni.get().getPublisherUrl(mNativeTrustedCdn);
         return publisherUrl.isValid() ? publisherUrl : null;
     }
 
     @NativeMethods
     public interface Natives {
-        long init(TrustedCdn self);
+        long init();
 
         void onDestroyed(long nativeTrustedCdn);
 
-        void setWebContents(long nativeTrustedCdn, WebContents webContents);
+        void setWebContents(
+                long nativeTrustedCdn, @JniType("content::WebContents*") WebContents webContents);
 
         void resetWebContents(long nativeTrustedCdn);
 
+        @JniType("GURL")
         GURL getPublisherUrl(long nativeTrustedCdn);
     }
 }

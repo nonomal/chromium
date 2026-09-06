@@ -9,19 +9,18 @@ snippet to put in uma.py of Chromium Dashboard. Make sure that you review the
 output for correctness.
 """
 
-import optparse
 import os
 import re
-import sys
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'common'))
-import path_util
+import setup_modules  # pylint: disable=unused-import
 
-import update_histogram_enum
+import chromium_src.tools.metrics.common.path_util as path_util
+import chromium_src.tools.metrics.histograms.update_histogram_enum as update_histogram_enum
 
 
-USE_COUNTER_MOJOM_PATH = 'third_party/blink/public/mojom/use_counter/'\
-                         'metrics/css_property_id.mojom'
+USE_COUNTER_MOJOM_PATH = (
+  'third_party/blink/public/mojom/use_counter/metrics/css_property_id.mojom'
+)
 
 
 def EnumToCssProperty(enum_name):
@@ -30,8 +29,8 @@ def EnumToCssProperty(enum_name):
   # uppercase letters, such as in "ZIndex" that need to convert to "z-index".
 
   # Special case total page measured for backward compat.
-  if enum_name == "TotalPagesMeasured":
-    return "Total Pages Measured"
+  if enum_name == 'TotalPagesMeasured':
+    return 'Total Pages Measured'
 
   return re.sub(r'([a-zA-Z])([A-Z])', r'\1-\2', enum_name).lower()
 
@@ -42,9 +41,12 @@ def ReadCssProperties(filename):
     content = f.readlines()
 
   # Looking for a single line like "kFontWeight = 10,"
-  ENUM_REGEX = re.compile(r"""k(\w+)\s*=       # capture the enum name
+  ENUM_REGEX = re.compile(
+    r"""k(\w+)\s*=       # capture the enum name
                               \s*(\d+),?       # capture the id
-                              """, re.VERBOSE)
+                              """,
+    re.VERBOSE,
+  )
 
   properties = {}
   for line in content:
@@ -65,6 +67,9 @@ def ReadCssProperties(filename):
 
 if __name__ == '__main__':
   update_histogram_enum.UpdateHistogramFromDict(
-      'tools/metrics/histograms/metadata/blink/enums.xml',
-      'MappedCSSProperties', ReadCssProperties(USE_COUNTER_MOJOM_PATH),
-      USE_COUNTER_MOJOM_PATH, os.path.basename(__file__))
+    'tools/metrics/histograms/metadata/blink/enums.xml',
+    'MappedCSSProperties',
+    ReadCssProperties(USE_COUNTER_MOJOM_PATH),
+    USE_COUNTER_MOJOM_PATH,
+    os.path.basename(__file__),
+  )

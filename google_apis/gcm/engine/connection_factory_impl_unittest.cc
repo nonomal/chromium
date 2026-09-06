@@ -13,10 +13,8 @@
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/test/task_environment.h"
-#include "google_apis/gcm/base/gcm_features.h"
 #include "google_apis/gcm/base/mcs_util.h"
 #include "google_apis/gcm/engine/connection_factory.h"
 #include "google_apis/gcm/engine/fake_connection_handler.h"
@@ -466,7 +464,7 @@ TEST_F(ConnectionFactoryImplTest, FailThenNetworkChangeEvent) {
 
   factory()->SetConnectResult(net::ERR_FAILED);
   factory()->OnConnectionChanged(
-      network::mojom::ConnectionType::CONNECTION_WIFI);
+      net::NetworkChangeNotifier::ConnectionType::CONNECTION_WIFI);
   WaitForConnections();
 
   // Backoff should not change because of network change.
@@ -486,7 +484,7 @@ TEST_F(ConnectionFactoryImplTest, CanarySucceedsThenDisconnects) {
 
   factory()->SetConnectResult(net::OK);
   factory()->OnConnectionChanged(
-      network::mojom::ConnectionType::CONNECTION_ETHERNET);
+      net::NetworkChangeNotifier::ConnectionType::CONNECTION_ETHERNET);
   WaitForConnections();
   EXPECT_TRUE(factory()->IsEndpointReachable());
   EXPECT_TRUE(connected_server().is_valid());
@@ -512,7 +510,7 @@ TEST_F(ConnectionFactoryImplTest, CanarySucceedsRetryDuringLogin) {
   factory()->SetDelayLogin(true);
   factory()->SetConnectResult(net::OK);
   factory()->OnConnectionChanged(
-      network::mojom::ConnectionType::CONNECTION_WIFI);
+      net::NetworkChangeNotifier::ConnectionType::CONNECTION_WIFI);
   WaitForConnections();
   EXPECT_FALSE(factory()->IsEndpointReachable());
 
@@ -596,9 +594,6 @@ TEST_F(ConnectionFactoryImplTest, SignalResetRestoresBackoff) {
 
 TEST_F(ConnectionFactoryImplTest,
        ShouldNotIncreaseBackoffDelayOnNetworkChange) {
-  base::test::ScopedFeatureList feature_override(
-      gcm::features::kGCMDoNotIncreaseBackoffDelayOnNetworkChange);
-
   factory()->SetConnectResult(net::ERR_NAME_NOT_RESOLVED);
   factory()->Connect();
   WaitForConnections();
@@ -607,7 +602,8 @@ TEST_F(ConnectionFactoryImplTest,
 
   // Mimic a network change with `ERR_NAME_NOT_RESOLVED` error.
   factory()->SetConnectResult(net::ERR_NAME_NOT_RESOLVED);
-  factory()->OnConnectionChanged(network::mojom::ConnectionType::CONNECTION_4G);
+  factory()->OnConnectionChanged(
+      net::NetworkChangeNotifier::ConnectionType::CONNECTION_4G);
   WaitForConnections();
   ASSERT_FALSE(factory()->IsEndpointReachable());
 
@@ -621,9 +617,6 @@ TEST_F(ConnectionFactoryImplTest,
 // connection.
 TEST_F(ConnectionFactoryImplTest,
        ShouldRetryWithSmallDelayAfterManyNetworkChanges) {
-  base::test::ScopedFeatureList feature_override(
-      gcm::features::kGCMDoNotIncreaseBackoffDelayOnNetworkChange);
-
   factory()->SetConnectResult(net::ERR_NAME_NOT_RESOLVED);
   base::TimeTicks connect_time = factory()->tick_clock()->NowTicks();
   factory()->Connect();
@@ -635,7 +628,7 @@ TEST_F(ConnectionFactoryImplTest,
   for (size_t i = 0; i < kNumAttempts; ++i) {
     factory()->SetConnectResult(net::ERR_NAME_NOT_RESOLVED);
     factory()->OnConnectionChanged(
-        network::mojom::ConnectionType::CONNECTION_4G);
+        net::NetworkChangeNotifier::ConnectionType::CONNECTION_4G);
     WaitForConnections();
     ASSERT_FALSE(factory()->IsEndpointReachable());
   }
@@ -651,10 +644,6 @@ TEST_F(ConnectionFactoryImplTest,
 // When the network is disconnected, close the socket and suppress further
 // connection attempts until the network returns.
 TEST_F(ConnectionFactoryImplTest, SuppressConnectWhenNoNetwork) {
-  base::test::ScopedFeatureList feature_override;
-  feature_override.InitAndEnableFeature(
-      gcm::features::kGCMAvoidConnectionWhenNetworkUnavailable);
-
   factory()->SetConnectResult(net::OK);
   factory()->Connect();
   EXPECT_TRUE(factory()->NextRetryAttempt().is_null());
@@ -665,13 +654,14 @@ TEST_F(ConnectionFactoryImplTest, SuppressConnectWhenNoNetwork) {
 
   // Will trigger reset, but will not attempt a new connection.
   factory()->OnConnectionChanged(
-      network::mojom::ConnectionType::CONNECTION_NONE);
+      net::NetworkChangeNotifier::ConnectionType::CONNECTION_NONE);
   EXPECT_FALSE(factory()->IsEndpointReachable());
   EXPECT_TRUE(factory()->NextRetryAttempt().is_null());
 
   // When the network returns, attempt to connect.
   factory()->SetConnectResult(net::OK);
-  factory()->OnConnectionChanged(network::mojom::ConnectionType::CONNECTION_4G);
+  factory()->OnConnectionChanged(
+      net::NetworkChangeNotifier::ConnectionType::CONNECTION_4G);
   WaitForConnections();
 
   EXPECT_TRUE(factory()->IsEndpointReachable());
@@ -681,7 +671,8 @@ TEST_F(ConnectionFactoryImplTest, SuppressConnectWhenNoNetwork) {
 // Receiving a network change event before the initial connection should have
 // no effect.
 TEST_F(ConnectionFactoryImplTest, NetworkChangeBeforeFirstConnection) {
-  factory()->OnConnectionChanged(network::mojom::ConnectionType::CONNECTION_4G);
+  factory()->OnConnectionChanged(
+      net::NetworkChangeNotifier::ConnectionType::CONNECTION_4G);
   factory()->SetConnectResult(net::OK);
   factory()->Connect();
   EXPECT_TRUE(factory()->NextRetryAttempt().is_null());
@@ -776,7 +767,7 @@ TEST_F(ConnectionFactoryImplTest,
   factory()->SetMultipleConnectResults(net::ERR_CONNECTION_FAILED,
                                        /*num_expected_attempts=*/2);
   factory()->OnConnectionChanged(
-      network::mojom::ConnectionType::CONNECTION_WIFI);
+      net::NetworkChangeNotifier::ConnectionType::CONNECTION_WIFI);
   WaitForConnections();
   ASSERT_FALSE(factory()->IsEndpointReachable());
   ASSERT_FALSE(factory()->NextRetryAttempt().is_null());

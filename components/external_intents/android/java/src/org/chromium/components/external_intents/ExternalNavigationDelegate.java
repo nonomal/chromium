@@ -161,20 +161,10 @@ public interface ExternalNavigationDelegate {
     void returnAsActivityResult(GURL url);
 
     /**
-     * Records the scheme of the external navigation if this is likely a CCT launched for auth
-     * purposes.
-     *
-     * @param url The {@link GURL} of the external navigation.
-     */
-    void maybeRecordExternalNavigationSchemeHistogram(GURL url);
-
-    /**
      * Records metrics relevant to password saving in CCTs if the recorder exists. A recorder might
      * not exist if there was no form submission preceding the external navigation.
      */
     void notifyCctPasswordSavingRecorderOfExternalNavigation();
-
-    void reportIntentToSafeBrowsing(Intent intent);
 
     /**
      * Returns an intent that targets the embedder application if opening the url in incognito
@@ -207,4 +197,32 @@ public interface ExternalNavigationDelegate {
      * @param params The parameters describing the navigation.
      */
     boolean shouldSelfNavigationLaunchAsMultipleTask(ExternalNavigationParams params);
+
+    /**
+     * Sets the {@link ExternalNavigationHelper} to use.
+     *
+     * @param helper The {@link ExternalNavigationHelper} to set.
+     */
+    void setExternalNavigationHelper(ExternalNavigationHelper helper);
+
+    /**
+     * Returns whether the external navigation should be allowed for HTTP protocols. If this returns
+     * true, normal external navigation checks will continue. If this returns false, the navigation
+     * will be kept inside the browser to be opened by the user on demand at a later time.
+     *
+     * @param url The {@link GURL} of the current page.
+     */
+    boolean allowExternalNavigationForHttpProtocols(GURL url);
+
+    /**
+     * Returns whether the given URL is within the scope of the current PWA/TWA.
+     *
+     * @param url The {@link GURL} to check.
+     */
+    default boolean isUrlInPwaScope(GURL url) {
+        return false;
+    }
+
+    /** Reparents the tab associated with this delegate to a new instance of the same PWA. */
+    default void reparentTabToSamePwa() {}
 }

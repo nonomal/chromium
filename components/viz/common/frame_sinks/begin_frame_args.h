@@ -20,6 +20,7 @@ namespace perfetto {
 class EventContext;
 namespace protos {
 namespace pbzero {
+class AndroidChoreographerFrameCallbackData_FrameTimeline;
 class BeginFrameArgsV2;
 }
 }  // namespace protos
@@ -94,10 +95,14 @@ struct VIZ_COMMON_EXPORT PossibleDeadline {
   // be presented to the user. This would be the present time if viz finished
   // its work before `latch_delta` and subsequent stages were also on time.
   base::TimeDelta present_delta;
+
+  void SetTraceTimelineData(
+      perfetto::protos::pbzero::
+          AndroidChoreographerFrameCallbackData_FrameTimeline& timeline) const;
 };
 
 struct VIZ_COMMON_EXPORT PossibleDeadlines {
-  explicit PossibleDeadlines(size_t preferred_index);
+  explicit PossibleDeadlines(size_t os_preferred_index);
   ~PossibleDeadlines();
 
   // Out-of-line copy and assignment operators.
@@ -106,10 +111,10 @@ struct VIZ_COMMON_EXPORT PossibleDeadlines {
   PossibleDeadlines& operator=(const PossibleDeadlines& other);
   PossibleDeadlines& operator=(PossibleDeadlines&& other);
 
-  const PossibleDeadline& GetPreferredDeadline() const;
+  const PossibleDeadline& GetOSPreferredDeadline() const;
 
   // Index into to `deadlines` vector picked by the OS as the default.
-  size_t preferred_index;
+  size_t os_preferred_index;
   std::vector<PossibleDeadline> deadlines;
 };
 
@@ -130,6 +135,13 @@ struct VIZ_COMMON_EXPORT BeginFrameArgs {
   static constexpr uint64_t kInvalidFrameNumber = 0;
   static constexpr uint64_t kStartingFrameNumber = 1;
 
+  // The maximum factor by which the unthrottled interval can exceed the current
+  // interval. Because unthrottled_interval is the minimum possible interval, it
+  // is usually strictly less than or equal to interval. This multiplier
+  // accounts for potential jitter or rounding errors when the two intervals are
+  // theoretically equal.
+  static constexpr float kUnthrottledIntervalJitterMultiplier = 1.5f;
+
   // Creates an invalid set of values.
   BeginFrameArgs();
   ~BeginFrameArgs();
@@ -147,13 +159,15 @@ struct VIZ_COMMON_EXPORT BeginFrameArgs {
   // You should be able to find all instances where a BeginFrame has been
   // created by searching for "BeginFrameArgs::Create".
   // The location argument should **always** be BEGINFRAME_FROM_HERE macro.
-  static BeginFrameArgs Create(CreationLocation location,
-                               uint64_t source_id,
-                               uint64_t sequence_number,
-                               base::TimeTicks frame_time,
-                               base::TimeTicks deadline,
-                               base::TimeDelta interval,
-                               BeginFrameArgsType type);
+  static BeginFrameArgs Create(
+      CreationLocation location,
+      uint64_t source_id,
+      uint64_t sequence_number,
+      base::TimeTicks frame_time,
+      base::TimeTicks deadline,
+      base::TimeDelta interval,
+      BeginFrameArgsType type,
+      base::TimeDelta unthrottled_interval = base::TimeDelta());
 
   // This is the default interval assuming 60Hz to use to avoid sprinkling the
   // code with magic numbers.
@@ -198,6 +212,11 @@ struct VIZ_COMMON_EXPORT BeginFrameArgs {
   // The inverse of the desired frame rate.
   base::TimeDelta interval;
 
+  // The inverse of the maximum possible hardware refresh rate. If positive,
+  // this is the minimum possible vsync interval, even if |interval| might be
+  // throttled to a lower frame rate.
+  base::TimeDelta unthrottled_interval;
+
   BeginFrameId frame_id;
 
   // |trace_id| is used as the id for the trace-events associated with this
@@ -237,13 +256,22 @@ struct VIZ_COMMON_EXPORT BeginFrameArgs {
   // `frame_time`.
   std::optional<PossibleDeadlines> possible_deadlines;
 
+  // VSync interval derived from `possible_deadlines` (aka frame timelines)
+  // provided by the OS. Populated on recent Android versions when
+  // `features::kCalculateDeadlineDerivedInterval` is enabled. See
+  // `ExternalBeginFrameSourceAndroid::AChoreographerImpl::
+  // CalculateDeadlineDerivedInterval()`. Unlike `possible_deadlines`, this
+  // field IS serialized over Mojo.
+  std::optional<base::TimeDelta> deadline_derived_interval;
+
  private:
   BeginFrameArgs(uint64_t source_id,
                  uint64_t sequence_number,
                  base::TimeTicks frame_time,
                  base::TimeTicks deadline,
                  base::TimeDelta interval,
-                 BeginFrameArgsType type);
+                 BeginFrameArgsType type,
+                 base::TimeDelta unthrottled_interval);
 };
 
 // Sent by a BeginFrameObserver as acknowledgment of completing a BeginFrame.
@@ -294,6 +322,9 @@ struct VIZ_COMMON_EXPORT CADisplayLinkParams {
   base::TimeTicks target_timestamp;
   // The time interval between screen refresh updates.
   base::TimeDelta interval;
+  // The time when DisplayLinkMacMojo::OnDisplayLinkVSyncCallback() is called in
+  // the Browser process.
+  base::TimeTicks ipc_begin_timestamp;
 };
 #endif
 

@@ -16,7 +16,6 @@
 #include "ash/shell.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
@@ -25,12 +24,12 @@
 #include "chrome/browser/ash/system_web_apps/system_web_app_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/web_applications/web_app_launch_process.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/account_id/account_id.h"
+#include "components/services/app_service/public/cpp/app_launch_params.h"
 #include "components/services/app_service/public/cpp/app_types.h"
 #include "components/services/app_service/public/cpp/app_update.h"
 #include "components/webapps/common/web_app_id.h"
@@ -265,7 +264,7 @@ IN_PROC_BROWSER_TEST_F(AppServiceAppItemBrowserTest,
 using AppServiceSystemWebAppItemBrowserTest = AppServiceAppItemBrowserTest;
 
 IN_PROC_BROWSER_TEST_F(AppServiceSystemWebAppItemBrowserTest, Activate) {
-  Profile* const profile = browser()->profile();
+  Profile* const profile = browser()->GetProfile();
   ash::SystemWebAppManager::GetForTest(profile)->InstallSystemAppsForTesting();
   const webapps::AppId app_id = ash::kHelpAppId;
 

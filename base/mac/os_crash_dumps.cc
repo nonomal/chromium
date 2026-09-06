@@ -2,17 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "base/mac/os_crash_dumps.h"
 
 #include <signal.h>
 #include <stddef.h>
 #include <unistd.h>
 
+#include "base/compiler_specific.h"
 #include "base/logging.h"
 
 namespace base::mac {
@@ -43,7 +39,7 @@ void DisableOSCrashDumps() {
                                       SIGABRT};
 
   // For all these signals, just wire things up so we exit immediately.
-  for (size_t i = 0; i < std::size(signals_to_intercept); ++i) {
+  for (int signal_to_intercept : signals_to_intercept) {
     struct sigaction act = {};
     act.sa_handler = ExitSignalHandler;
 
@@ -54,7 +50,7 @@ void DisableOSCrashDumps() {
     if (sigemptyset(&act.sa_mask) != 0) {
       DPLOG(FATAL) << "sigemptyset() failed";
     }
-    if (sigaction(signals_to_intercept[i], &act, NULL) != 0) {
+    if (sigaction(signal_to_intercept, &act, NULL) != 0) {
       DPLOG(FATAL) << "sigaction() failed";
     }
   }

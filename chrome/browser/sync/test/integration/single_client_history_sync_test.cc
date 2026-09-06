@@ -13,7 +13,7 @@
 #include "chrome/browser/sync/test/integration/history_helper.h"
 #include "chrome/browser/sync/test/integration/sync_service_impl_harness.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
-#include "chrome/browser/ui/browser_navigator_params.h"
+#include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/webui_url_constants.h"
@@ -39,7 +39,7 @@
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/metrics/desktop_session_duration/desktop_session_duration_tracker.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #endif
 
@@ -159,6 +159,11 @@ class SingleClientHistorySyncTest
   ~SingleClientHistorySyncTest() override = default;
 
   void SetUpOnMainThread() override {
+    SetUpEmbeddedTestServer();
+    SyncTest::SetUpOnMainThread();
+  }
+
+  virtual void SetUpEmbeddedTestServer() {
     host_resolver()->AddRule("*", "127.0.0.1");
 
     // Set up a server redirect from `kRedirectFromPath` to `kRedirectToPath`.
@@ -174,30 +179,6 @@ class SingleClientHistorySyncTest
           response->AddCustomHeader("Location", kRedirectToPath);
           return response;
         }));
-
-    ASSERT_TRUE(embedded_test_server()->Start());
-
-    SyncTest::SetUpOnMainThread();
-  }
-
-  bool SetupClients() override {
-    if (!SyncTest::SetupClients()) {
-      return false;
-    }
-
-#if !BUILDFLAG(IS_ANDROID)
-    // On non-Android platforms, SyncTest doesn't create any tabs in the
-    // profiles/browsers it creates. Create an "empty" tab here, so that
-    // NavigateToURL() will have a non-null WebContents to navigate in.
-    for (int i = 0; i < num_clients(); ++i) {
-      if (!AddTabAtIndexToBrowser(GetBrowser(0), 0, GURL("about:blank"),
-                                  ui::PAGE_TRANSITION_AUTO_TOPLEVEL)) {
-        return false;
-      }
-    }
-#endif
-
-    return true;
   }
 
   SyncTest::SetupSyncMode GetSetupSyncMode() const override {
@@ -400,12 +381,9 @@ IN_PROC_BROWSER_TEST_P(SingleClientHistorySyncTest,
 
 IN_PROC_BROWSER_TEST_P(SingleClientHistorySyncTest,
                        ReportsSessionTotalDurationWhilePaused) {
-  // Invoke the base class directly as this test doesn't need a tab, and it
-  // allows verifying that the very initial transport state is *not* PAUSED.
+  // Invoke the base class directly as this test doesn't need a tab.
   ASSERT_TRUE(SyncTest::SetupClients());
 
-  ASSERT_NE(GetSyncService(0)->GetTransportState(),
-            syncer::SyncService::TransportState::PAUSED);
   ASSERT_TRUE(GetSyncService(0)->HasCachedPersistentAuthErrorForMetrics());
 
   {
@@ -452,7 +430,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientHistorySyncTest, UploadsAllFields) {
   // cause it to get updated with some details that are known only now, e.g.
   // the visit duration.
   // Note that currently, HistoryBackend depends on the presence of a referrer
-  // to correctly populate the visit_duration (see crbug.com/1357013).
+  // to correctly populate the visit_duration (see crbug.com/40236508).
   GURL url2 =
       embedded_test_server()->GetURL("www.host2.com", "/sync/simple.html");
   NavigateToURL(url2, ui::PAGE_TRANSITION_LINK, /*referrer=*/url1);
@@ -1064,7 +1042,7 @@ IN_PROC_BROWSER_TEST_P(SingleClientHistorySyncTest,
   ASSERT_TRUE(history_helper::GetUrlFromClient(/*index=*/0, url_remote, &row));
 
   // Turn Sync off *in two steps* (similar to what actually happens in practice,
-  // see crbug.com/1383912#c5):
+  // see crbug.com/40246310#comment6):
   // 1) Remove the Sync-consent bit (but leave the primary account around).
   // 2) Actually remove the primary account.
   // After step 1, Sync will *not* be fully disabled, but rather try to start up
@@ -1153,5 +1131,55 @@ IN_PROC_BROWSER_TEST_P(SingleClientHistorySyncTest,
 
   EXPECT_TRUE(GetSyncService(0)->GetActiveDataTypes().Has(syncer::HISTORY));
 }
+
+class SingleClientHistorySync404Test : public SingleClientHistorySyncTest {
+ public:
+  void NavigateTo404URL() {
+    GURL url404 = embedded_test_server()->GetURL("/page404.html");
+    content::NavigationController::LoadURLParams params(url404);
+    params.transition_type = ui::PAGE_TRANSITION_TYPED;
+    content::NavigateToURLBlockUntilNavigationsComplete(GetActiveWebContents(),
+                                                        params, 1);
+
+    ASSERT_EQ(404, GetActiveWebContents()
+                       ->GetController()
+                       .GetLastCommittedEntry()
+                       ->GetHttpStatusCode());
+  }
+
+  void SetUpEmbeddedTestServer() override {
+    host_resolver()->AddRule("*", "127.0.0.1");
+
+    embedded_test_server()->RegisterDefaultHandler(base::BindRepeating(
+        [](const net::test_server::HttpRequest& request)
+            -> std::unique_ptr<net::test_server::HttpResponse> {
+          if (request.relative_url == "/page404.html") {
+            auto response =
+                std::make_unique<net::test_server::BasicHttpResponse>();
+            response->set_code(net::HTTP_NOT_FOUND);
+            response->set_content_type("text/html");
+            response->set_content("<html><body>Not found</body></html>");
+            return response;
+          }
+          return nullptr;
+        }));
+  }
+};
+
+IN_PROC_BROWSER_TEST_P(SingleClientHistorySync404Test, Handles404Visits) {
+  ASSERT_TRUE(SetupSync());
+
+  // Navigate to a URL that results in a 404 error.
+  NavigateTo404URL();
+  // The URL that we navigated to.
+  GURL url404 = embedded_test_server()->GetURL("/page404.html");
+
+  ASSERT_TRUE(WaitForServerHistory(UnorderedElementsAre(UrlIs(url404.spec()))));
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         SingleClientHistorySync404Test,
+                         GetSyncTestModes(),
+                         testing::PrintToStringParamName());
 
 }  // namespace

@@ -198,6 +198,10 @@ class MouseWheelEventQueueTest : public testing::Test,
     ++acked_event_count_;
     last_acked_event_ = event.event;
     last_acked_event_state_ = ack_result;
+    if (destroy_queue_on_ack_) {
+      queue_.reset();
+      return;
+    }
   }
 
   bool IsWheelScrollInProgress() override {
@@ -286,7 +290,8 @@ class MouseWheelEventQueueTest : public testing::Test,
                       blink::WebMouseWheelEvent::Phase momentum_phase,
                       bool has_synthetic_phase = false) {
     SendMouseWheel(x, y, global_x, global_y, dX, dY, modifiers, high_precision,
-                   phase, momentum_phase, WebInputEvent::kRailsModeFree,
+                   phase, momentum_phase,
+                   WebInputEvent::RailsMode::kRailsModeFree,
                    has_synthetic_phase);
   }
 
@@ -401,6 +406,10 @@ class MouseWheelEventQueueTest : public testing::Test,
     EXPECT_EQ(1U, GetAndResetSentEventCount());
   }
 
+  void set_destroy_queue_on_ack(bool destroy) {
+    destroy_queue_on_ack_ = destroy;
+  }
+
   base::test::SingleThreadTaskEnvironment task_environment_;
   std::unique_ptr<MouseWheelEventQueue> queue_;
   std::vector<std::unique_ptr<WebInputEvent>> sent_events_;
@@ -408,6 +417,7 @@ class MouseWheelEventQueueTest : public testing::Test,
   size_t acked_event_count_;
   blink::mojom::InputEventResultState last_acked_event_state_;
   WebMouseWheelEvent last_acked_event_;
+  bool destroy_queue_on_ack_ = false;
 
  private:
   bool is_wheel_scroll_in_progress_ = false;
@@ -584,10 +594,11 @@ TEST_F(MouseWheelEventQueueTest, GestureSendingInterrupted) {
 TEST_F(MouseWheelEventQueueTest, GestureRailScrolling) {
   const ui::ScrollGranularity scroll_units =
       ui::ScrollGranularity::kScrollByPixel;
-  SendMouseWheel(
-      kWheelScrollX, kWheelScrollY, kWheelScrollGlobalX, kWheelScrollGlobalY, 1,
-      1, 0, false, WebMouseWheelEvent::kPhaseBegan,
-      WebMouseWheelEvent::kPhaseNone, WebInputEvent::kRailsModeHorizontal);
+  SendMouseWheel(kWheelScrollX, kWheelScrollY, kWheelScrollGlobalX,
+                 kWheelScrollGlobalY, 1, 1, 0, false,
+                 WebMouseWheelEvent::kPhaseBegan,
+                 WebMouseWheelEvent::kPhaseNone,
+                 WebInputEvent::RailsMode::kRailsModeHorizontal);
   EXPECT_EQ(0U, queued_event_count());
   EXPECT_TRUE(event_in_flight());
   EXPECT_EQ(1U, GetAndResetSentEventCount());
@@ -605,10 +616,11 @@ TEST_F(MouseWheelEventQueueTest, GestureRailScrolling) {
   EXPECT_EQ(0U, sent_gesture_event(1)->data.scroll_update.delta_y);
   EXPECT_EQ(2U, GetAndResetSentEventCount());
 
-  SendMouseWheel(
-      kWheelScrollX, kWheelScrollY, kWheelScrollGlobalX, kWheelScrollGlobalY, 1,
-      1, 0, false, WebMouseWheelEvent::kPhaseChanged,
-      WebMouseWheelEvent::kPhaseNone, WebInputEvent::kRailsModeVertical);
+  SendMouseWheel(kWheelScrollX, kWheelScrollY, kWheelScrollGlobalX,
+                 kWheelScrollGlobalY, 1, 1, 0, false,
+                 WebMouseWheelEvent::kPhaseChanged,
+                 WebMouseWheelEvent::kPhaseNone,
+                 WebInputEvent::RailsMode::kRailsModeVertical);
 
   EXPECT_EQ(0U, queued_event_count());
   EXPECT_TRUE(event_in_flight());
@@ -634,10 +646,11 @@ TEST_F(MouseWheelEventQueueTest, GestureRailScrolling) {
 TEST_F(MouseWheelEventQueueTest, WheelScrollLatching) {
   const ui::ScrollGranularity scroll_units =
       ui::ScrollGranularity::kScrollByPixel;
-  SendMouseWheel(
-      kWheelScrollX, kWheelScrollY, kWheelScrollGlobalX, kWheelScrollGlobalY, 1,
-      1, 0, false, WebMouseWheelEvent::kPhaseBegan,
-      WebMouseWheelEvent::kPhaseNone, WebInputEvent::kRailsModeVertical);
+  SendMouseWheel(kWheelScrollX, kWheelScrollY, kWheelScrollGlobalX,
+                 kWheelScrollGlobalY, 1, 1, 0, false,
+                 WebMouseWheelEvent::kPhaseBegan,
+                 WebMouseWheelEvent::kPhaseNone,
+                 WebInputEvent::RailsMode::kRailsModeVertical);
   EXPECT_EQ(0U, queued_event_count());
   EXPECT_TRUE(event_in_flight());
   EXPECT_EQ(1U, GetAndResetSentEventCount());
@@ -655,10 +668,11 @@ TEST_F(MouseWheelEventQueueTest, WheelScrollLatching) {
   EXPECT_EQ(1U, sent_gesture_event(1)->data.scroll_update.delta_y);
   EXPECT_EQ(2U, GetAndResetSentEventCount());
 
-  SendMouseWheel(
-      kWheelScrollX, kWheelScrollY, kWheelScrollGlobalX, kWheelScrollGlobalY, 1,
-      1, 0, false, WebMouseWheelEvent::kPhaseChanged,
-      WebMouseWheelEvent::kPhaseNone, WebInputEvent::kRailsModeVertical);
+  SendMouseWheel(kWheelScrollX, kWheelScrollY, kWheelScrollGlobalX,
+                 kWheelScrollGlobalY, 1, 1, 0, false,
+                 WebMouseWheelEvent::kPhaseChanged,
+                 WebMouseWheelEvent::kPhaseNone,
+                 WebInputEvent::RailsMode::kRailsModeVertical);
   EXPECT_EQ(0U, queued_event_count());
   EXPECT_TRUE(event_in_flight());
   EXPECT_EQ(1U, GetAndResetSentEventCount());
@@ -685,7 +699,8 @@ TEST_F(MouseWheelEventQueueTest, DoNotSwapXYForShiftScroll) {
   SendMouseWheel(kWheelScrollX, kWheelScrollY, kWheelScrollGlobalX,
                  kWheelScrollGlobalY, 0.0, 1.0, WebInputEvent::kShiftKey, false,
                  WebMouseWheelEvent::kPhaseBegan,
-                 WebMouseWheelEvent::kPhaseNone, WebInputEvent::kRailsModeFree);
+                 WebMouseWheelEvent::kPhaseNone,
+                 WebInputEvent::RailsMode::kRailsModeFree);
   EXPECT_EQ(0U, queued_event_count());
   EXPECT_TRUE(event_in_flight());
   EXPECT_EQ(1U, GetAndResetSentEventCount());
@@ -703,4 +718,18 @@ TEST_F(MouseWheelEventQueueTest, DoNotSwapXYForShiftScroll) {
   EXPECT_EQ(2U, GetAndResetSentEventCount());
 }
 #endif
+TEST_F(MouseWheelEventQueueTest, SynchronousDestructionDuringAck) {
+  SendMouseWheel(kWheelScrollX, kWheelScrollY, kWheelScrollGlobalX,
+                 kWheelScrollGlobalY, 1, 1, 0, false,
+                 WebMouseWheelEvent::kPhaseBegan,
+                 WebMouseWheelEvent::kPhaseNone);
+  EXPECT_EQ(0U, queued_event_count());
+  EXPECT_TRUE(event_in_flight());
+
+  set_destroy_queue_on_ack(true);
+  SendMouseWheelEventAck(blink::mojom::InputEventResultState::kNotConsumed);
+
+  EXPECT_EQ(nullptr, queue_);
+}
+
 }  // namespace input

@@ -33,6 +33,7 @@
 #include "ui/gl/buildflags.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
+#include "ui/gl/gl_features.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gl_surface_egl.h"
@@ -91,6 +92,8 @@ scoped_refptr<gl::GLSurface> InitializeGLSurface(gl::GLDisplay* display) {
 scoped_refptr<gl::GLContext> InitializeGLContext(gl::GLSurface* surface) {
   TRACE_EVENT("gpu,startup", "gpu_info_collector::InitializeGLContext");
   gl::GLContextAttribs attribs;
+  attribs.allow_es_version_fallback =
+      !features::ShouldFallbackToSWIfGLES3NotSupported();
   scoped_refptr<gl::GLContext> context(
       gl::init::CreateGLContext(nullptr, surface, attribs));
   if (!context.get()) {
@@ -164,8 +167,6 @@ std::string GetDisplayTypeString(gl::DisplayType type) {
       return "SWIFT_SHADER";
     case gl::ANGLE_WARP:
       return "ANGLE_WARP";
-    case gl::ANGLE_D3D9:
-      return "ANGLE_D3D9";
     case gl::ANGLE_D3D11:
       return "ANGLE_D3D11";
     case gl::ANGLE_OPENGL:
@@ -288,6 +289,7 @@ void GetDawnTogglesForSkiaGraphite(
   force_enabled_toggles->push_back("skip_validation");
   force_enabled_toggles->push_back(
       "disable_lazy_clear_for_mapped_at_creation_buffer");
+  force_enabled_toggles->push_back("dump_shaders_on_failure");
 #if BUILDFLAG(IS_WIN)
   if (backend_type == wgpu::BackendType::D3D11) {
     force_enabled_toggles->push_back(
@@ -361,7 +363,6 @@ void ReportWebGPUAdapterMetrics(dawn::native::Instance* instance) {
 
 void ReportWebGPUSupportMetrics(dawn::native::Instance* instance) {
   static BASE_FEATURE(kCollectWebGPUSupportMetrics,
-                      "CollectWebGPUSupportMetrics",
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX)
                       base::FEATURE_DISABLED_BY_DEFAULT);
 #else
@@ -855,7 +856,6 @@ void CollectDawnInfo(const gpu::GpuPreferences& gpu_preferences,
       dawn_search_path = module_path.AsEndingWithSeparator().MaybeAsASCII();
     }
   }
-  const char* dawn_search_path_c_str = dawn_search_path.c_str();
 
   // Get the list of required toggles for WebGPU.
   std::vector<const char*> required_enabled_toggles_webgpu;
@@ -877,9 +877,11 @@ void CollectDawnInfo(const gpu::GpuPreferences& gpu_preferences,
   dawn_toggles.disabledToggles = required_disabled_toggles_webgpu.data();
 
   dawn::native::DawnInstanceDescriptor dawn_instance_desc = {};
-  dawn_instance_desc.additionalRuntimeSearchPathsCount =
-      dawn_search_path.empty() ? 0u : 1u;
-  dawn_instance_desc.additionalRuntimeSearchPaths = &dawn_search_path_c_str;
+  std::string_view dawn_search_path_view = dawn_search_path;
+  if (!dawn_search_path.empty()) {
+    dawn_instance_desc.additionalRuntimeSearchPaths =
+        base::span_from_ref(dawn_search_path_view);
+  }
 
   wgpu::InstanceDescriptor instance_desc = {};
   instance_desc.nextInChain = &dawn_instance_desc;

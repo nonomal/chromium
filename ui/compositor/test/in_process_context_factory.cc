@@ -28,7 +28,7 @@
 #include "components/viz/service/display/display_scheduler.h"
 #include "components/viz/service/display/output_surface_client.h"
 #include "components/viz/service/display/output_surface_frame.h"
-#include "components/viz/service/display/overlay_processor_stub.h"
+#include "components/viz/service/display/overlay_processor_interface.h"
 #include "components/viz/service/display_embedder/skia_output_surface_dependency_impl.h"
 #include "components/viz/service/display_embedder/skia_output_surface_impl.h"
 #include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
@@ -127,16 +127,6 @@ class InProcessContextFactory::PerCompositorData
     display_->SetVisible(visible);
   }
   void Resize(const gfx::Size& size) override { display_->Resize(size); }
-#if BUILDFLAG(IS_WIN)
-  bool DisableSwapUntilResize() override {
-    display_->DisableSwapUntilResize(base::OnceClosure());
-    return true;
-  }
-  void DisableSwapUntilResize(
-      DisableSwapUntilResizeCallback callback) override {
-    display_->DisableSwapUntilResize(std::move(callback));
-  }
-#endif
   void SetDisplayColorMatrix(const gfx::Transform& matrix) override {
     output_color_matrix_ = gfx::TransformToSkM44(matrix);
   }
@@ -157,12 +147,14 @@ class InProcessContextFactory::PerCompositorData
   void AddVSyncParameterObserver(
       mojo::PendingRemote<viz::mojom::VSyncParameterObserver> observer)
       override {}
-#if BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_MAC)
   void UpdateRefreshRate(float refresh_rate) override {}
+#endif
+
+#if BUILDFLAG(IS_ANDROID)
   void SetAdaptiveRefreshRateInfo(
-      bool has_support,
-      float suggested_high,
-      float device_scale_factor) override {}
+      viz::mojom::AdaptiveRefreshRateInfoPtr info) override {}
   void PreserveChildSurfaceControls() override {}
   void SetSwapCompletionCallbackEnabled(bool enabled) override {}
 #endif  // BUILDFLAG(IS_ANDROID)
@@ -302,8 +294,15 @@ void InProcessContextFactory::CreateLayerTreeFrameSink(
     data = CreatePerCompositorData(compositor.get());
   data->Bind(display_private.BindNewEndpointAndPassDedicatedReceiver());
 
+  auto* test_gpu_service_holder = viz::TestGpuServiceHolder::GetInstance();
+#if BUILDFLAG(IS_WIN)
+  if (initialize_direct_composition_) {
+    // Calling this multiple times is safe on the same instance.
+    test_gpu_service_holder->InitializeDirectComposition();
+  }
+#endif
   auto skia_deps = std::make_unique<viz::SkiaOutputSurfaceDependencyImpl>(
-      viz::TestGpuServiceHolder::GetInstance()->gpu_service(),
+      test_gpu_service_holder->gpu_service(),
       output_to_window_ ? data->surface_handle() : gpu::kNullSurfaceHandle);
   auto display_dependency =
       std::make_unique<viz::DisplayCompositorMemoryAndTaskController>(
@@ -312,7 +311,12 @@ void InProcessContextFactory::CreateLayerTreeFrameSink(
       viz::SkiaOutputSurfaceImpl::Create(display_dependency.get(),
                                          renderer_settings_, &debug_settings_);
 
-  auto overlay_processor = std::make_unique<viz::OverlayProcessorStub>();
+  auto overlay_processor =
+      viz::OverlayProcessorInterface::CreateOverlayProcessor(
+          output_surface.get(),
+          output_to_window_ ? data->surface_handle() : gpu::kNullSurfaceHandle,
+          output_surface->capabilities(), display_dependency.get(),
+          &shared_image_manager_, renderer_settings_, &debug_settings_);
 
   std::unique_ptr<viz::BeginFrameSource> begin_frame_source;
   if (disable_vsync_) {

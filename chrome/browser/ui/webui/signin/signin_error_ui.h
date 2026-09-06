@@ -35,12 +35,11 @@ class SigninErrorUI : public SigninWebDialogUI {
 
   ~SigninErrorUI() override = default;
 
-  // SigninWebDialogUI:
-  void InitializeMessageHandlerWithBrowser(Browser* browser) override;
+  static std::u16string GetTitle(const std::u16string& email);
 
- private:
-  void InitializeMessageHandlerForProfilePicker();
-  void Initialize(Browser* browser, bool from_profile_picker);
+  // SigninWebDialogUI:
+  void InitializeMessageHandlerWithBrowser(
+      BrowserWindowInterface* browser) override;
 };
 
 #endif  // CHROME_BROWSER_UI_WEBUI_SIGNIN_SIGNIN_ERROR_UI_H_

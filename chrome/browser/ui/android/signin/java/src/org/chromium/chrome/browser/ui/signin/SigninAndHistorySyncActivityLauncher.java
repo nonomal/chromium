@@ -15,7 +15,6 @@ import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.profiles.ProfileProvider;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.device_lock.DeviceLockActivityLauncher;
@@ -50,13 +49,17 @@ public interface SigninAndHistorySyncActivityLauncher {
         SigninAccessPoint.COLLABORATION_SHARE_TAB_GROUP,
         SigninAccessPoint.COLLABORATION_LEAVE_OR_DELETE_TAB_GROUP,
         SigninAccessPoint.HISTORY_SYNC_EDUCATIONAL_TIP,
+        SigninAccessPoint.SET_UP_LIST,
+        SigninAccessPoint.GLIC_LAUNCH_BUTTON,
+        SigninAccessPoint.SETTINGS_AUTOFILL_AND_PASSWORDS,
+        SigninAccessPoint.DEEP_LINK_DEFAULT,
     })
     @Retention(RetentionPolicy.SOURCE)
     @interface AccessPoint {}
 
     /**
-     * Create {@Intent} for the {@link SigninAndHistorySyncActivity} from an eligible access point,
-     * Show an error if the intent can't be created.
+     * Create {@link Intent} for the {@link SigninAndHistorySyncActivity} from an eligible access
+     * point, Show an error if the intent can't be created.
      *
      * @param profile the current profile.
      * @param config The object containing configurations for the sign-in & history sync views.
@@ -70,7 +73,11 @@ public interface SigninAndHistorySyncActivityLauncher {
             @AccessPoint int accessPoint);
 
     /**
-     * Creates a coordinator for the bottom-sheet sign-in and history sync flow.
+     * Creates a coordinator for the bottom-sheet sign-in and history sync flow and registers it to
+     * receive activity results using {@link ActivityResultTracker}. Should be called **early** in
+     * the embedding UI's creation (e.g. activity onCreate) so the coordinator can receive and
+     * handle in-flight activity result if the activity holding the coordinator is killed by the OS.
+     * See {@link ActivityResultTracker} for more details.
      *
      * @param windowAndroid The {@link WindowAndroid} for the current window.
      * @param activity The hosting {@link Activity}.
@@ -79,7 +86,7 @@ public interface SigninAndHistorySyncActivityLauncher {
      * @param delegate The {@link BottomSheetSigninAndHistorySyncCoordinator.Delegate} to be
      *     notified of flow completion for instance.
      * @param deviceLockActivityLauncher The launcher for the device lock challenge.
-     * @param profileSupplier The supplier of the {@link ProfileProvider}.
+     * @param profileSupplier The supplier of the {@link Profile}.
      * @param bottomSheetController The {@link BottomSheetController} to show the sign-in bottom
      *     sheet.
      * @param modalDialogManagerSupplier The supplier of the {@link ModalDialogManager}.
@@ -94,15 +101,15 @@ public interface SigninAndHistorySyncActivityLauncher {
                     ActivityResultTracker activityResultTracker,
                     BottomSheetSigninAndHistorySyncCoordinator.Delegate delegate,
                     DeviceLockActivityLauncher deviceLockActivityLauncher,
-                    OneshotSupplier<ProfileProvider> profileSupplier,
-                    BottomSheetController bottomSheetController,
-                    Supplier<@Nullable ModalDialogManager> modalDialogManagerSupplier,
-                    SnackbarManager snackbarManager,
+                    OneshotSupplier<Profile> profileSupplier,
+                    Supplier<BottomSheetController> bottomSheetControllerSupplier,
+                    Supplier<ModalDialogManager> modalDialogManagerSupplier,
+                    Supplier<@Nullable SnackbarManager> snackbarManagerSupplier,
                     @SigninAccessPoint int signinAccessPoint);
 
     /**
-     * Create {@Intent} for the fullscreen flavor of the {@link SigninAndHistorySyncActivity} if
-     * sign-in and history opt-in are allowed. Does not show any error if the intent can't be
+     * Create {@link Intent} for the fullscreen flavor of the {@link SigninAndHistorySyncActivity}
+     * if sign-in and history opt-in are allowed. Does not show any error if the intent can't be
      * created.
      *
      * @param config The object containing IDS of resources for the sign-in & history sync views.
@@ -116,15 +123,14 @@ public interface SigninAndHistorySyncActivityLauncher {
             @SigninAccessPoint int signinAccessPoint);
 
     /**
-     * Create {@Intent} for the fullscreen flavor of the {@link SigninAndHistorySyncActivity} if
-     * sign-in and history opt-in are allowed. Show an error if the intent can't be created.
+     * Create {@link Intent} for the fullscreen flavor of the {@link SigninAndHistorySyncActivity}
+     * if sign-in and history opt-in are allowed. Show an error if the intent can't be created.
      *
      * @param config The object containing IDS of resources for the sign-in & history sync views.
      * @param accessPoint The access point from which the sign-in was triggered.
      */
     @MainThread
-    @Nullable
-    Intent createFullscreenSigninIntentOrShowError(
+    @Nullable Intent createFullscreenSigninIntentOrShowError(
             Context context,
             Profile profile,
             FullscreenSigninAndHistorySyncConfig config,

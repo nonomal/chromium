@@ -10,15 +10,18 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/values_test_util.h"
 #include "components/autofill/core/browser/payments/payments_request_details.h"
 #include "components/autofill/core/browser/payments/payments_requests/payments_request_constants.h"
-#include "components/autofill/core/browser/payments/test/autofill_payments_test_utils.h"
-#include "components/autofill/core/browser/test_utils/autofill_test_utils.h"
+#include "components/autofill/core/browser/payments/payments_requests/payments_request_test_api.h"
+#include "components/autofill/core/browser/payments/test/autofill_payments_test_util.h"
+#include "components/autofill/core/browser/test_utils/autofill_test_util.h"
+#include "components/autofill/core/common/autofill_payments_features.h"
+#include "components/version_info/version_info.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace autofill::payments {
-
 namespace {
 
 struct CreateCardOptions {
@@ -77,13 +80,16 @@ TEST(CreateCardRequestTest, GetRequestUrlPath) {
 }
 
 TEST(CreateCardRequestTest, GetRequestContent_ContainsExpectedData) {
+  base::test::ScopedFeatureList feature_list(
+      autofill::features::kAutofillAddChromeUserContextFields);
+
   std::unique_ptr<CreateCardRequest> request = BuildCreateCardRequest();
-  base::Value::Dict address =
-      base::Value::Dict()
+  base::DictValue address =
+      base::DictValue()
           .Set("phone_number", "16502111111")
           .Set("postal_address",
-               base::Value::Dict()
-                   .Set("address_line", base::Value::List()
+               base::DictValue()
+                   .Set("address_line", base::ListValue()
                                             .Append("666 Erebus St.")
                                             .Append("Apt 8"))
                    .Set("administrative_area_name", "CA")
@@ -94,27 +100,34 @@ TEST(CreateCardRequestTest, GetRequestContent_ContainsExpectedData) {
   int exp_month, exp_year;
   base::StringToInt(test::NextMonth(), &exp_month);
   base::StringToInt(test::NextYear(), &exp_year);
-  base::Value::Dict json_dict =
-      base::Value::Dict()
+  base::DictValue json_dict =
+      base::DictValue()
           .Set("context",
-               base::Value::Dict()
+               base::DictValue()
                    .Set("billable_service",
-                        payments::kUploadPaymentMethodBillableServiceNumber)
+                        kUploadPaymentMethodBillableServiceNumber)
                    .Set("customer_context",
                         PaymentsRequest::BuildCustomerContextDictionary(
                             111122223333))
                    .Set("language_code", "en"))
-          .Set("chrome_user_context",
-               base::Value::Dict().Set(
-                   "client_behavior_signals",
-                   base::Value::List().Append(static_cast<int>(
-                       ClientBehaviorConstants::kOfferingToSaveCvc))))
+          .Set(
+              "chrome_user_context",
+              base::DictValue()
+                  .Set("client_behavior_signals",
+                       base::ListValue().Append(static_cast<int>(
+                           ClientBehaviorConstants::kOfferingToSaveCvc)))
+                  .Set("full_sync_enabled", false)
+                  .Set("chrome_major_version",
+                       version_info::GetMajorVersionNumberAsInt())
+                  .Set("client_type",
+                       static_cast<int>(test_api(request.get())
+                                            .GetChromeUserContextClientType())))
           .Set("context_token", "some context token")
           .Set("risk_data_encoded",
                PaymentsRequest::BuildRiskDictionary("some risk data"))
           .Set("nickname", "some nickname")
           .Set("card_info",
-               base::Value::Dict()
+               base::DictValue()
                    .Set("pan", "__param:s7e_21_pan")
                    .Set("cvc", "__param:s7e_13_cvc")
                    .Set("expiration_month", exp_month)
@@ -127,10 +140,9 @@ TEST(CreateCardRequestTest, GetRequestContent_ContainsExpectedData) {
   std::string expected_request_content = base::StringPrintf(
       "requestContentType=application/json; charset=utf-8&request=%s"
       "&s7e_21_pan=%s&s7e_13_cvc=%s",
-      base::EscapeUrlEncodedData(expected_json_content, true).c_str(),
-      base::EscapeUrlEncodedData(base::UTF16ToASCII(u"4111111111111111"), true)
-          .c_str(),
-      base::EscapeUrlEncodedData(base::UTF16ToASCII(u"123"), true).c_str());
+      base::EscapeUrlEncodedData(expected_json_content, true),
+      base::EscapeUrlEncodedData(base::UTF16ToASCII(u"4111111111111111"), true),
+      base::EscapeUrlEncodedData(base::UTF16ToASCII(u"123"), true));
 
   EXPECT_EQ(request->GetRequestContent(), expected_request_content);
 }
@@ -176,8 +188,8 @@ TEST(CreateCardRequestTest, GetTimeout) {
 TEST(CreateCardRequestTest, ParseResponse) {
   std::unique_ptr<CreateCardRequest> request = BuildCreateCardRequest();
 
-  base::Value::Dict response = base::Value::Dict().Set(
-      "card_info", base::Value::Dict().Set("instrument_id", "11223344"));
+  base::DictValue response = base::DictValue().Set(
+      "card_info", base::DictValue().Set("instrument_id", "11223344"));
 
   request->ParseResponse(response);
 
@@ -188,11 +200,10 @@ TEST(CreateCardRequestTest, ParseResponse) {
 TEST(CreateCardRequestTest, ParseResponse_MissingCardInfo) {
   std::unique_ptr<CreateCardRequest> request = BuildCreateCardRequest();
 
-  request->ParseResponse(base::Value::Dict());
+  request->ParseResponse(base::DictValue());
 
   EXPECT_FALSE(request->IsResponseComplete());
 }
 
 }  // namespace
-
 }  // namespace autofill::payments

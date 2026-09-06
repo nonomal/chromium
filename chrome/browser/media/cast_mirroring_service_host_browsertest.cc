@@ -4,7 +4,8 @@
 
 #include "chrome/browser/media/cast_mirroring_service_host.h"
 
-#include "base/containers/contains.h"
+#include <algorithm>
+
 #include "base/containers/flat_map.h"
 #include "base/json/json_reader.h"
 #include "base/memory/raw_ptr.h"
@@ -16,9 +17,9 @@
 #include "chrome/browser/media/router/discovery/access_code/access_code_cast_feature.h"
 #include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tabs/alert/tab_alert.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/alert/tab_alert_controller.h"
+#include "chrome/browser/ui/tabs/tab_change_type.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
@@ -29,6 +30,7 @@
 #include "components/mirroring/mojom/session_observer.mojom.h"
 #include "components/mirroring/mojom/session_parameters.mojom.h"
 #include "components/prefs/pref_service.h"
+#include "components/tabs/public/tab_alert.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -235,16 +237,16 @@ class CastMirroringServiceHostBrowserTest
               base::JSONReader::Read(message->json_format_data,
                                      base::JSON_PARSE_CHROMIUM_EXTENSIONS);
           ASSERT_TRUE(root_or_error);
-          const base::Value::Dict& root = root_or_error->GetDict();
+          const base::DictValue& root = root_or_error->GetDict();
           const std::string* type = root.FindString("type");
           ASSERT_TRUE(type);
           if (*type == "OFFER") {
-            const base::Value::Dict* offer = root.FindDict("offer");
+            const base::DictValue* offer = root.FindDict("offer");
             EXPECT_TRUE(offer);
-            const base::Value::List* streams =
+            const base::ListValue* streams =
                 offer->FindList("supportedStreams");
             for (auto& stream : *streams) {
-              const base::Value::Dict& stream_dict = stream.GetDict();
+              const base::DictValue& stream_dict = stream.GetDict();
               const int stream_target_delay =
                   stream_dict.FindInt("targetDelay").value();
               EXPECT_EQ(stream_target_delay, expected_delay_ms);
@@ -417,12 +419,12 @@ IN_PROC_BROWSER_TEST_F(CastMirroringServiceHostBrowserTest, TabIndicator) {
   // UI's model is sent an event that might change the indicator status.
   class IndicatorChangeObserver : public TabStripModelObserver {
    public:
-    explicit IndicatorChangeObserver(Browser* browser) : browser_(browser) {
-      browser_->tab_strip_model()->AddObserver(this);
+    explicit IndicatorChangeObserver(BrowserWindowInterface* browser)
+        : browser_(browser) {
+      browser_->GetTabStripModel()->AddObserver(this);
     }
 
     void OnTabChangedAt(tabs::TabInterface* tab,
-                        int index,
                         TabChangeType change_type) override {
       std::move(on_tab_changed_).Run();
     }
@@ -434,7 +436,7 @@ IN_PROC_BROWSER_TEST_F(CastMirroringServiceHostBrowserTest, TabIndicator) {
     }
 
    private:
-    const raw_ptr<Browser> browser_;
+    const raw_ptr<BrowserWindowInterface> browser_;
     base::OnceClosure on_tab_changed_;
   };
 
@@ -444,8 +446,8 @@ IN_PROC_BROWSER_TEST_F(CastMirroringServiceHostBrowserTest, TabIndicator) {
 
   // Run the browser until the indicator turns on.
   const base::TimeTicks start_time = base::TimeTicks::Now();
-  while (!base::Contains(GetTabAlertStatesForContents(contents),
-                         tabs::TabAlert::kTabCapturing)) {
+  while (!std::ranges::contains(GetTabAlertStatesForContents(contents),
+                                tabs::TabAlert::kTabCapturing)) {
     if (base::TimeTicks::Now() - start_time >
         TestTimeouts::action_max_timeout()) {
       EXPECT_THAT(GetTabAlertStatesForContents(contents),

@@ -79,7 +79,7 @@ class NetworkServiceObserver
         this);
   }
 
-  void WaitForConnectionType(network::mojom::ConnectionType type) {
+  void WaitForConnectionType(net::NetworkChangeNotifier::ConnectionType type) {
     while (last_connection_type_ != type) {
       run_loop_ = std::make_unique<base::RunLoop>();
       run_loop_->Run();
@@ -88,7 +88,8 @@ class NetworkServiceObserver
   }
 
   // network::NetworkConnectionTracker::NetworkConnectionObserver:
-  void OnConnectionChanged(network::mojom::ConnectionType type) override {
+  void OnConnectionChanged(
+      net::NetworkChangeNotifier::ConnectionType type) override {
     change_count_++;
     last_connection_type_ = type;
 
@@ -101,7 +102,7 @@ class NetworkServiceObserver
   }
 
   int change_count_ = 0;
-  network::mojom::ConnectionType last_connection_type_;
+  net::NetworkChangeNotifier::ConnectionType last_connection_type_;
 
  private:
   std::unique_ptr<base::RunLoop> run_loop_;
@@ -116,14 +117,19 @@ class NetworkChangeManagerClientBrowserTest : public InProcessBrowserTest {
     InProcessBrowserTest::SetUpOnMainThread();
 
     // Make sure everyone thinks we have an ethernet connection.
-    NetObserver().WaitForConnectionType(
+    NetObserver net_observer;
+    net_observer.WaitForConnectionType(
         net::NetworkChangeNotifier::CONNECTION_ETHERNET);
-    NetworkServiceObserver().WaitForConnectionType(
-        network::mojom::ConnectionType::CONNECTION_ETHERNET);
+    NetworkServiceObserver network_service_observer;
+    network_service_observer.WaitForConnectionType(
+        net::NetworkChangeNotifier::ConnectionType::CONNECTION_ETHERNET);
 
-    // Wait for all services to be removed.
+    // Wait until both consumers under test observe the no-network state.
     ShillServiceClient::Get()->GetTestInterface()->ClearServices();
-    base::RunLoop().RunUntilIdle();
+    net_observer.WaitForConnectionType(
+        net::NetworkChangeNotifier::CONNECTION_NONE);
+    network_service_observer.WaitForConnectionType(
+        net::NetworkChangeNotifier::ConnectionType::CONNECTION_NONE);
   }
 
   ShillServiceClient::TestInterface* service_client() {
@@ -150,9 +156,9 @@ IN_PROC_BROWSER_TEST_F(NetworkChangeManagerClientBrowserTest,
             net_observer.last_connection_type_);
 
   network_service_observer.WaitForConnectionType(
-      network::mojom::ConnectionType::CONNECTION_WIFI);
+      net::NetworkChangeNotifier::ConnectionType::CONNECTION_WIFI);
   EXPECT_EQ(2, network_service_observer.change_count_);
-  EXPECT_EQ(network::mojom::ConnectionType::CONNECTION_WIFI,
+  EXPECT_EQ(net::NetworkChangeNotifier::ConnectionType::CONNECTION_WIFI,
             network_service_observer.last_connection_type_);
 }
 
@@ -177,7 +183,7 @@ IN_PROC_BROWSER_TEST_F(NetworkChangeManagerClientBrowserTest,
   NetObserver().WaitForConnectionType(
       net::NetworkChangeNotifier::CONNECTION_WIFI);
   network_service_observer.WaitForConnectionType(
-      network::mojom::ConnectionType::CONNECTION_WIFI);
+      net::NetworkChangeNotifier::ConnectionType::CONNECTION_WIFI);
   EXPECT_EQ(2, network_service_observer.change_count_);
 }
 

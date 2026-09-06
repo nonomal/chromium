@@ -17,6 +17,7 @@
 #include "net/reporting/reporting_cache.h"
 #include "net/reporting/reporting_cache_observer.h"
 #include "net/reporting/reporting_target_type.h"
+#include "net/reporting/reporting_uploader.h"
 
 class GURL;
 
@@ -52,7 +53,8 @@ class NET_EXPORT ReportingService {
       const ReportingPolicy& policy,
       URLRequestContext* request_context,
       ReportingCache::PersistentReportingStore* store,
-      const base::flat_map<std::string, GURL>& enterprise_reporting_endpoints);
+      ReportingUploader::PrepareUploadRequestCallback
+          prepare_upload_request_callback = base::DoNothing());
 
   // Creates a ReportingService for testing purposes using an
   // already-constructed ReportingContext. The ReportingService will take
@@ -82,7 +84,7 @@ class NET_EXPORT ReportingService {
       const std::string& user_agent,
       const std::string& group,
       const std::string& type,
-      base::Value::Dict body,
+      base::DictValue body,
       int depth,
       ReportingTargetType target_type) = 0;
 
@@ -108,16 +110,15 @@ class NET_EXPORT ReportingService {
       const IsolationInfo& isolation_info,
       const base::flat_map<std::string, std::string>& endpoints) = 0;
 
-  // Configures reporting endpoints set by the ReportingEndpoints enterprise
-  // policy.
-  // `endpoints` is a mapping of endpoint names to URLs.
-  virtual void SetEnterpriseReportingEndpoints(
-      const base::flat_map<std::string, GURL>& endpoints) = 0;
-
   // Attempts to send any queued reports and removes all associated
   // configuration for `reporting_source`. This is called when a source is
   // destroyed.
   virtual void SendReportsAndRemoveSource(
+      const base::UnguessableToken& reporting_source) = 0;
+
+  // Attempts to send any queued reports for `reporting_source` immediately,
+  // without removing the associated endpoint configuration.
+  virtual void SendReportsForSource(
       const base::UnguessableToken& reporting_source) = 0;
 
   // Removes browsing data from the Reporting system. See

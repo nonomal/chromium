@@ -9,7 +9,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ash/extensions/speech/speech_recognition_private_recognizer.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
-#include "chrome/common/extensions/api/speech_recognition_private.h"
+#include "chromeos/ash/experiences/extensions/api/speech_recognition_private.h"
 #include "content/public/browser/browser_context.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/event_router_factory.h"
@@ -71,11 +71,11 @@ void SpeechRecognitionPrivateManager::HandleSpeechRecognitionStopped(
   std::optional<int> client_id = GetClientIdFromKey(key);
   EventRouter* event_router = EventRouter::Get(context_);
 
-  base::Value::Dict return_dict;
+  base::DictValue return_dict;
   if (client_id.has_value())
     return_dict.Set("clientId", client_id.value());
 
-  base::Value::List event_args;
+  base::ListValue event_args;
   event_args.Append(std::move(return_dict));
   std::unique_ptr<Event> event = std::make_unique<Event>(
       events::SPEECH_RECOGNITION_PRIVATE_ON_STOP,

@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/style/style_generated_image.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_to_number.h"
 #include "ui/gfx/color_utils.h"
 
 namespace blink {
@@ -51,7 +52,7 @@ void BlendWithColorsFromGradient(cssvalue::CSSGradientValue* gradient,
 
   Vector<Color> stop_colors = gradient->GetStopColors(document, style);
   if (colors.empty()) {
-    colors.AppendRange(stop_colors.begin(), stop_colors.end());
+    colors.append_range(stop_colors);
   } else {
     if (colors.size() > 1) {
       // Gradient on gradient is too complicated, bail out.
@@ -191,8 +192,9 @@ static bool IsLargeFont(const TextInfo& text_info) {
   String font_size_css = text_info.font_size;
   String font_weight = text_info.font_weight;
   // font_size_css always has 'px' appended at the end;
-  String font_size_str = font_size_css.Substring(0, font_size_css.length() - 2);
-  double font_size_px = font_size_str.ToDouble();
+  StringView font_size_str =
+      StringView(font_size_css, 0, font_size_css.length() - 2);
+  double font_size_px = StringToDouble(font_size_str).value_or(0);
   double font_size_pt = font_size_px * 72 / 96;
   bool is_bold = font_weight == "bold" || font_weight == "bolder" ||
                  font_weight == "600" || font_weight == "700" ||
@@ -338,26 +340,24 @@ bool InspectorContrast::GetColorsFromRect(PhysicalRect rect,
       continue;
     }
 
-    const ComputedStyle* style = layout_object->Style();
-    if (!style)
-      continue;
+    const ComputedStyle& style = layout_object->StyleRef();
 
     // If background elements are hidden, ignore their background colors.
-    if (element != top_element && style->Visibility() == EVisibility::kHidden) {
+    if (element != top_element && style.Visibility() == EVisibility::kHidden) {
       continue;
     }
 
     Color background_color =
-        style->VisitedDependentColor(GetCSSPropertyBackgroundColor());
+        style.VisitedDependentColor(GetCSSPropertyBackgroundColor());
 
     // Opacity applies to the entire element so mix it with the alpha channel.
-    if (style->HasOpacity()) {
-      background_color.SetAlpha(background_color.Alpha() * style->Opacity());
+    if (style.HasOpacity()) {
+      background_color.SetAlpha(background_color.Alpha() * style.Opacity());
       // If the background element is the ancestor of the top element or is the
       // top element, the opacity affects the text color of the top element.
       if (element == top_element ||
           FlatTreeTraversal::IsDescendantOf(*top_element, *element)) {
-        *text_opacity *= style->Opacity();
+        *text_opacity *= style.Opacity();
       }
     }
 
@@ -378,7 +378,7 @@ bool InspectorContrast::GetColorsFromRect(PhysicalRect rect,
       }
     }
 
-    AddColorsFromImageStyle(*style, *layout_object, colors, found_opaque_color,
+    AddColorsFromImageStyle(style, *layout_object, colors, found_opaque_color,
                             found_non_transparent_color);
 
     bool contains = found_top_element || GetNodeRect(node).Contains(rect);

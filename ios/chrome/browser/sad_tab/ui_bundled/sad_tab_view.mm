@@ -10,7 +10,7 @@
 #import "components/strings/grit/components_strings.h"
 #import "components/ui_metrics/sadtab_metrics_types.h"
 #import "ios/chrome/browser/shared/model/url/chrome_url_constants.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/ui/util/rtl_geometry.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
@@ -491,13 +491,13 @@ NSString* const kMessageTextViewBulletRTLFormat = @"\u202E%@\u202C";
     case SadTabViewMode::RELOAD:
       UMA_HISTOGRAM_ENUMERATION(ui_metrics::kSadTabReloadHistogramKey,
                                 ui_metrics::SadTabEvent::BUTTON_CLICKED,
-                                ui_metrics::SadTabEvent::MAX_SAD_TAB_EVENT);
+                                ui_metrics::SadTabEvent::COUNT);
       [self.delegate sadTabViewReload:self];
       break;
     case SadTabViewMode::FEEDBACK: {
       UMA_HISTOGRAM_ENUMERATION(ui_metrics::kSadTabFeedbackHistogramKey,
                                 ui_metrics::SadTabEvent::BUTTON_CLICKED,
-                                ui_metrics::SadTabEvent::MAX_SAD_TAB_EVENT);
+                                ui_metrics::SadTabEvent::COUNT);
       [self.delegate sadTabViewShowReportAnIssue:self];
       break;
     }

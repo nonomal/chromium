@@ -62,21 +62,19 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/chromeos/devicetype_utils.h"
 #include "ui/chromeos/styles/cros_tokens_color_mappings.h"
+#include "ui/compositor/layer_solid_color.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
-#include "ui/display/test/display_manager_test_api.h"
 #include "ui/events/event_constants.h"
 #include "ui/message_center/message_center.h"
 #include "ui/views/accessibility/view_accessibility.h"
+#include "ui/views/controls/image_view.h"
 
 namespace ash {
 
 namespace {
 
 constexpr int kQsDetailedViewHeight = 464;
-constexpr char kQuickSettingsPageCountOnClose[] =
-    "Ash.QuickSettings.PageCountOnClose";
-
 }  // namespace
 
 using message_center::MessageCenter;
@@ -440,46 +438,6 @@ TEST_P(UnifiedSystemTrayTest, TimeInQuickSettingsMetric) {
                                     /*count=*/2);
 }
 
-// Tests that the number of quick settings pages is recorded when the QS bubble
-// is closed.
-TEST_P(UnifiedSystemTrayTest, QuickSettingsPageCountMetric) {
-  base::HistogramTester histogram_tester;
-
-  // Show the bubble with one page and verify that nothing is recorded yet.
-  auto* tray = GetPrimaryUnifiedSystemTray();
-  tray->ShowBubble();
-  tray->bubble()
-      ->unified_system_tray_controller()
-      ->model()
-      ->pagination_model()
-      ->SetTotalPages(1);
-  histogram_tester.ExpectTotalCount(kQuickSettingsPageCountOnClose, 0);
-
-  // Close the bubble and verify that the metric is recorded.
-  tray->CloseBubble();
-  histogram_tester.ExpectTotalCount(kQuickSettingsPageCountOnClose, 1);
-  histogram_tester.ExpectBucketCount(kQuickSettingsPageCountOnClose,
-                                     /*sample=*/1,
-                                     /*expected_count=*/1);
-
-  // Show the bubble with two pages, and verify that the metric is recorded when
-  // the bubble is closed.
-  tray->ShowBubble();
-  tray->bubble()
-      ->unified_system_tray_controller()
-      ->model()
-      ->pagination_model()
-      ->SetTotalPages(2);
-  tray->CloseBubble();
-  histogram_tester.ExpectTotalCount(kQuickSettingsPageCountOnClose, 2);
-  histogram_tester.ExpectBucketCount(kQuickSettingsPageCountOnClose,
-                                     /*sample=*/2,
-                                     /*expected_count=*/1);
-  histogram_tester.ExpectBucketCount(kQuickSettingsPageCountOnClose,
-                                     /*sample=*/1,
-                                     /*expected_count=*/1);
-}
-
 // Tests that pressing the TOGGLE_CALENDAR accelerator once results in the
 // calendar view showing.
 TEST_P(UnifiedSystemTrayTest, PressCalendarAccelerator) {
@@ -717,16 +675,16 @@ TEST_P(UnifiedSystemTrayTest, TrayBackgroundColorAfterSwitchToTabletMode) {
       Shell::Get()->tablet_mode_controller();
 
   tablet_mode_controller->SetEnabledForTest(false);
-  EXPECT_EQ(tray->layer()->background_color(),
+  EXPECT_EQ(tray->layer()->AsSolidColor()->background_color().toSkColor(),
             ShelfConfig::Get()->GetShelfControlButtonColor(widget));
 
   tablet_mode_controller->SetEnabledForTest(true);
-  EXPECT_EQ(tray->layer()->background_color(),
+  EXPECT_EQ(tray->layer()->AsSolidColor()->background_color().toSkColor(),
             widget->GetColorProvider()->GetColor(
                 cros_tokens::kCrosSysSystemBaseElevated));
 
   tablet_mode_controller->SetEnabledForTest(false);
-  EXPECT_EQ(tray->layer()->background_color(),
+  EXPECT_EQ(tray->layer()->AsSolidColor()->background_color().toSkColor(),
             ShelfConfig::Get()->GetShelfControlButtonColor(widget));
 }
 
@@ -863,40 +821,6 @@ TEST_P(UnifiedSystemTrayTest, BubbleViewSizeChangeWithBigMainPage) {
   EXPECT_EQ(main_page_height, bubble_view->height());
 
   tray->CloseBubble();
-}
-
-TEST_P(UnifiedSystemTrayTest, BrightnessSliderDisabledInDockedMode) {
-  const int64_t internal_display_id =
-      display::test::DisplayManagerTestApi(display_manager())
-          .SetFirstDisplayAsInternalDisplay();
-  const auto internal_info =
-      display_manager()->GetDisplayInfo(internal_display_id);
-  constexpr int64_t external_id = 210000010;
-
-  const auto external_info =
-      display::ManagedDisplayInfo::CreateFromSpecWithID("400x300", external_id);
-
-  std::vector<display::ManagedDisplayInfo> display_info_list;
-  display_info_list.push_back(internal_info);
-  display_info_list.push_back(external_info);
-  display_manager()->OnNativeDisplaysChanged(display_info_list);
-  EXPECT_EQ(2U, display_manager()->GetNumDisplays());
-
-  auto* tray = GetPrimaryUnifiedSystemTray();
-  tray->ShowBubble();
-
-  EXPECT_TRUE(tray->bubble()
-                  ->unified_system_tray_controller()
-                  ->GetBrightnessSliderEnabledForTesting());
-
-  display_info_list.clear();
-  display_info_list.push_back(external_info);
-  display_manager()->OnNativeDisplaysChanged(display_info_list);
-  EXPECT_EQ(1U, display_manager()->GetNumDisplays());
-
-  EXPECT_FALSE(tray->bubble()
-                   ->unified_system_tray_controller()
-                   ->GetBrightnessSliderEnabledForTesting());
 }
 
 // Tests that there's no bubble in the kiosk mode.
@@ -1442,12 +1366,8 @@ TEST_F(UnifiedSystemTrayAccessibilityTest, NameWithBatterySaverDisabled) {
 }
 
 // This tests the logic in `PowerStatus::GetAccessibleNameString` where
-// `features::IsBatteryChargeLimitAvailable()` and `IsBatteryChargeLimited()`
-// are both true.
+// `IsBatteryChargeLimited()` is true.
 TEST_F(UnifiedSystemTrayAccessibilityTest, NameWithBatteryChargeLimitEnabled) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(ash::features::kBatteryChargeLimit);
-
   std::vector<std::u16string> status;
   CreateDefaultStatusForTesting(&status);
 

@@ -4,11 +4,11 @@
 
 #include <fidl/fuchsia.logger/cpp/fidl.h>
 
+#include <algorithm>
 #include <cstring>
 #include <optional>
 #include <string_view>
 
-#include "base/containers/contains.h"
 #include "base/fuchsia/test_log_listener_safe.h"
 #include "base/strings/stringprintf.h"
 #include "fuchsia_web/common/test/frame_test_util.h"
@@ -47,10 +47,13 @@ class WebEngineIntegrationLoggingTest : public WebEngineIntegrationTestBase {
       : isolated_archivist_(
             *filtered_service_directory().outgoing_directory()) {}
 
-  ~WebEngineIntegrationLoggingTest() override {
+  ~WebEngineIntegrationLoggingTest() override = default;
+
+  void TearDown() override {
     // We're about to shut down the realm; unbind to unhook the error handler.
     frame_.Unbind();
     context_.Unbind();
+    context_provider_.reset();
   }
 
   void StartWebEngine(base::CommandLine command_line) override {
@@ -102,7 +105,7 @@ TEST_F(WebEngineIntegrationLoggingTest, SetJavaScriptLogLevel_DEBUG) {
 
   // Verify that the Frame's |debug_name| is amongst the log message tags.
   EXPECT_FALSE(logged_message->tags().empty());
-  EXPECT_TRUE(base::Contains(logged_message->tags(), kFrameLogTag));
+  EXPECT_TRUE(std::ranges::contains(logged_message->tags(), kFrameLogTag));
 
   // Verify that the message is formatted as expected.
   EXPECT_EQ(NormalizeConsoleLogMessage(logged_message->msg()),

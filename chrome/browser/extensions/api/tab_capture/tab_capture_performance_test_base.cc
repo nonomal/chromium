@@ -20,9 +20,9 @@
 #include "base/time/time.h"
 #include "base/trace_event/trace_config.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/tracing.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -31,6 +31,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/test_extension_registry_observer.h"
+#include "extensions/browser/unpacked_installer.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/switches.h"
 #include "net/dns/mock_host_resolver.h"
@@ -56,7 +57,6 @@ void TabCapturePerformanceTestBase::SetUp() {
   feature_list_.InitWithFeatures(
       {
           features::kAudioServiceSandbox,
-          features::kAudioServiceLaunchOnStartup,
           features::kAudioServiceOutOfProcess,
       },
       {});
@@ -137,7 +137,7 @@ base::Value TabCapturePerformanceTestBase::SendMessageToExtension(
       extension_->id().c_str(), json.c_str());
   LOG(INFO) << "Sending message to extension: " << json;
   auto* const web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
   for (;;) {
     auto result = content::EvalJs(web_contents, javascript);
     if (result.is_ok()) {

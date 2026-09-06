@@ -35,9 +35,9 @@ found in the LICENSE file.
          "binary_toggle" above and the "four_state_cookie_toggle" below. -->
     <org.chromium.components.browser_ui.site_settings.TriStateSiteSettingsPreference
         android:key="tri_state_toggle" />
-    <!-- A three state toggle for third-party cookies preferences, only shown for the ThirdPartyCookies category. -->
-    <org.chromium.components.browser_ui.site_settings.TriStateCookieSettingsPreference
-        android:key="tri_state_cookie_toggle" />
+    <!-- A toggle shown only for the ThirdPartyCookies preference category. -->
+    <org.chromium.components.browser_ui.site_settings.CookieSettingsPreference
+        android:key="cookie_toggle" />
     <!-- A message to display why toggle is disabled -->
     <org.chromium.components.browser_ui.settings.ChromeBasePreference
         android:key="toggle_disable_reason" />
@@ -80,7 +80,7 @@ found in the LICENSE file.
 
     <!-- Text messages describing the anti abuse features.
          Only shown for the AntiAbuse category. -->
-    <PreferenceCategory
+    <org.chromium.components.browser_ui.settings.ChromeBasePreferenceCategory
         android:key="anti_abuse_when_on_header"
         android:title="@string/anti_abuse_when_on_header"/>
     <org.chromium.components.browser_ui.settings.TextMessagePreference
@@ -98,7 +98,7 @@ found in the LICENSE file.
         android:summary="@string/anti_abuse_when_on_section_three"
         android:icon="@drawable/ic_timer"
         app:allowDividerBelow="false" />
-    <PreferenceCategory
+    <org.chromium.components.browser_ui.settings.ChromeBasePreferenceCategory
         android:key="anti_abuse_things_to_consider_header"
         android:title="@string/anti_abuse_things_to_consider_header"/>
     <org.chromium.components.browser_ui.settings.TextMessagePreference

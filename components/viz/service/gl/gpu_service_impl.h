@@ -26,6 +26,7 @@
 #include "components/viz/service/display_embedder/compositor_gpu_thread.h"
 #include "components/viz/service/gl/exit_code.h"
 #include "components/viz/service/viz_service_export.h"
+#include "components/vrp_flags/buildflags.h"
 #include "gpu/command_buffer/common/shm_count.h"
 #include "gpu/command_buffer/service/gpu_persistent_cache.h"
 #include "gpu/command_buffer/service/sequence_id.h"
@@ -46,7 +47,9 @@
 #include "services/viz/privileged/mojom/gl/gpu_host.mojom.h"
 #include "services/viz/privileged/mojom/gl/gpu_service.mojom.h"
 #include "services/viz/privileged/mojom/viz_main.mojom.h"
+#include "services/webnn/public/mojom/webnn_browser_host.mojom.h"
 #include "services/webnn/public/mojom/webnn_context_provider.mojom.h"
+#include "services/webnn/public/mojom/webnn_service_introspection.mojom.h"
 #include "skia/buildflags.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "ui/gfx/gpu_extra_info.h"
@@ -64,6 +67,7 @@ class SharedContextState;
 class SharedImageManager;
 class SyncPointManager;
 class VulkanImplementation;
+class VulkanContextProvider;
 }  // namespace gpu
 
 namespace gpu::webgpu {
@@ -79,9 +83,6 @@ class WebNNContextProviderImpl;
 }  // namespace webnn
 
 namespace viz {
-
-class VulkanContextProvider;
-class MetalContextProvider;
 
 // This runs in the GPU process, and communicates with the gpu host (which is
 // the window server) over the mojom APIs. This is responsible for setting up
@@ -103,6 +104,12 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
     std::unique_ptr<gpu::GpuWatchdogThread> watchdog_thread;
     scoped_refptr<base::SingleThreadTaskRunner> io_runner;
     raw_ptr<gpu::VulkanImplementation> vulkan_implementation = nullptr;
+    // Binds a receiver for the interface the WebNN service uses to broker
+    // operations through the browser (see webnn::mojom::WebNNBrowserHost),
+    // invoked on demand when WebNN is first used.
+    base::OnceCallback<void(
+        mojo::PendingReceiver<webnn::mojom::WebNNBrowserHost>)>
+        bind_webnn_browser_host;
 #if BUILDFLAG(SKIA_USE_DAWN)
     std::unique_ptr<gpu::DawnContextProvider> dawn_context_provider;
 #endif
@@ -164,6 +171,7 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
                            uint64_t client_tracing_id,
                            bool is_gpu_host,
                            bool enable_extra_handles_validation,
+                           mojo::ScopedMessagePipeHandle channel_handle,
                            EstablishGpuChannelCallback callback) override;
   void SetChannelClientPid(int32_t client_id,
                            base::ProcessId client_pid) override;
@@ -201,7 +209,13 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   void BindWebNNContextProvider(
       mojo::PendingReceiver<webnn::mojom::WebNNContextProvider>
           pending_receiver,
-      int client_id) override;
+      int client_id,
+      uint64_t client_tracing_id,
+      bool is_incognito) override;
+
+  void BindWebNNServiceIntrospection(
+      mojo::PendingReceiver<webnn::mojom::WebNNServiceIntrospection>
+          pending_receiver) override;
 
   void GetVideoMemoryUsageStats(
       GetVideoMemoryUsageStatsCallback callback) override;
@@ -218,7 +232,6 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
                   const std::string& key,
                   const std::string& data) override;
   void WakeUpGpu() override;
-  void GpuSwitched() override;
   void DisplayAdded() override;
   void DisplayRemoved() override;
   void DisplayMetricsChanged() override;
@@ -226,9 +239,6 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   void OnBackgroundCleanup() override;
   void OnBackgrounded() override;
   void OnForegrounded() override;
-#if !BUILDFLAG(IS_ANDROID)
-  void OnMemoryPressure(base::MemoryPressureLevel level) override;
-#endif
 #if BUILDFLAG(IS_APPLE)
   void BeginCATransaction() override;
   void CommitCATransaction(CommitCATransactionCallback callback) override;
@@ -240,6 +250,12 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   void Crash() override;
   void Hang() override;
   void ThrowJavaException() override;
+  // mojom::GpuService implementation:
+  void InduceMemoryInvalidAccess(
+      mojom::MemoryInvalidAccessType action) override;
+#if BUILDFLAG(ENABLE_VRP_FLAGS)
+  void GetVrpFlags(GetVrpFlagsCallback callback) override;
+#endif
 
   // gpu::GpuChannelManagerDelegate:
   void LoseAllContexts() override;
@@ -345,19 +361,13 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   }
 
 #if BUILDFLAG(ENABLE_VULKAN)
-  VulkanContextProvider* vulkan_context_provider() const {
+  gpu::VulkanContextProvider* vulkan_context_provider() const {
     return vulkan_context_provider_.get();
   }
 #else
-  VulkanContextProvider* vulkan_context_provider() const { return nullptr; }
-#endif
-
-#if BUILDFLAG(SKIA_USE_METAL)
-  MetalContextProvider* metal_context_provider() const {
-    return metal_context_provider_.get();
+  gpu::VulkanContextProvider* vulkan_context_provider() const {
+    return nullptr;
   }
-#else
-  MetalContextProvider* metal_context_provider() const { return nullptr; }
 #endif
 
 #if BUILDFLAG(SKIA_USE_DAWN)
@@ -374,9 +384,9 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   void SetHostProcessId(base::ProcessId pid);
 #endif
 
-  using VisibilityChangedCallback =
-      base::RepeatingCallback<void(bool /*visible*/)>;
-  void SetVisibilityChangedCallback(VisibilityChangedCallback);
+  using PriorityChangedCallback =
+      base::RepeatingCallback<void(base::Process::Priority /*priority*/)>;
+  void SetPriorityChangedCallback(PriorityChangedCallback);
 
  private:
   void InitializeWithHostInternal(
@@ -445,6 +455,8 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   bool IsGMBNV12Supported();
 #endif
 
+  void CreateWebNNContextProviderIfNeeded();
+
   scoped_refptr<base::SingleThreadTaskRunner> main_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> io_runner_;
 
@@ -483,6 +495,12 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   scoped_refptr<gpu::RefCountedGpuProcessShmCount> use_shader_cache_shm_count_;
 
   mojo::SharedRemote<mojom::GpuHost> gpu_host_;
+
+  // Stored from InitParams and run when the WebNNContextProviderImpl is lazily
+  // created, binding the WebNNBrowserHost pipe on first WebNN use.
+  base::OnceCallback<void(
+      mojo::PendingReceiver<webnn::mojom::WebNNBrowserHost>)>
+      bind_webnn_browser_host_;
   std::unique_ptr<gpu::GpuChannelManager> gpu_channel_manager_;
   std::unique_ptr<media::MediaGpuChannelManager> media_gpu_channel_manager_;
 
@@ -511,11 +529,9 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
 
 #if BUILDFLAG(ENABLE_VULKAN)
   raw_ptr<gpu::VulkanImplementation> vulkan_implementation_;
-  scoped_refptr<VulkanContextProvider> vulkan_context_provider_;
+  scoped_refptr<gpu::VulkanContextProvider> vulkan_context_provider_;
 #endif
-#if BUILDFLAG(SKIA_USE_METAL)
-  std::unique_ptr<MetalContextProvider> metal_context_provider_;
-#endif
+
 #if BUILDFLAG(SKIA_USE_DAWN)
   std::unique_ptr<gpu::DawnContextProvider> dawn_context_provider_;
 #endif
@@ -541,13 +557,14 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   // Should only be accessed on the IO thread after creation.
   mojo::Receiver<mojom::GpuService> receiver_{this};
 
-  VisibilityChangedCallback visibility_changed_callback_;
+  PriorityChangedCallback priority_changed_callback_;
 
   base::ProcessId host_process_id_ = base::kNullProcessId;
 
   base::RepeatingClosure wake_up_closure_;
 
-  std::string shader_prefix_key_;
+  base::Lock shader_prefix_key_lock_;
+  std::string shader_prefix_key_ GUARDED_BY(shader_prefix_key_lock_);
 
   // This is flag is controlled by the finch experiment
   // ClearGrShaderDiskCacheOnInvalidPrefix. Earlier this flag was assigned in

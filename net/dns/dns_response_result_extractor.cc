@@ -16,13 +16,12 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <unordered_set>
 #include <vector>
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/containers/to_vector.h"
 #include "base/dcheck_is_on.h"
+#include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/numerics/checked_math.h"
@@ -33,6 +32,7 @@
 #include "base/time/time.h"
 #include "net/base/address_list.h"
 #include "net/base/connection_endpoint_metadata.h"
+#include "net/base/features.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/ip_address.h"
 #include "net/base/ip_endpoint.h"
@@ -48,6 +48,7 @@
 #include "net/dns/public/dns_query_type.h"
 #include "net/dns/record_parsed.h"
 #include "net/dns/record_rdata.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
 
 namespace net {
 
@@ -91,7 +92,7 @@ void SaveMetricsForRequestedAdditionalHttpsRecord(const RecordParsed& record) {
 // using `weight` with higher weighted objects more likely to go first.
 std::vector<HostPortPair> SortServiceTargets(
     const std::vector<const SrvRecordRdata*>& rdatas) {
-  std::map<uint16_t, std::unordered_set<const SrvRecordRdata*>>
+  std::map<uint16_t, absl::flat_hash_set<const SrvRecordRdata*>>
       ordered_by_priority;
   for (const SrvRecordRdata* rdata : rdatas) {
     ordered_by_priority[rdata->priority()].insert(rdata);
@@ -102,7 +103,7 @@ std::vector<HostPortPair> SortServiceTargets(
     // With (num results) <= UINT16_MAX (and in practice, much less) and
     // (weight per result) <= UINT16_MAX, then it should be the case that
     // (total weight) <= UINT32_MAX, but use CheckedNumeric for extra safety.
-    auto total_weight = base::MakeCheckedNum<uint32_t>(0);
+    auto total_weight = base::CheckedNumeric<uint32_t>(0);
     for (const SrvRecordRdata* rdata : priority.second) {
       total_weight += rdata->weight();
     }
@@ -249,16 +250,8 @@ RecordsOrError ExtractResponseRecords(
   std::string final_chain_name;
   ExtractionError name_and_alias_validation_error = ValidateNamesAndAliases(
       response.GetSingleDottedName(), aliases, data_records, final_chain_name);
-  bool has_extraction_error =
-      name_and_alias_validation_error != ExtractionError::kOk;
 
-  if (query_type == DnsQueryType::A || query_type == DnsQueryType::AAAA) {
-    UMA_HISTOGRAM_BOOLEAN(
-        DnsResponseResultExtractor::kHasValidCnameRecordsHistogram,
-        !has_extraction_error && !aliases.empty());
-  }
-
-  if (has_extraction_error) {
+  if (name_and_alias_validation_error != ExtractionError::kOk) {
     return base::unexpected(name_and_alias_validation_error);
   }
 
@@ -507,6 +500,9 @@ ResultsOrError ExtractHttpsResults(const DnsResponse& response,
   std::optional<base::TimeDelta> min_compatible_ttl;
 
   std::multimap<HttpsRecordPriority, ConnectionEndpointMetadata> metadatas;
+  HostResolverInternalMetadataResult::AddressHintsMap address_hints;
+  const bool collect_address_hints =
+      base::FeatureList::IsEnabled(features::kUseDnsHttpsSvcbAddressHints);
   bool compatible_record_found = false;
   bool default_alpn_found = false;
   for (const auto& record : https_records.value()) {
@@ -568,8 +564,8 @@ ResultsOrError ExtractHttpsResults(const DnsResponse& response,
 
     metadata.supported_protocol_alpns = service->alpn_ids();
     if (service->default_alpn() &&
-        !base::Contains(metadata.supported_protocol_alpns,
-                        dns_protocol::kHttpsServiceDefaultAlpn)) {
+        !std::ranges::contains(metadata.supported_protocol_alpns,
+                               dns_protocol::kHttpsServiceDefaultAlpn)) {
       metadata.supported_protocol_alpns.push_back(
           dns_protocol::kHttpsServiceDefaultAlpn);
     }
@@ -584,6 +580,16 @@ ResultsOrError ExtractHttpsResults(const DnsResponse& response,
 
     metadata.ech_config_list = ConnectionEndpointMetadata::EchConfigList(
         service->ech_config().cbegin(), service->ech_config().cend());
+
+    if (collect_address_hints &&
+        (!service->ipv4_hint().empty() || !service->ipv6_hint().empty())) {
+      HostResolverInternalMetadataResult::AddressHints& hints =
+          address_hints[target_name];
+      hints.ipv4_hints.insert(service->ipv4_hint().begin(),
+                              service->ipv4_hint().end());
+      hints.ipv6_hints.insert(service->ipv6_hint().begin(),
+                              service->ipv6_hint().end());
+    }
 
     metadata.target_name = std::move(target_name);
 
@@ -603,6 +609,7 @@ ResultsOrError ExtractHttpsResults(const DnsResponse& response,
   if (std::ranges::any_of(https_records.value(), &RecordIsAlias,
                           &UnwrapRecordPtr)) {
     metadatas.clear();
+    address_hints.clear();
   }
 
   // Ignore all records if they all mark "no-default-alpn". Domains should
@@ -611,9 +618,11 @@ ResultsOrError ExtractHttpsResults(const DnsResponse& response,
   // draft-ietf-dnsop-svcb-https-12#section-7.1.2
   if (!default_alpn_found) {
     metadatas.clear();
+    address_hints.clear();
   }
 
   if (metadatas.empty() && compatible_record_found) {
+    CHECK(address_hints.empty());
     // Empty metadata result signifies that compatible HTTPS records were
     // received but with no contained metadata of use to Chrome. Use the min TTL
     // of all compatible records.
@@ -623,14 +632,16 @@ ResultsOrError ExtractHttpsResults(const DnsResponse& response,
         now_ticks + min_compatible_ttl.value(),
         now + min_compatible_ttl.value(), Source::kDns,
         /*metadatas=*/
-        std::multimap<HttpsRecordPriority, ConnectionEndpointMetadata>{}));
+        std::multimap<HttpsRecordPriority, ConnectionEndpointMetadata>{},
+        /*address_hints=*/
+        HostResolverInternalMetadataResult::AddressHintsMap()));
   } else if (!metadatas.empty()) {
     // Use min TTL only of those records contributing useful metadata.
     CHECK(min_ttl.has_value());
     results.insert(std::make_unique<HostResolverInternalMetadataResult>(
         https_records->front()->name(), DnsQueryType::HTTPS,
         now_ticks + min_ttl.value(), now + min_ttl.value(), Source::kDns,
-        std::move(metadatas)));
+        std::move(metadatas), std::move(address_hints)));
   }
 
   return results;

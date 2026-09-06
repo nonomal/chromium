@@ -4,7 +4,6 @@
 
 #import "components/optimization_guide/core/delivery/prediction_manager.h"
 
-#import "base/containers/contains.h"
 #import "base/files/file_util.h"
 #import "base/task/thread_pool.h"
 #import "base/test/metrics/histogram_tester.h"
@@ -13,11 +12,10 @@
 #import "components/component_updater/pref_names.h"
 #import "components/download/internal/background_service/ios/background_download_task_helper.h"
 #import "components/optimization_guide/core/delivery/optimization_target_model_observer.h"
-#import "components/optimization_guide/core/optimization_guide_constants.h"
 #import "components/optimization_guide/core/optimization_guide_enums.h"
 #import "components/optimization_guide/core/optimization_guide_features.h"
 #import "components/optimization_guide/core/optimization_guide_prefs.h"
-#import "components/optimization_guide/core/optimization_guide_switches.h"
+#import "components/optimization_guide/core/optimization_guide_permissions_util.h"
 #import "components/sync_preferences/pref_service_syncable.h"
 #import "components/sync_preferences/testing_pref_service_syncable.h"
 #import "components/variations/hashing.h"
@@ -182,9 +180,10 @@ class PredictionManagerTestBase : public TestWithProfile {
     cmd->AppendSwitch("enable-spdy-proxy-auth");
 
     cmd->AppendSwitch(
-        optimization_guide::switches::kGoogleApiKeyConfigurationCheckOverride);
+        optimization_guide::kGoogleApiKeyConfigurationCheckOverrideSwitch);
     cmd->AppendSwitchASCII(
-        optimization_guide::switches::kOptimizationGuideServiceGetModelsURL,
+        optimization_guide::features::
+            kOptimizationGuideServiceGetModelsURLSwitch,
         models_server_->GetURL("/").spec());
 
     cmd->AppendSwitchASCII("force-variation-ids", "4");
@@ -385,18 +384,17 @@ class PredictionManagerModelDownloadingBrowserTest
               optimization_guide::proto::OPTIMIZATION_TARGET_PAINFUL_PAGE_LOAD);
           EXPECT_TRUE(model_info.has_value());
 
-          EXPECT_EQ(123, model_info->GetVersion());
-          EXPECT_TRUE(model_info->GetModelFilePath().IsAbsolute());
-          EXPECT_TRUE(base::PathExists(model_info->GetModelFilePath()));
+          EXPECT_EQ(123, model_info->version);
+          EXPECT_TRUE(model_info->model_file_path.IsAbsolute());
+          EXPECT_TRUE(base::PathExists(model_info->model_file_path));
 
           EXPECT_EQ(expected_additional_files.size(),
-                    model_info->GetAdditionalFiles().size());
-          for (const base::FilePath& add_file :
-               model_info->GetAdditionalFiles()) {
+                    model_info->additional_files.size());
+          for (const base::FilePath& add_file : model_info->additional_files) {
             EXPECT_TRUE(add_file.IsAbsolute());
             EXPECT_TRUE(base::PathExists(add_file));
-            EXPECT_TRUE(base::Contains(expected_additional_files,
-                                       add_file.BaseName().value()));
+            EXPECT_TRUE(expected_additional_files.contains(
+                add_file.BaseName().value()));
           }
           run_loop->Quit();
         },

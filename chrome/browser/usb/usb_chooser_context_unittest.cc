@@ -102,8 +102,8 @@ class UsbChooserContextTest : public testing::Test {
     EXPECT_TRUE(devices_future.Wait());
 
     // Add observers
-    EXPECT_FALSE(base::Contains(mock_permission_observers_, profile));
-    EXPECT_FALSE(base::Contains(mock_device_observers_, profile));
+    EXPECT_FALSE(mock_permission_observers_.contains(profile));
+    EXPECT_FALSE(mock_device_observers_.contains(profile));
     mock_permission_observers_.emplace(
         profile,
         std::make_unique<NiceMock<permissions::MockPermissionObserver>>());
@@ -148,7 +148,7 @@ TEST_F(UsbChooserContextTest, CheckGrantAndRevokePermission) {
       device_manager_.CreateAndAddDevice(0, 0, "Google", "Gizmo", "123ABC");
   UsbChooserContext* store = GetChooserContext(profile());
 
-  auto object = base::Value(base::Value::Dict()
+  auto object = base::Value(base::DictValue()
                                 .Set(kDeviceNameKey, "Gizmo")
                                 .Set(kVendorIdKey, 0)
                                 .Set(kProductIdKey, 0)
@@ -202,7 +202,7 @@ TEST_F(UsbChooserContextTest, CheckGrantAndRevokeEphemeralPermission) {
   UsbChooserContext* store = GetChooserContext(profile());
 
   auto object = base::Value(
-      base::Value::Dict()
+      base::DictValue()
           .Set(kDeviceNameKey, "Gizmo")
           .Set(kGuidKey, device_info->guid)
           .Set(kVendorIdKey, static_cast<int>(device_info->vendor_id))
@@ -484,15 +484,16 @@ TEST_F(UsbChooserContextTest, PolicyAskForUrls) {
   auto* store = GetChooserContext(profile());
   store->GrantDevicePermission(kFooOrigin, *device);
   store->GrantDevicePermission(kBarOrigin, *device);
+  store->FlushScheduledSaveSettingsCalls();
 
   // Set the default to "ask" so that the policy being tested overrides it.
   auto* prefs = profile()->GetTestingPrefService();
-  prefs->SetManagedPref(prefs::kManagedDefaultWebUsbGuardSetting,
-                        std::make_unique<base::Value>(CONTENT_SETTING_BLOCK));
   prefs->SetManagedPref(prefs::kManagedWebUsbAskForUrls,
                         base::test::ParseJsonList(R"(
     [ "https://foo.origin" ]
   )"));
+  prefs->SetManagedPref(prefs::kManagedDefaultWebUsbGuardSetting,
+                        std::make_unique<base::Value>(CONTENT_SETTING_BLOCK));
 
   EXPECT_TRUE(store->CanRequestObjectPermission(kFooOrigin));
   EXPECT_TRUE(store->HasDevicePermission(kFooOrigin, *device));
@@ -519,6 +520,7 @@ TEST_F(UsbChooserContextTest, PolicyBlockedForUrls) {
   auto* store = GetChooserContext(profile());
   store->GrantDevicePermission(kFooOrigin, *device);
   store->GrantDevicePermission(kBarOrigin, *device);
+  store->FlushScheduledSaveSettingsCalls();
 
   auto* prefs = profile()->GetTestingPrefService();
   prefs->SetManagedPref(prefs::kManagedWebUsbBlockedForUrls,
@@ -789,7 +791,7 @@ TEST_F(DeviceLoginScreenWebUsbChooserContextTest,
 
 namespace {
 
-void ExpectDeviceObjectInfo(const base::Value::Dict& actual,
+void ExpectDeviceObjectInfo(const base::DictValue& actual,
                             int vendor_id,
                             int product_id,
                             const std::string& name) {
@@ -1284,8 +1286,8 @@ TEST_F(UsbChooserContextTest, MassStorageHidden) {
 
 #if BUILDFLAG(IS_CHROMEOS)
 TEST_F(UsbChooserContextTest, MassStorageShownWhenDetachable) {
-  base::Value::List allowlist;
-  base::Value::Dict ids;
+  base::ListValue allowlist;
+  base::DictValue ids;
   ids.Set(ash::kUsbDetachableAllowlistKeyVid, 1234);
   ids.Set(ash::kUsbDetachableAllowlistKeyPid, 1);
   allowlist.Append(std::move(ids));
@@ -1348,4 +1350,74 @@ TEST_F(UsbChooserContextTest, DeviceWithNoInterfaceVisible) {
         loop.Quit();
       }));
   loop.Run();
+}
+
+TEST_F(UsbChooserContextTest, ClearBrowsingDataStaleCache) {
+  GURL url("https://www.google.com");
+  const auto origin = url::Origin::Create(url);
+  UsbDeviceInfoPtr device_info =
+      device_manager_.CreateAndAddDevice(0, 0, "Google", "Gizmo", "123ABC");
+  UsbChooserContext* store = GetChooserContext(profile());
+
+  EXPECT_FALSE(store->HasDevicePermission(origin, *device_info));
+
+  // Grant permission.
+  store->GrantDevicePermission(origin, *device_info);
+  store->FlushScheduledSaveSettingsCalls();
+  EXPECT_TRUE(store->HasDevicePermission(origin, *device_info));
+
+  // Simulate Clear Browsing Data.
+  // Clearing USB_CHOOSER_DATA will trigger one OnObjectPermissionChanged call
+  // from NotifyPermissionRevoked().
+  EXPECT_CALL(*mock_permission_observers_[profile()],
+              OnObjectPermissionChanged(
+                  std::make_optional(ContentSettingsType::USB_GUARD),
+                  ContentSettingsType::USB_CHOOSER_DATA));
+  EXPECT_CALL(*mock_permission_observers_[profile()],
+              OnPermissionRevoked(origin));
+
+  auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
+  map->ClearSettingsForOneTypeWithPredicate(
+      ContentSettingsType::USB_CHOOSER_DATA, base::Time(), base::Time::Max(),
+      HostContentSettingsMap::PatternSourcePredicate());
+
+  // Check if the permission is still returned.
+  // Should be FALSE because we fixed ObjectPermissionContextBase.
+  EXPECT_FALSE(store->HasDevicePermission(origin, *device_info));
+}
+
+TEST_F(UsbChooserContextTest, ClearBrowsingDataEphemeralDevice) {
+  GURL url("https://www.google.com");
+  const auto origin = url::Origin::Create(url);
+  // Create an ephemeral device (no serial number).
+  UsbDeviceInfoPtr device_info =
+      device_manager_.CreateAndAddDevice(0, 0, "Google", "Gizmo", "");
+  UsbChooserContext* store = GetChooserContext(profile());
+
+  EXPECT_FALSE(store->HasDevicePermission(origin, *device_info));
+
+  // Grant permission.
+  store->GrantDevicePermission(origin, *device_info);
+  EXPECT_TRUE(store->HasDevicePermission(origin, *device_info));
+
+  // Simulate Clear Browsing Data.
+  // Clearing USB_CHOOSER_DATA will trigger one OnObjectPermissionChanged call
+  // from NotifyPermissionRevoked().
+  EXPECT_CALL(*mock_permission_observers_[profile()],
+              OnObjectPermissionChanged(
+                  std::make_optional(ContentSettingsType::USB_GUARD),
+                  ContentSettingsType::USB_CHOOSER_DATA));
+  EXPECT_CALL(*mock_permission_observers_[profile()],
+              OnPermissionRevoked(origin));
+
+  auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
+  map->ClearSettingsForOneTypeWithPredicate(
+      ContentSettingsType::USB_CHOOSER_DATA, base::Time(), base::Time::Max(),
+      HostContentSettingsMap::PatternSourcePredicate());
+  map->ClearSettingsForOneTypeWithPredicate(
+      ContentSettingsType::USB_GUARD, base::Time(), base::Time::Max(),
+      HostContentSettingsMap::PatternSourcePredicate());
+
+  // Check if the permission is still returned.
+  EXPECT_FALSE(store->HasDevicePermission(origin, *device_info));
 }

@@ -8,18 +8,19 @@
 #include <string_view>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "chromeos/ash/components/boca/boca_metrics_util.h"
+#include "chromeos/ash/components/boca/util.h"
 #include "components/gcm_driver/gcm_driver.h"
 #include "components/gcm_driver/instance_id/instance_id_driver.h"
 
 namespace ash::boca {
 namespace {
 
-inline static constexpr std::string_view kSenderId = "947897361853";
+inline static constexpr std::string_view kSenderIdProd = "947897361853";
+inline static constexpr std::string_view kSenderIdStaging = "55013907119";
 inline static constexpr std::string_view kApplicationId =
     "com.google.chrome.boca.fcm.invalidations";
 
@@ -146,7 +147,7 @@ void FCMHandlerImpl::OnMessage(const std::string& app_id,
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_EQ(app_id, kApplicationId);
   const std::string kMethodKey = "method";
-  const bool method_exists = base::Contains(message.data, kMethodKey);
+  const bool method_exists = message.data.contains(kMethodKey);
   LOG_IF(ERROR, !method_exists)
       << "[Boca] Method does not exist in FCM message.";
   for (InvalidationsListener& listener : listeners_) {
@@ -239,7 +240,8 @@ void FCMHandlerImpl::StartTokenFetch(bool is_validation) {
   }
   instance_id_driver_->GetInstanceID(std::string(kApplicationId))
       ->GetToken(
-          std::string(kSenderId), instance_id::kGCMScope,
+          std::string(IsTestEnvironment() ? kSenderIdStaging : kSenderIdProd),
+          instance_id::kGCMScope,
           /*time_to_live=*/base::Seconds(kInstanceIDTokenTTLSeconds),
           /*flags=*/{instance_id::InstanceID::Flags::kIsLazy},
           base::BindOnce(&FCMHandlerImpl::DidRetrieveToken,

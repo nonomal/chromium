@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -60,7 +61,7 @@ PrivacySandboxAttestationsComponentInstallerPolicy::
     ~PrivacySandboxAttestationsComponentInstallerPolicy() = default;
 
 bool PrivacySandboxAttestationsComponentInstallerPolicy::VerifyInstallation(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) const {
   return base::PathExists(GetInstalledFilePath(install_dir));
 }
@@ -78,7 +79,7 @@ bool PrivacySandboxAttestationsComponentInstallerPolicy::
 
 update_client::CrxInstaller::Result
 PrivacySandboxAttestationsComponentInstallerPolicy::OnCustomInstall(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) {
   // No custom install for privacy sandbox attestations.
   return update_client::CrxInstaller::Result(0);
@@ -89,7 +90,7 @@ void PrivacySandboxAttestationsComponentInstallerPolicy::OnCustomUninstall() {}
 void PrivacySandboxAttestationsComponentInstallerPolicy::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
-    base::Value::Dict manifest) {
+    base::DictValue manifest) {
   if (!base::FeatureList::IsEnabled(
           privacy_sandbox::kEnforcePrivacySandboxAttestations)) {
     // Privacy Sandbox Enrollment is not enforced if the feature is disabled.
@@ -127,8 +128,7 @@ PrivacySandboxAttestationsComponentInstallerPolicy::GetRelativeInstallDir()
 
 void PrivacySandboxAttestationsComponentInstallerPolicy::GetHash(
     std::vector<uint8_t>* hash) const {
-  hash->assign(std::begin(kPrivacySandboxAttestationsPublicKeySHA256),
-               std::end(kPrivacySandboxAttestationsPublicKeySHA256));
+  hash->assign_range(kPrivacySandboxAttestationsPublicKeySHA256);
 }
 
 std::string PrivacySandboxAttestationsComponentInstallerPolicy::GetName()
@@ -145,7 +145,7 @@ PrivacySandboxAttestationsComponentInstallerPolicy::GetInstallerAttributes()
 void PrivacySandboxAttestationsComponentInstallerPolicy::
     ComponentReadyForTesting(const base::Version& version,
                              const base::FilePath& install_dir,
-                             base::Value::Dict manifest) {
+                             base::DictValue manifest) {
   ComponentReady(version, install_dir, std::move(manifest));
 }
 

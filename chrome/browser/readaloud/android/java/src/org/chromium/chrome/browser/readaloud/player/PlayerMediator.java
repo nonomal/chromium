@@ -125,6 +125,15 @@ class PlayerMediator implements InteractionHandler {
                         mLastState = data.state();
                     }
                 }
+
+                @Override
+                public void onMetadataChanged(Playback.Metadata metadata) {
+                    if (mPlayback == null) {
+                        return;
+                    }
+                    mModel.set(PlayerProperties.TITLE, metadata.title());
+                    mModel.set(PlayerProperties.PUBLISHER, metadata.publisher());
+                }
             };
 
     private boolean mIsScrubbingSeekBar;
@@ -211,10 +220,14 @@ class PlayerMediator implements InteractionHandler {
         mBottomControlsStacker = bottomControlsStacker;
         mModel.set(PlayerProperties.INTERACTION_HANDLER, this);
 
-        mDelegate.getCurrentLanguageVoicesSupplier().addObserver(mVoiceListObserver);
-        mDelegate.getVoiceIdSupplier().addObserver(mVoiceIdObserver);
-        mDelegate.getPlaybackModeSelectionEnabled().addObserver(mPlaybackModeSelectionEnabledObserver);
-        mDelegate.getFeedbackTypeSupplier().addObserver(mFeedbackTypeObserver);
+        mDelegate
+                .getCurrentLanguageVoicesSupplier()
+                .addSyncObserverAndPostIfNonNull(mVoiceListObserver);
+        mDelegate.getVoiceIdSupplier().addSyncObserverAndPostIfNonNull(mVoiceIdObserver);
+        mDelegate
+                .getPlaybackModeSelectionEnabled()
+                .addSyncObserverAndPostIfNonNull(mPlaybackModeSelectionEnabledObserver);
+        mDelegate.getFeedbackTypeSupplier().addSyncObserverAndPostIfNonNull(mFeedbackTypeObserver);
     }
 
     void destroy() {
@@ -242,7 +255,7 @@ class PlayerMediator implements InteractionHandler {
             onSpeedChange(ReadAloudPrefs.getSpeed(mDelegate.getPrefService()));
             mModel.set(
                     PlayerProperties.HIGHLIGHTING_ENABLED,
-                    assumeNonNull(mDelegate.getHighlightingEnabledSupplier().get()));
+                    mDelegate.getHighlightingEnabledSupplier().get());
             mModel.set(
                     PlayerProperties.HIGHLIGHTING_SUPPORTED,
                     mDelegate.isHighlightingSupported(metadata.playbackMode()));

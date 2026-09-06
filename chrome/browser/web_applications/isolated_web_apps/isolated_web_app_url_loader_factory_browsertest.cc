@@ -6,7 +6,6 @@
 
 #include "base/strings/string_util.h"
 #include "chrome/browser/lifetime/application_lifetime_desktop.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/web_applications/test/isolated_web_app_test_utils.h"
 #include "chrome/browser/web_applications/isolated_web_apps/isolated_web_app_trust_checker.h"
 #include "chrome/browser/web_applications/isolated_web_apps/test/isolated_web_app_builder.h"
@@ -78,8 +77,7 @@ class IsolatedWebAppURLLoaderFactoryBrowserTest
         [](const content::WebContentsConsoleObserver::Message& message) {
           return message.log_level ==
                      blink::mojom::ConsoleMessageLevel::kError &&
-                 base::Contains(
-                     message.message,
+                 message.message.contains(
                      u"Failed to read response from Signed Web Bundle");
         }));
 

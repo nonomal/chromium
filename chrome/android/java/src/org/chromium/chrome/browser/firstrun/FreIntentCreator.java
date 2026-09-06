@@ -14,6 +14,8 @@ import android.os.Bundle;
 import android.os.SystemClock;
 import android.text.TextUtils;
 
+import androidx.annotation.VisibleForTesting;
+
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.IntentUtils;
 import org.chromium.build.annotations.NullMarked;
@@ -40,7 +42,7 @@ public class FreIntentCreator {
      * @param usePendingIntent Whether to use PendingIntent or original Intent after FRE.
      * @return Intent to launch First Run Experience.
      */
-    public Intent create(
+    public static Intent create(
             Context caller,
             Intent fromIntent,
             boolean preferLightweightFre,
@@ -76,14 +78,14 @@ public class FreIntentCreator {
      * Selects one specific FRE implementation and creates an intent to launch this implementation.
      * Called by {@link #create} that also adds some final touches to the returned intent.
      *
-     * @param caller               Activity instance that is requesting the first run.
-     * @param fromIntent           Intent used to launch the caller.
+     * @param caller Activity instance that is requesting the first run.
+     * @param fromIntent Intent used to launch the caller.
      * @param preferLightweightFre Whether to prefer the Lightweight First Run Experience.
-     * @param associatedAppName    WebAPK short name if this FRE flow was triggered by launching a
-     *                             WebAPK. Null otherwise.
+     * @param associatedAppName WebAPK short name if this FRE flow was triggered by launching a
+     *     WebAPK. Null otherwise.
      * @return Intent to launch First Run Experience.
      */
-    protected Intent createInternal(
+    protected static Intent createInternal(
             Context caller,
             Intent fromIntent,
             boolean preferLightweightFre,
@@ -147,11 +149,12 @@ public class FreIntentCreator {
      * Adds fromIntent as a PendingIntent to the firstRunIntent. This should be used to add a
      * PendingIntent that will be sent when first run is completed.
      *
-     * @param context                        The context that corresponds to the Intent.
-     * @param firstRunIntent                 The intent that will be used to start first run.
+     * @param context The context that corresponds to the Intent.
+     * @param firstRunIntent The intent that will be used to start first run.
      * @param intentToLaunchAfterFreComplete The intent to launch when the user completes the FRE.
      */
-    private static void addPendingIntent(
+    @VisibleForTesting
+    public static void addPendingIntent(
             Context context, Intent firstRunIntent, Intent intentToLaunchAfterFreComplete) {
         int pendingIntentFlags =
                 PendingIntent.FLAG_UPDATE_CURRENT

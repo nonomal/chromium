@@ -5,6 +5,9 @@
 #ifndef MEDIA_GPU_WINDOWS_D3D12_HELPERS_H_
 #define MEDIA_GPU_WINDOWS_D3D12_HELPERS_H_
 
+#include "third_party/microsoft_dxheaders/src/include/directx/d3d12.h"
+// Windows SDK headers should be included after DirectX headers.
+
 #include <array>
 
 #include "base/containers/span.h"
@@ -13,6 +16,7 @@
 #include "media/base/video_codecs.h"
 #include "media/gpu/h264_dpb.h"
 #include "media/gpu/media_gpu_export.h"
+#include "media/gpu/windows/d3d12_fence.h"
 #include "media/gpu/windows/d3d_com_defs.h"
 #include "media/parsers/h265_parser.h"
 #include "media/parsers/vp9_parser.h"
@@ -27,7 +31,30 @@ struct D3D12HeapProperties {
   constexpr static D3D12_HEAP_PROPERTIES kReadback{D3D12_HEAP_TYPE_READBACK};
 };
 
-class D3D11PictureBuffer;
+class D3DPictureBuffer;
+
+using D3D11FenceAndValue =
+    std::pair<Microsoft::WRL::ComPtr<ID3D11Fence>, uint64_t>;
+using D3D12FenceAndValue =
+    std::pair<Microsoft::WRL::ComPtr<ID3D12Fence>, uint64_t>;
+
+struct MEDIA_GPU_EXPORT D3D12PictureBuffer {
+  D3D12PictureBuffer(
+      const Microsoft::WRL::ComPtr<ID3D12Resource>& resource = nullptr,
+      UINT subresource = 0,
+      const D3D12FenceAndValue& fence_and_value = {});
+  ~D3D12PictureBuffer();
+
+  D3D12PictureBuffer(const D3D12PictureBuffer& other);
+  D3D12PictureBuffer(D3D12PictureBuffer&& other) noexcept;
+  D3D12PictureBuffer& operator=(const D3D12PictureBuffer& other);
+  D3D12PictureBuffer& operator=(D3D12PictureBuffer&& other) noexcept;
+
+  Microsoft::WRL::ComPtr<ID3D12Resource> resource;
+  UINT subresource = 0;
+  // Fence and value indicating when the resource is ready for read.
+  D3D12FenceAndValue fence_and_value;
+};
 
 // Manages reference frame buffers, for reference frame descriptors to index on.
 class MEDIA_GPU_EXPORT D3D12ReferenceFrameList {
@@ -38,7 +65,7 @@ class MEDIA_GPU_EXPORT D3D12ReferenceFrameList {
   D3D12ReferenceFrameList(const D3D12ReferenceFrameList& other);
 
   void SetPictureBuffers(
-      base::span<scoped_refptr<D3D11PictureBuffer>> picture_buffers);
+      base::span<scoped_refptr<D3DPictureBuffer>> picture_buffers);
 
   void WriteTo(D3D12_VIDEO_DECODE_REFERENCE_FRAMES* dest);
 
@@ -53,7 +80,7 @@ class MEDIA_GPU_EXPORT D3D12ReferenceFrameList {
       UINT current_output_subresource);
 
  private:
-  // Max size of picture_buffers_ that D3D11VideoDecoder may create.
+  // Max size of picture_buffers_ that D3DVideoDecoder may create.
   static constexpr size_t kMaxSize =
       std::max({static_cast<size_t>(H264DPB::kDPBMaxSize),
                 static_cast<size_t>(/*H265*/ kMaxDpbSize),
@@ -66,7 +93,7 @@ class MEDIA_GPU_EXPORT D3D12ReferenceFrameList {
   // D3D12_VIDEO_DECODE_REFERENCE_FRAMES has ID3D12Resource** ppTexture2Ds, so
   // we have to store raw pointer array here. The pointers are only passed to
   // D3D12 API and we never dereference it in Chromium.
-  // The lifetime of these |resources_| is managed by |D3D11VideoDecoder|'s
+  // The lifetime of these |resources_| is managed by |D3DVideoDecoder|'s
   // |picture_buffers_|. When picture buffers are invalidated, the
   // D3D12VideoDecoderWrapper and its ID3D12VideoDecoder instance will be
   // destroyed ensuring these values are no longer referenced.
@@ -77,8 +104,9 @@ class MEDIA_GPU_EXPORT D3D12ReferenceFrameList {
   std::array<ID3D12VideoDecoderHeap*, kMaxSize> heaps_;
   // The raw pointer array for converting to
   // D3D12_VIDEO_DECODE_REFERENCE_FRAMES. We only store the references here. The
-  // lifetime of |D3D11PictureBuffer|'s is managed by the |D3D11VideoDecoder|.
-  std::array<raw_ptr<D3D11PictureBuffer>, kMaxSize> picture_buffers_;
+  // lifetime of the |D3DPictureBuffer| instances is managed by
+  // |D3DVideoDecoder|.
+  std::array<raw_ptr<D3DPictureBuffer>, kMaxSize> picture_buffers_;
 };
 
 // A scoped class managing the |Map()| and |Unmap()| of a |ID3D12Resource|. The
@@ -134,6 +162,29 @@ MEDIA_GPU_EXPORT GUID
 GetD3D12VideoDecodeGUID(VideoCodecProfile profile,
                         uint8_t bitdepth,
                         VideoChromaSampling chroma_sampling);
+
+// Helpers for synchronizing same underlying resource between D3D11 and D3D12.
+class MEDIA_GPU_EXPORT D3D11To12Fence {
+ public:
+  explicit D3D11To12Fence(Microsoft::WRL::ComPtr<ID3D11Fence> d3d11_fence,
+                          Microsoft::WRL::ComPtr<ID3D12Fence> d3d12_fence);
+  D3D11To12Fence() = delete;
+  D3D11To12Fence(const D3D11To12Fence&) = delete;
+  ~D3D11To12Fence();
+
+  D3D11FenceAndValue GetD3D11FenceAndIncrementValue() {
+    return std::make_pair(d3d11_fence_, ++fence_value_);
+  }
+
+  Microsoft::WRL::ComPtr<ID3D12Fence> GetD3D12Fence() const {
+    return d3d12_fence_;
+  }
+
+ private:
+  Microsoft::WRL::ComPtr<ID3D11Fence> d3d11_fence_;
+  Microsoft::WRL::ComPtr<ID3D12Fence> d3d12_fence_;
+  uint64_t fence_value_ = 0;
+};
 
 }  // namespace media
 

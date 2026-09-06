@@ -14,7 +14,6 @@
 #include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "chrome/browser/resource_coordinator/lifecycle_unit_state.mojom-forward.h"
-#include "content/public/browser/visibility.h"
 
 namespace resource_coordinator {
 
@@ -81,6 +80,10 @@ class LifecycleUnit {
   // Returns the last time at which the state of this LifecycleUnit changed.
   virtual base::TimeTicks GetStateChangeTime() const = 0;
 
+  // Returns the wall-clock time at which the state of this LifecycleUnit last
+  // changed. Stamped together with `GetStateChangeTime()`.
+  virtual base::Time GetStateChangeWallTime() const = 0;
+
   // Request that the LifecycleUnit be loaded, return true if the request is
   // successful.
   virtual bool Load() = 0;
@@ -91,7 +94,7 @@ class LifecycleUnit {
   // LifecycleUnits. On urgent discard, we want to minimize memory accesses. It
   // is easier to achieve that if we discard a group of LifecycleUnits that live
   // in the same process(es) than if we discard individual LifecycleUnits.
-  // https://crbug.com/775644
+  // https://crbug.com/40545253
   virtual bool Discard(LifecycleUnitDiscardReason discard_reason,
                        uint64_t resident_set_size_estimate = 0) = 0;
 

@@ -11,7 +11,6 @@
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
-#include "base/compiler_specific.h"
 #include "base/feature_list.h"
 #include "base/files/scoped_file.h"
 #include "base/functional/bind.h"
@@ -45,8 +44,6 @@
 #include "chromecast/browser/cast_web_preferences.h"
 #include "chromecast/browser/cast_web_service.h"
 #include "chromecast/browser/devtools/cast_devtools_manager_delegate.h"
-#include "chromecast/browser/general_audience_browsing_navigation_throttle.h"
-#include "chromecast/browser/general_audience_browsing_service.h"
 #include "chromecast/browser/media/media_caps_impl.h"
 #include "chromecast/browser/service/cast_service_simple.h"
 #include "chromecast/browser/service_connector.h"
@@ -116,8 +113,6 @@
 #include "components/crash/core/app/crashpad.h"
 #include "media/audio/android/audio_manager_android.h"
 #include "media/audio/audio_features.h"
-#else
-#include "chromecast/browser/memory_pressure_controller_impl.h"
 #endif  // BUILDFLAG(IS_ANDROID)
 
 #if defined(USE_ALSA)
@@ -285,8 +280,7 @@ CastContentBrowserClient::CreateAudioManager(
       std::move(audio_thread), audio_log_factory, cast_session_id_map,
       base::BindRepeating(&CastContentBrowserClient::GetCmaBackendFactory,
                           base::Unretained(this)),
-      content::GetUIThreadTaskRunner({}), GetMediaTaskRunner(),
-      /* use_mixer= */ false);
+      content::GetUIThreadTaskRunner({}), GetMediaTaskRunner());
 #elif BUILDFLAG(IS_ANDROID)
   if (base::FeatureList::IsEnabled(kEnableChromeAudioManagerAndroid)) {
     LOG(INFO) << "Use AudioManagerAndroid instead of CastAudioManagerAndroid.";
@@ -304,8 +298,7 @@ CastContentBrowserClient::CreateAudioManager(
       std::move(audio_thread), audio_log_factory, cast_session_id_map,
       base::BindRepeating(&CastContentBrowserClient::GetCmaBackendFactory,
                           base::Unretained(this)),
-      content::GetUIThreadTaskRunner({}), GetMediaTaskRunner(),
-      /* use_mixer= */ false);
+      content::GetUIThreadTaskRunner({}), GetMediaTaskRunner());
 #endif
 }
 
@@ -379,8 +372,8 @@ bool CastContentBrowserClient::IsHandledURL(const GURL& url) {
   };
 
   const std::string& scheme = url.GetScheme();
-  for (size_t i = 0; i < std::size(kProtocolList); ++i) {
-    if (scheme == UNSAFE_TODO(kProtocolList[i])) {
+  for (const char* protocol : kProtocolList) {
+    if (scheme == protocol) {
       return true;
     }
   }
@@ -496,10 +489,6 @@ void CastContentBrowserClient::OverrideWebPreferences(
 
   prefs->hide_scrollbars = true;
 
-  // Disable images rendering in Cast for Audio configuration
-#if BUILDFLAG(IS_CAST_AUDIO_ONLY)
-  prefs->images_enabled = false;
-#endif
 
 #if BUILDFLAG(IS_ANDROID)
   // Enable the television style for viewport so that all cast apps have a
@@ -799,16 +788,6 @@ CastContentBrowserClient::CreateCrashHandlerHost(
 }
 #endif  // BUILDFLAG(IS_ANDROID)
 
-void CastContentBrowserClient::CreateThrottlesForNavigation(
-    content::NavigationThrottleRegistry& registry) {
-  if (chromecast::IsFeatureEnabled(kEnableGeneralAudienceBrowsing)) {
-    registry.AddThrottle(
-        std::make_unique<GeneralAudienceBrowsingNavigationThrottle>(
-            registry,
-            general_audience_browsing_service_.get()));
-  }
-}
-
 void CastContentBrowserClient::RegisterNonNetworkSubresourceURLLoaderFactories(
     int render_process_id,
     int render_frame_id,
@@ -857,26 +836,18 @@ bool CastContentBrowserClient::IsWebUIAllowedToMakeNetworkRequests(
   return false;
 }
 
-content::ContentBrowserClient::PrivateNetworkRequestPolicyOverride
-CastContentBrowserClient::ShouldOverridePrivateNetworkRequestPolicy(
+content::ContentBrowserClient::LocalNetworkAccessRequestPolicyOverride
+CastContentBrowserClient::ShouldOverrideLocalNetworkAccessRequestPolicy(
     content::BrowserContext* browser_context,
     const url::Origin& origin) {
-  // Some Cast apps hosted over HTTP needs to access the private network so that
+  // Some Cast apps hosted over HTTP needs to access the local network so that
   // media can be streamed from a local media server.
-  return content::ContentBrowserClient::PrivateNetworkRequestPolicyOverride::
-      kForceAllow;
+  return content::ContentBrowserClient::
+      LocalNetworkAccessRequestPolicyOverride::kForceAllow;
 }
 
 std::string CastContentBrowserClient::GetUserAgent() {
   return chromecast::GetUserAgent();
-}
-
-void CastContentBrowserClient::CreateGeneralAudienceBrowsingService() {
-  DCHECK(!general_audience_browsing_service_);
-  general_audience_browsing_service_ =
-      std::make_unique<GeneralAudienceBrowsingService>(
-          browser_main_parts()->connector(),
-          cast_network_contexts_->GetSystemSharedURLLoaderFactory());
 }
 
 }  // namespace shell

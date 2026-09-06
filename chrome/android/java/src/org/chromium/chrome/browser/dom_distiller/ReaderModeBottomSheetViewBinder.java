@@ -8,8 +8,9 @@ import android.content.res.ColorStateList;
 import android.graphics.drawable.GradientDrawable;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ImageView;
 import android.widget.TextView;
+
+import com.google.android.material.button.MaterialButton;
 
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.chrome.R;
@@ -45,6 +46,12 @@ public class ReaderModeBottomSheetViewBinder {
             fontFamilyContainer.getBackground().setTint(color);
             fontSizeContainer.getBackground().setTint(color);
             themeContainer.getBackground().setTint(color);
+
+            // Only non-null when ReaderModeToggleLinks is enabled.
+            View toggleLinksContainer = view.findViewById(R.id.toggle_links_container);
+            if (toggleLinksContainer != null) {
+                toggleLinksContainer.getBackground().setTint(color);
+            }
         } else if (key == ReaderModeBottomSheetProperties.PRIMARY_TEXT_COLOR) {
             int color = model.get(ReaderModeBottomSheetProperties.PRIMARY_TEXT_COLOR);
             TextView title = view.findViewById(R.id.title);
@@ -57,10 +64,14 @@ public class ReaderModeBottomSheetViewBinder {
             fontSizeLabelEnd.setTextColor(color);
         } else if (key == ReaderModeBottomSheetProperties.ICON_TINT) {
             ColorStateList colorStateList = model.get(ReaderModeBottomSheetProperties.ICON_TINT);
-            ImageView dragHandle = view.findViewById(R.id.drag_handle);
             TextView title = view.findViewById(R.id.title);
-            dragHandle.setImageTintList(colorStateList);
             title.setCompoundDrawableTintList(colorStateList);
+
+            // Only non-null when the ReaderModeToggleLinks is enabled.
+            MaterialButton toggleLinksButton = view.findViewById(R.id.toggle_links_button);
+            if (toggleLinksButton != null) {
+                toggleLinksButton.setIconTint(colorStateList);
+            }
         }
     }
 }

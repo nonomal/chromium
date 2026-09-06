@@ -24,6 +24,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
+#include "components/tabs/public/tab_interface.h"
 #include "components/webapps/browser/banners/app_banner_manager.h"
 #include "content/public/browser/page.h"
 #include "content/public/browser/web_contents.h"
@@ -35,7 +36,10 @@
 #include "ui/wm/public/activation_client.h"
 #include "url/gurl.h"
 
-class Browser;
+namespace base {
+class TickClock;
+}
+
 class Profile;
 
 namespace webapps {
@@ -97,7 +101,9 @@ class WebsiteMetrics : public BrowserCollectionObserver,
     virtual void OnWebsiteMetricsDestroyed() {}
   };
 
-  WebsiteMetrics(Profile* profile, int user_type_by_device_type);
+  WebsiteMetrics(Profile* profile,
+                 int user_type_by_device_type,
+                 const base::TickClock& tick_clock);
 
   WebsiteMetrics(const WebsiteMetrics&) = delete;
   WebsiteMetrics& operator=(const WebsiteMetrics&) = delete;
@@ -167,10 +173,18 @@ class WebsiteMetrics : public BrowserCollectionObserver,
         const std::optional<webapps::WebAppBannerData>& data) override;
 
    private:
+    // The AppBannerManager's lifetime is tied to the tab, which can be
+    // destroyed before this observer's WebContents (e.g. when its
+    // TabFeatures-owned manager dies with the closing tab), so stop
+    // observing when the tab detaches.
+    void OnTabWillDetach(tabs::TabInterface* tab,
+                         tabs::TabInterface::DetachReason reason);
+
     raw_ptr<WebsiteMetrics> owner_;
     base::ScopedObservation<webapps::AppBannerManager,
                             webapps::AppBannerManager::Observer>
         app_banner_manager_observer_{this};
+    base::CallbackListSubscription tab_will_detach_subscription_;
   };
 
   struct UrlInfo {
@@ -187,13 +201,13 @@ class WebsiteMetrics : public BrowserCollectionObserver,
     bool is_activated = false;
     bool promotable = false;
 
-    // Converts the struct UsageTime to base::Value::Dict, e.g.:
+    // Converts the struct UsageTime to base::DictValue, e.g.:
     // {
     //    "time": "3600",
     //    "url_content": "scope",
     //    "promotable": "false",
     // }
-    base::Value::Dict ConvertToDict() const;
+    base::DictValue ConvertToDict() const;
   };
 
   // Observes the root window's activation client for the OnWindowActivated
@@ -313,6 +327,8 @@ class WebsiteMetrics : public BrowserCollectionObserver,
       history_observation_{this};
 
   base::ObserverList<Observer> observers_;
+
+  const raw_ref<const base::TickClock> tick_clock_;
 
   base::WeakPtrFactory<WebsiteMetrics> weak_factory_{this};
 };

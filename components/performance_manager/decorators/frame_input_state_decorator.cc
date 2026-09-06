@@ -11,6 +11,8 @@
 #include "components/performance_manager/public/performance_manager.h"
 #include "components/performance_manager/public/render_frame_host_proxy.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_widget_host.h"
+#include "content/public/browser/render_widget_host_observer.h"
 
 namespace performance_manager {
 
@@ -169,6 +171,7 @@ void FrameInputStateDecorator::InputObserver::OnInputEvent(
     input::InputEventSource source) {
   switch (event.GetType()) {
     case blink::WebInputEvent::Type::kRawKeyDown:
+    case blink::WebInputEvent::Type::kKeyDown:
       OnKeyEvent(event);
       return;
     // Pinches and flings are classified as scrolls.

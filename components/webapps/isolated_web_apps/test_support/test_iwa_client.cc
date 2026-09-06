@@ -6,6 +6,7 @@
 
 #include "base/notreached.h"
 #include "components/web_package/signed_web_bundles/signed_web_bundle_id.h"
+#include "components/webapps/isolated_web_apps/public/iwa_runtime_data_provider.h"
 
 namespace web_app::test {
 
@@ -22,15 +23,16 @@ void TestIwaClient::GetIwaSourceForRequest(
     const network::ResourceRequest& request,
     const std::optional<content::FrameTreeNodeId>& frame_tree_node,
     base::OnceCallback<void(base::expected<IwaSourceWithModeOrGeneratedResponse,
-                                           std::string>)> callback) {
+                                           SourceRequestError>)> callback) {
   NOTREACHED();
 }
 
-IwaRuntimeDataProvider* TestIwaClient::GetRuntimeDataProvider() {
-  return nullptr;
+void TestIwaClient::SetRuntimeDataProvider(IwaRuntimeDataProvider* provider) {
+  provider_ = provider;
 }
 
-MockIwaClient::MockIwaClient() = default;
-MockIwaClient::~MockIwaClient() = default;
+IwaRuntimeDataProvider* TestIwaClient::GetRuntimeDataProvider() {
+  return provider_;
+}
 
 }  // namespace web_app::test

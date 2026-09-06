@@ -9,12 +9,12 @@
 #include "chrome/browser/sync/test/integration/exponential_backoff_helper.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/updated_progress_marker_checker.h"
+#include "components/browser_sync/browser_sync_switches.h"
+#include "components/signin/public/base/signin_switches.h"
 #include "components/sync/base/features.h"
 #include "components/sync/engine/polling_constants.h"
 #include "components/sync/service/sync_service_impl.h"
-#include "components/sync/test/fake_server_http_post_provider.h"
 #include "content/public/test/browser_test.h"
-#include "content/public/test/network_connection_change_simulator.h"
 #include "net/base/network_change_notifier.h"
 
 namespace {
@@ -29,8 +29,10 @@ class SyncExponentialBackoffTest
  public:
   SyncExponentialBackoffTest() : SyncTest(SINGLE_CLIENT) {
     if (GetSetupSyncMode() == SetupSyncMode::kSyncTransportOnly) {
-      scoped_feature_list_.InitAndEnableFeature(
-          syncer::kReplaceSyncPromosWithSignInPromos);
+      scoped_feature_list_.InitWithFeatures(
+          {syncer::kReplaceSyncPromosWithSignInPromos,
+           switches::kSyncEnableBookmarksInTransportMode},
+          {});
     }
   }
 
@@ -79,7 +81,7 @@ IN_PROC_BROWSER_TEST_P(SyncExponentialBackoffTest, OfflineToOnline) {
                                              /*cryptographer=*/nullptr)
                   .Wait());
 
-  fake_server::FakeServerHttpPostProvider::DisableNetwork();
+  DisableNetwork();
 
   // Add a new item to trigger another sync cycle.
   ASSERT_TRUE(AddFolder(0, 0, kFolderTitle2, GetBookmarksStoreType()));
@@ -96,10 +98,7 @@ IN_PROC_BROWSER_TEST_P(SyncExponentialBackoffTest, OfflineToOnline) {
 
   // Trigger network change notification and remember time when it happened.
   // Ensure that scheduler runs canary job immediately.
-  fake_server::FakeServerHttpPostProvider::EnableNetwork();
-  content::NetworkConnectionChangeSimulator connection_change_simulator;
-  connection_change_simulator.SetConnectionType(
-      network::mojom::ConnectionType::CONNECTION_ETHERNET);
+  EnableNetwork();
 
   base::Time network_notification_time = base::Time::Now();
 

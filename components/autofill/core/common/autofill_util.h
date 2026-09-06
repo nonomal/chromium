@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "base/types/strong_alias.h"
 #include "components/autofill/core/common/aliases.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
@@ -35,12 +36,6 @@ bool IsShowAutofillSignaturesEnabled();
 // ends on a token.
 bool IsPrefixOfEmailEndingWithAtSign(std::u16string_view full_string,
                                      std::u16string_view prefix);
-
-bool IsCheckable(const FormFieldData::CheckStatus& check_status);
-bool IsChecked(const FormFieldData::CheckStatus& check_status);
-void SetCheckStatus(FormFieldData* form_field_data,
-                    bool is_checkable,
-                    bool is_checked);
 
 // Returns the index of the shortest entry in the given select field of which
 // |value| is a substring. Returns -1 if no such entry exists.
@@ -84,10 +79,8 @@ GURL StripAuthAndParams(const GURL& gurl);
 IsPasswordRequestManuallyTriggered IsPasswordsAutofillManuallyTriggered(
     AutofillSuggestionTriggerSource trigger_source);
 
-// Checks if the user triggered plus addresses on a field manually through the
-// Chrome context menu.
-bool IsPlusAddressesManuallyTriggered(
-    AutofillSuggestionTriggerSource trigger_source);
+// Checks if the user triggered AtMemory on a field.
+bool IsAtMemoryTriggerSource(AutofillSuggestionTriggerSource trigger_source);
 
 // Returns whether the feature `kAutofillPaymentsFieldSwapping` is enabled
 // or not.
@@ -101,7 +94,13 @@ std::u16string GetButtonTitlesString(const ButtonTitleList& titles_list);
 //
 // A form is perfectly filled if the user did not have to manually type into any
 // field that Autofill didn't assist with.
-bool IsFormPerfectlyFilled(const FormData& form);
+bool IsFormDataPerfectlyFilled(const FormData& form);
+
+// Returns true if `field` is a <select> field that appears to be a
+// `PHONE_HOME_COUNTRY_CODE` field by looking at its option contents.
+// "Augmented" refers to the fact that we also allow select options containing
+// not only a country code but also further text like "Germany (+49)".
+bool LikelyAugmentedPhoneCountryCode(const FormFieldData& field);
 
 }  // namespace autofill
 

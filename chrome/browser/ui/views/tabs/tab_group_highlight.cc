@@ -7,6 +7,7 @@
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/tabs/tab_style.h"
 #include "chrome/browser/ui/views/tabs/tab_group_views.h"
+#include "components/tab_groups/tab_group_id.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkPathBuilder.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
@@ -55,7 +56,7 @@ SkPath TabGroupHighlight::GetPath() const {
   // the tabs around it, so there are no special cases needed when determining
   // its shape.
   const int corner_radius = TabStyle::Get()->GetBottomCornerRadius();
-  const int top = GetLayoutConstant(TAB_STRIP_PADDING);
+  const int top = GetLayoutConstant(LayoutConstant::kTabStripPadding);
 
   return SkPathBuilder()
       .moveTo(0, bounds().height())

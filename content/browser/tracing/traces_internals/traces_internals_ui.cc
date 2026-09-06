@@ -25,7 +25,7 @@ TracesInternalsUI::TracesInternalsUI(WebUI* web_ui, const GURL& url)
       web_ui->GetWebContents()->GetBrowserContext(), url.GetHost());
 
   source->AddResourcePaths(kTracesInternalsResources);
-  source->AddResourcePath("", IDR_TRACES_INTERNALS_TRACES_INTERNALS_HTML);
+  source->SetDefaultResource(IDR_TRACES_INTERNALS_TRACES_INTERNALS_HTML);
 
   // Add TrustedTypes policies necessary for using Polymer.
   source->OverrideContentSecurityPolicy(
@@ -55,7 +55,7 @@ void TracesInternalsUI::BindInterface(
 void TracesInternalsUI::CreatePageHandler(
     mojo::PendingRemote<traces_internals::mojom::Page> page,
     mojo::PendingReceiver<traces_internals::mojom::PageHandler> receiver) {
-  DCHECK(page);
+  CHECK(page, base::NotFatalUntil::M159);
   ui_handler_ = std::make_unique<TracesInternalsHandler>(std::move(receiver),
                                                          std::move(page));
 }

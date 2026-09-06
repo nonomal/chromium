@@ -88,11 +88,6 @@ std::string GetCookiesFromHeaders(
     const net::HttpRequestHeaders& headers,
     const net::HttpRequestHeaders& cors_exempt_headers);
 
-// Records UMA histograms for request sizes and categorizes them.
-void RecordURLLoaderRequestMetrics(const net::URLRequest& url_request,
-                                   size_t raw_request_line_size,
-                                   size_t raw_request_headers_size);
-
 // Records UMA metrics related to shared dictionary usage for non-cached
 // responses.
 void MaybeRecordSharedDictionaryUsedResponseMetrics(
@@ -104,6 +99,7 @@ void MaybeRecordSharedDictionaryUsedResponseMetrics(
 // Configures the given `url_request` based on the properties specified in
 // `request` and context/factory parameters (`factory_params`,
 // `origin_access_list`).
+COMPONENT_EXPORT(NETWORK_SERVICE)
 void ConfigureUrlRequest(const ResourceRequest& request,
                          const mojom::URLLoaderFactoryParams& factory_params,
                          const cors::OriginAccessList& origin_access_list,
@@ -150,6 +146,18 @@ mojom::URLResponseHeadPtr BuildResponseHead(
     base::TimeTicks response_start,
     const raw_ptr<mojom::DevToolsObserver> devtools_observer,
     const std::string& devtools_request_id);
+
+// Returns true if the site for cookies should be ignored to allow cookies to
+// be sent. This applies the origin access and same-site checks to every URL in
+// `url_chain` using one consistent authorization path, typically allowing
+// extensions to send cookies to cross-origin targets. Returns false for an
+// empty chain.
+COMPONENT_EXPORT(NETWORK_SERVICE)
+bool ShouldForceIgnoreSiteForCookies(
+    const std::vector<GURL>& url_chain,
+    const std::optional<url::Origin>& request_initiator,
+    const net::SiteForCookies& site_for_cookies,
+    const cors::OriginAccessList& origin_access_list);
 
 }  // namespace url_loader_util
 }  // namespace network

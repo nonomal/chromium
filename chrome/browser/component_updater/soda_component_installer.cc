@@ -4,9 +4,13 @@
 
 #include "chrome/browser/component_updater/soda_component_installer.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -95,7 +99,7 @@ void SodaComponentInstallerPolicy::UpdateSodaComponentOnDemand() {
             error != update_client::Error::UPDATE_IN_PROGRESS) {
           LOG(ERROR) << "On demand update of the SODA component failed "
                         "with error: "
-                     << static_cast<int>(error);
+                     << std::to_underlying(error);
         }
       }));
 }
@@ -131,10 +135,9 @@ SodaComponentInstallerPolicy::SetComponentDirectoryPermission(
       base::win::TakeLocalAlloc(acl_ptr);
 
   // Change the security attributes.
-  LPWSTR file_name = const_cast<LPWSTR>(install_dir.value().c_str());
-  if (::SetNamedSecurityInfo(file_name, SE_FILE_OBJECT,
-                             DACL_SECURITY_INFORMATION, nullptr, nullptr,
-                             acl.get(), nullptr) != ERROR_SUCCESS) {
+  if (::SetNamedSecurityInfo(const_cast<LPWSTR>(install_dir.value().c_str()),
+                             SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+                             nullptr, acl.get(), nullptr) != ERROR_SUCCESS) {
     return update_client::CrxInstaller::Result(
         update_client::InstallError::SET_PERMISSIONS_FAILED);
   }
@@ -154,7 +157,7 @@ bool SodaComponentInstallerPolicy::RequiresNetworkEncryption() const {
 
 update_client::CrxInstaller::Result
 SodaComponentInstallerPolicy::OnCustomInstall(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) {
   return SodaComponentInstallerPolicy::SetComponentDirectoryPermission(
       install_dir);
@@ -163,7 +166,7 @@ SodaComponentInstallerPolicy::OnCustomInstall(
 void SodaComponentInstallerPolicy::OnCustomUninstall() {}
 
 bool SodaComponentInstallerPolicy::VerifyInstallation(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) const {
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE)
   bool missing_indicator_file =
@@ -184,7 +187,7 @@ bool SodaComponentInstallerPolicy::VerifyInstallation(
 void SodaComponentInstallerPolicy::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
-    base::Value::Dict manifest) {
+    base::DictValue manifest) {
   VLOG(1) << "Component ready, version " << version.GetString() << " in "
           << install_dir.value();
   if (on_installed_callback_) {
@@ -201,8 +204,7 @@ base::FilePath SodaComponentInstallerPolicy::GetRelativeInstallDir() const {
 }
 
 void SodaComponentInstallerPolicy::GetHash(std::vector<uint8_t>* hash) const {
-  hash->assign(std::begin(kSodaPublicKeySHA256),
-               std::end(kSodaPublicKeySHA256));
+  hash->assign_range(kSodaPublicKeySHA256);
 }
 
 std::string SodaComponentInstallerPolicy::GetName() const {

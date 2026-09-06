@@ -45,7 +45,10 @@ const char kInitialConnectMessage[] = R"(
         "urn:x-cast:com.google.cast.webrtc",
         "urn:x-cast:com.google.cast.remoting",
         "urn:x-cast:com.google.cast.inject",
-        "urn:x-cast:com.google.cast.media"
+        "urn:x-cast:com.google.cast.media",
+        "urn:x-cast:com.google.cast.exo.bootstrap",
+        "urn:x-cast:com.google.cast.exo.input",
+        "urn:x-cast:com.google.cast.exo.capability"
       ],
       "version": "2.0.0",
       "messagesVersion": "1.0"
@@ -56,7 +59,7 @@ bool DeserializeCastMessage(std::string_view buffer,
                             std::string* sender_id,
                             std::string* message_namespace,
                             std::string* message) {
-  std::optional<base::Value::Dict> converted_dict =
+  std::optional<base::DictValue> converted_dict =
       base::JSONReader::ReadDict(buffer, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
   if (!converted_dict) {
     return false;
@@ -87,7 +90,7 @@ bool DeserializeCastMessage(std::string_view buffer,
 std::string SerializeCastMessage(const std::string& sender_id,
                                  const std::string& message_namespace,
                                  const std::string& message) {
-  base::Value::Dict value;
+  base::DictValue value;
   value.Set(kKeyNamespace, message_namespace);
   value.Set(kKeySenderId, sender_id);
   value.Set(kKeyData, message);

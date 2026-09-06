@@ -4,7 +4,7 @@
 
 #include "components/page_load_metrics/common/page_load_timing.h"
 
-#include "components/page_load_metrics/common/page_load_metrics.mojom-forward.h"
+#include "components/page_load_metrics/common/page_load_metrics.mojom.h"
 #include "third_party/blink/public/web/web_performance_metrics_for_reporting.h"
 
 namespace page_load_metrics {
@@ -31,14 +31,6 @@ mojom::LargestContentfulPaintTimingPtr CreateLargestContentfulPaintTiming() {
   return timing;
 }
 
-mojom::SoftNavigationMetricsPtr CreateSoftNavigationMetrics() {
-  auto timing = mojom::SoftNavigationMetrics::New();
-  timing->navigation_id = 0;
-  timing->start_time = base::Milliseconds(0);
-  timing->largest_contentful_paint = CreateLargestContentfulPaintTiming();
-  return timing;
-}
-
 bool IsEmpty(const page_load_metrics::mojom::DocumentTiming& timing) {
   return !timing.dom_content_loaded_event_start && !timing.load_event_start;
 }
@@ -46,10 +38,6 @@ bool IsEmpty(const page_load_metrics::mojom::DocumentTiming& timing) {
 bool IsEmpty(const page_load_metrics::mojom::InteractiveTiming& timing) {
   return !timing.first_input_delay && !timing.first_input_timestamp &&
          !timing.first_scroll_delay && !timing.first_scroll_timestamp;
-}
-
-bool IsEmpty(const page_load_metrics::mojom::InputTiming& timing) {
-  return timing.user_interaction_latencies.empty();
 }
 
 bool IsEmpty(const page_load_metrics::mojom::PaintTiming& timing) {
@@ -85,14 +73,12 @@ bool IsEmpty(const mojom::LargestContentfulPaintTiming& timing) {
 }
 
 bool IsEmpty(const mojom::MonotonicPaintTiming& timing) {
-  return !timing.first_paint && !timing.first_contentful_paint;
+  return !timing.first_paint && !timing.first_contentful_paint &&
+         !timing.first_contentful_paint_submitted;
 }
 
 bool IsEmpty(const mojom::SoftNavigationMetrics& timing) {
-  return !timing.count && timing.start_time.is_zero() &&
-         !timing.navigation_id && !timing.same_document_metrics_token &&
-         (!timing.largest_contentful_paint ||
-          IsEmpty(*timing.largest_contentful_paint));
+  return !timing.performance_timeline_navigation_id;
 }
 
 bool IsEmpty(const page_load_metrics::mojom::PageLoadTiming& timing) {

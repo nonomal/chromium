@@ -5,19 +5,22 @@
 #ifndef CHROME_BROWSER_GLIC_BROWSER_UI_TAB_UNDERLINE_VIEW_H_
 #define CHROME_BROWSER_GLIC_BROWSER_UI_TAB_UNDERLINE_VIEW_H_
 
+#include <optional>
+
 #include "base/scoped_observation.h"
 #include "cc/paint/paint_shader.h"
 #include "chrome/browser/glic/browser_ui/animated_effect_view.h"
+#include "chrome/browser/glic/browser_ui/tab_underline_controller.h"
 #include "components/tabs/public/tab_interface.h"
-#include "content/public/browser/gpu_data_manager_observer.h"
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/compositor/compositor_animation_observer.h"
 #include "ui/compositor/compositor_observer.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/views/metadata/view_factory.h"
 #include "ui/views/view.h"
 
-class Browser;
+class BrowserWindowInterface;
 
 namespace gfx {
 class Canvas;
@@ -25,18 +28,24 @@ class Canvas;
 
 namespace glic {
 
-class TabUnderlineViewController;
-
-class TabUnderlineView : public AnimatedEffectView {
+class TabUnderlineView : public AnimatedEffectView,
+                         public TabUnderlineController::UiDelegate {
   METADATA_HEADER(TabUnderlineView, views::View)
 
  public:
+  // The height of the underline effect. Also used for the padding outside the
+  // underline.
+  static constexpr int kEffectThickness = 2;
+
+  // The radius to use for rounded corners of the underline effect.
+  static constexpr float kCornerRadius = kEffectThickness / 2.0f;
+
   // Allows the test to inject the tester at the border's creation.
   class Factory {
    public:
     static std::unique_ptr<TabUnderlineView> Create(
-        std::unique_ptr<TabUnderlineViewController> controller,
-        Browser* browser,
+        std::unique_ptr<TabUnderlineController> controller,
+        BrowserWindowInterface* browser_window_interface,
         tabs::TabHandle tab_handle);
     static void set_factory(Factory* factory) { factory_ = factory; }
 
@@ -46,8 +55,8 @@ class TabUnderlineView : public AnimatedEffectView {
 
     // For tests to override.
     virtual std::unique_ptr<TabUnderlineView> CreateUnderlineView(
-        std::unique_ptr<TabUnderlineViewController> controller,
-        Browser* browser,
+        std::unique_ptr<TabUnderlineController> controller,
+        BrowserWindowInterface* browser_window_interface,
         tabs::TabHandle tab) = 0;
 
    private:
@@ -58,9 +67,12 @@ class TabUnderlineView : public AnimatedEffectView {
   TabUnderlineView& operator=(const TabUnderlineView&) = delete;
   ~TabUnderlineView() override;
 
-  // Returns the TabInterface corresponding to `underline_view_`, if it is
-  // valid.
-  tabs::TabInterface* GetTabInterface();
+  // TabUnderlineController::UiDelegate:
+  void Show() override;
+  void StopShowing() override;
+  void ResetAnimationCycle() override;
+  void StartRampingDown() override;
+  bool IsShowing() const override;
 
   enum class Orientation {
     kHorizontal,
@@ -68,16 +80,16 @@ class TabUnderlineView : public AnimatedEffectView {
   };
 
   void SetOrientation(Orientation orientation);
+  void SetInsets(const gfx::Insets& insets);
 
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kGlicTabUnderlineElementId);
 
  protected:
   friend class Factory;
-  explicit TabUnderlineView(
-      std::unique_ptr<TabUnderlineViewController> controller,
-      Browser* browser,
-      tabs::TabHandle tab_handle,
-      std::unique_ptr<Tester> tester);
+  explicit TabUnderlineView(std::unique_ptr<TabUnderlineController> controller,
+                            BrowserWindowInterface* browser_window_interface,
+                            tabs::TabHandle tab_handle,
+                            std::unique_ptr<Tester> tester);
 
  private:
   // `AnimatedEffectView`:
@@ -93,16 +105,22 @@ class TabUnderlineView : public AnimatedEffectView {
 
   // `views::View`:
   void OnThemeChanged() override;
+  void AddedToWidget() override;
 
   int ComputeDimension();
 
+  void OnActiveTabChanged(BrowserWindowInterface* browser_window_interface);
+
   // The controller responsible for notifying the view about various browser
   // UI status changes that affect showing and animating of the tab underlines.
-  const std::unique_ptr<TabUnderlineViewController> controller_;
+  const std::unique_ptr<TabUnderlineController> controller_;
 
   tabs::TabHandle tab_handle_;
 
   Orientation orientation_ = Orientation::kHorizontal;
+  std::optional<gfx::Insets> insets_;
+
+  base::CallbackListSubscription active_tab_subscription_;
 };
 
 BEGIN_VIEW_BUILDER(, TabUnderlineView, AnimatedEffectView)

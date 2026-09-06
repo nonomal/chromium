@@ -18,15 +18,17 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/to_string.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "build/config/chromebox_for_meetings/buildflags.h"  // PLATFORM_CFM
 #include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
 #include "chrome/browser/media/webrtc/webrtc_browsertest_base.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tab_sharing/tab_sharing_infobar_delegate.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -44,6 +46,8 @@
 #include "components/url_formatter/elide_url.h"
 #include "content/public/browser/audio_service.h"
 #include "content/public/browser/host_zoom_map.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
@@ -344,7 +348,17 @@ class WebRtcScreenCaptureBrowserTestWithPicker
 #if BUILDFLAG(PLATFORM_CFM)
     if (test_config_.should_prefer_current_tab &&
         !test_config_.accept_this_tab_capture) {
-      GTEST_SKIP();  // CFMs always automatically accept current-tab captures.
+      GTEST_SKIP() << "Skipping test: CFMs always automatically accept "
+                      "current-tab captures.";
+    }
+#endif
+
+#if BUILDFLAG(IS_WIN)
+    if (!test_config_.should_prefer_current_tab) {
+      // Win bots don't usually have GPU adapter, therefore DXGI capturers
+      // aren't available. WGC capturers aren't available on older platforms.
+      // Therefore we can't capture screens.
+      GTEST_SKIP() << "Skipping desktop capture tests";
     }
 #endif
   }
@@ -374,19 +388,29 @@ class WebRtcScreenCaptureBrowserTestWithPicker
   const TestConfigForPicker test_config_;
 };
 
-INSTANTIATE_TEST_SUITE_P(All,
-                         WebRtcScreenCaptureBrowserTestWithPicker,
-                         Combine(
-                             /*should_prefer_current_tab=*/Bool(),
-                             /*accept_this_tab_capture=*/Bool()));
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    WebRtcScreenCaptureBrowserTestWithPicker,
+    Combine(
+        /*should_prefer_current_tab=*/Bool(),
+        /*accept_this_tab_capture=*/Bool()),
+    [](const testing::TestParamInfo<
+        WebRtcScreenCaptureBrowserTestWithPicker::ParamType>& info) {
+      return base::JoinString(
+          {std::get<0>(info.param) ? "PreferCurrentTab" : "Standard",
+           std::get<1>(info.param) ? "Accept" : "Reject"},
+          "_");
+    });
 
 // TODO(crbug.com/40744542): Real desktop capture is flaky on below platforms.
 // TODO(crbug.com/41493366): enable this flaky test.
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+// TODO(crbug.com/461258716): enable this flaky test.
+#if BUILDFLAG(IS_MAC) || (BUILDFLAG(IS_LINUX) && defined(MEMORY_SANITIZER))
 #define MAYBE_ScreenCaptureVideo DISABLED_ScreenCaptureVideo
 #else
 #define MAYBE_ScreenCaptureVideo ScreenCaptureVideo
-#endif  // BUILDFLAG(IS_WIN)
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || (BUILDFLAG(IS_LINUX) &&
+        // defined(MEMORY_SANITIZER))
 IN_PROC_BROWSER_TEST_P(WebRtcScreenCaptureBrowserTestWithPicker,
                        MAYBE_ScreenCaptureVideo) {
   if (!test_config_.should_prefer_current_tab &&
@@ -453,13 +477,15 @@ IN_PROC_BROWSER_TEST_P(WebRtcScreenCaptureBrowserTestWithPicker,
 
 // TODO(crbug.com/40744542): Real desktop capture is flaky on below platforms.
 // TODO(crbug.com/41493366): enable this flaky test.
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+// TODO(crbug.com/461258716): enable this flaky test.
+#if BUILDFLAG(IS_MAC)
 #define MAYBE_ScreenCaptureVideoAndAudio DISABLED_ScreenCaptureVideoAndAudio
 // On linux debug bots, it's flaky as well.
 #elif BUILDFLAG(IS_LINUX) && !defined(NDEBUG)
 #define MAYBE_ScreenCaptureVideoAndAudio DISABLED_ScreenCaptureVideoAndAudio
-// On linux asan bots, it's flaky as well - msan and other rel bot are fine.
-#elif BUILDFLAG(IS_LINUX) && defined(ADDRESS_SANITIZER)
+// On linux asan and msan bots, it's flaky as well.
+#elif BUILDFLAG(IS_LINUX) && \
+    (defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER))
 #define MAYBE_ScreenCaptureVideoAndAudio DISABLED_ScreenCaptureVideoAndAudio
 #else
 #define MAYBE_ScreenCaptureVideoAndAudio ScreenCaptureVideoAndAudio
@@ -511,8 +537,14 @@ class WebRtcScreenCaptureBrowserTestWithFakeUI
   const TestConfigForFakeUI test_config_;
 };
 
+// TODO(crbug.com/461258716): enable this flaky test.
+#if (BUILDFLAG(IS_LINUX) && defined(MEMORY_SANITIZER))
+#define MAYBE_ScreenCaptureVideo_1 DISABLED_ScreenCaptureVideo
+#else
+#define MAYBE_ScreenCaptureVideo_1 ScreenCaptureVideo
+#endif  // (BUILDFLAG(IS_LINUX) && defined(MEMORY_SANITIZER))
 IN_PROC_BROWSER_TEST_P(WebRtcScreenCaptureBrowserTestWithFakeUI,
-                       ScreenCaptureVideo) {
+                       MAYBE_ScreenCaptureVideo_1) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   content::WebContents* tab = OpenTestPageInNewTab(kMainHtmlPage);
@@ -549,8 +581,14 @@ IN_PROC_BROWSER_TEST_P(WebRtcScreenCaptureBrowserTestWithFakeUI,
             "true");
 }
 
+// TODO(crbug.com/461258716): enable this flaky test.
+#if (BUILDFLAG(IS_LINUX) && defined(MEMORY_SANITIZER))
+#define MAYBE_ScreenCaptureWithConstraints DISABLED_ScreenCaptureWithConstraints
+#else
+#define MAYBE_ScreenCaptureWithConstraints ScreenCaptureWithConstraints
+#endif  // (BUILDFLAG(IS_LINUX) && defined(MEMORY_SANITIZER))
 IN_PROC_BROWSER_TEST_P(WebRtcScreenCaptureBrowserTestWithFakeUI,
-                       ScreenCaptureWithConstraints) {
+                       MAYBE_ScreenCaptureWithConstraints) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   content::WebContents* tab = OpenTestPageInNewTab(kMainHtmlPage);
@@ -587,7 +625,15 @@ INSTANTIATE_TEST_SUITE_P(
            TestConfigForFakeUI{/*should_prefer_current_tab=*/false,
                                /*display_surface=*/"browser"},
            TestConfigForFakeUI{/*should_prefer_current_tab=*/true,
-                               /*display_surface=*/"browser"}));
+                               /*display_surface=*/"browser"}),
+    [](const testing::TestParamInfo<
+        WebRtcScreenCaptureBrowserTestWithFakeUI::ParamType>& info) {
+      return base::JoinString(
+          {info.param.should_prefer_current_tab ? "PreferCurrentTab"
+                                                : "Standard",
+           info.param.display_surface},
+          "_");
+    });
 
 class WebRtcScreenCapturePermissionPolicyBrowserTest
     : public WebRtcScreenCaptureBrowserTest,
@@ -621,9 +667,18 @@ INSTANTIATE_TEST_SUITE_P(
     WebRtcScreenCapturePermissionPolicyBrowserTest,
     Combine(Values(GetDisplayMediaVariant::kStandard,
                    GetDisplayMediaVariant::kPreferCurrentTab),
-            /*allowlisted_by_policy=*/Bool()));
+            /*allowlisted_by_policy=*/Bool()),
+    [](const testing::TestParamInfo<
+        WebRtcScreenCapturePermissionPolicyBrowserTest::ParamType>& info) {
+      return base::JoinString(
+          {std::get<0>(info.param) == GetDisplayMediaVariant::kPreferCurrentTab
+               ? "PreferCurrentTab"
+               : "Standard",
+           std::get<1>(info.param) ? "Allowlisted" : "NotAllowlisted"},
+          "_");
+    });
 
-// Flaky on Win bots http://crbug.com/1264805
+// Flaky on Win bots http://crbug.com/40800993
 #if BUILDFLAG(IS_WIN)
 #define MAYBE_ScreenShareFromEmbedded DISABLED_ScreenShareFromEmbedded
 #else
@@ -676,16 +731,16 @@ class WebRtcAppWindowCaptureBrowserTestWithPicker
 
     // We will restrict all pages to "Tab Capture" only. This should force App
     // Windows to show up in the tabs list, and thus make it selectable.
-    base::Value::List matchlist;
+    base::ListValue matchlist;
     matchlist.Append("*");
-    browser()->profile()->GetPrefs()->SetList(
+    browser()->GetProfile()->GetPrefs()->SetList(
         prefs::kTabCaptureAllowedByOrigins, std::move(matchlist));
   }
 
   void TearDownOnMainThread() override {
     extensions::PlatformAppBrowserTest::TearDownOnMainThread();
-    browser()->profile()->GetPrefs()->SetList(
-        prefs::kTabCaptureAllowedByOrigins, base::Value::List());
+    browser()->GetProfile()->GetPrefs()->SetList(
+        prefs::kTabCaptureAllowedByOrigins, base::ListValue());
   }
 
   extensions::AppWindow* CreateAppWindowWithTitle(const std::u16string& title) {
@@ -703,7 +758,7 @@ class WebRtcAppWindowCaptureBrowserTestWithPicker
     chrome::AddTabAt(browser(), GURL(url::kAboutBlankURL), -1, true);
     GURL url = embedded_test_server()->GetURL(test_url);
     EXPECT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
-    return browser()->tab_strip_model()->GetActiveWebContents();
+    return browser()->GetTabStripModel()->GetActiveWebContents();
   }
 };
 
@@ -742,16 +797,16 @@ class WebRtcSameOriginPolicyBrowserTest
     ASSERT_TRUE(embedded_test_server()->Start());
 
     // Restrict all origins to SameOrigin tab capture only.
-    base::Value::List matchlist;
+    base::ListValue matchlist;
     matchlist.Append("*");
-    browser()->profile()->GetPrefs()->SetList(
+    browser()->GetProfile()->GetPrefs()->SetList(
         prefs::kSameOriginTabCaptureAllowedByOrigins, std::move(matchlist));
   }
 
   void TearDownOnMainThread() override {
     WebRtcScreenCaptureBrowserTest::TearDownOnMainThread();
-    browser()->profile()->GetPrefs()->SetList(
-        prefs::kSameOriginTabCaptureAllowedByOrigins, base::Value::List());
+    browser()->GetProfile()->GetPrefs()->SetList(
+        prefs::kSameOriginTabCaptureAllowedByOrigins, base::ListValue());
   }
 };
 
@@ -778,11 +833,11 @@ IN_PROC_BROWSER_TEST_F(WebRtcSameOriginPolicyBrowserTest,
   // the target tab is focused, so that we can navigate it easily. If it is
   // already focused, this will just no-op.
   int target_index =
-      browser()->tab_strip_model()->GetIndexOfWebContents(target_tab);
-  browser()->tab_strip_model()->ActivateTabAt(
+      browser()->GetTabStripModel()->GetIndexOfWebContents(target_tab);
+  browser()->GetTabStripModel()->ActivateTabAt(
       target_index, TabStripUserGestureDetails(
                         TabStripUserGestureDetails::GestureType::kOther));
-  ASSERT_EQ(target_tab, browser()->tab_strip_model()->GetActiveWebContents());
+  ASSERT_EQ(target_tab, browser()->GetTabStripModel()->GetActiveWebContents());
 
   // We navigate to a FileURL so that the origin will change, which should
   // trigger the capture to end.
@@ -818,11 +873,11 @@ IN_PROC_BROWSER_TEST_F(WebRtcSameOriginPolicyBrowserTest,
   // the target tab is focused, so that we can navigate it easily. If it is
   // already focused, this will just no-op.
   int target_index =
-      browser()->tab_strip_model()->GetIndexOfWebContents(target_tab);
-  browser()->tab_strip_model()->ActivateTabAt(
+      browser()->GetTabStripModel()->GetIndexOfWebContents(target_tab);
+  browser()->GetTabStripModel()->ActivateTabAt(
       target_index, TabStripUserGestureDetails(
                         TabStripUserGestureDetails::GestureType::kOther));
-  ASSERT_EQ(target_tab, browser()->tab_strip_model()->GetActiveWebContents());
+  ASSERT_EQ(target_tab, browser()->GetTabStripModel()->GetActiveWebContents());
 
   // We navigate using the test server so that the origin doesn't change.
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
@@ -955,12 +1010,12 @@ INSTANTIATE_TEST_SUITE_P(
                    DisplaySurfaceType::kScreen)),
     [](const testing::TestParamInfo<
         GetDisplayMediaVideoTrackBrowserTest::ParamType>& info) {
-      return base::StrCat(
+      return base::JoinString(
           {std::get<0>(info.param) ? "RegionCapture" : "",
-           std::get<1>(info.param) == DisplaySurfaceType::kTab ? "Tab"
-           : std::get<1>(info.param) == DisplaySurfaceType::kWindow
-               ? "Window"
-               : "Screen"});
+           std::get<1>(info.param) == DisplaySurfaceType::kTab      ? "Tab"
+           : std::get<1>(info.param) == DisplaySurfaceType::kWindow ? "Window"
+                                                                    : "Screen"},
+          "_");
     });
 
 // Normally, each of these these would have its own test, but the number of
@@ -983,7 +1038,7 @@ IN_PROC_BROWSER_TEST_P(GetDisplayMediaVideoTrackBrowserTest, RunCombinedTest) {
   }
 }
 
-// Flaky on Mac, Windows, and ChromeOS bots, https://crbug.com/1371309
+// Flaky on Mac, Windows, and ChromeOS bots, https://crbug.com/40241323
 // Also some flakes on Linux ASAN/MSAN builds.
 #if BUILDFLAG(IS_LINUX) && \
     !(defined(MEMORY_SANITIZER) || defined(ADDRESS_SANITIZER))
@@ -1121,25 +1176,27 @@ INSTANTIATE_TEST_SUITE_P(
     Values(TestConfigForMediaResolution{/*constraint_width=*/640,
                                         /*constraint_height=*/480},
            TestConfigForMediaResolution{/*constraint_width=*/3840,
-                                        /*constraint_height=*/2160}));
+                                        /*constraint_height=*/2160}),
+    [](const testing::TestParamInfo<TestConfigForMediaResolution>& info) {
+      return base::StringPrintf("%dx%d", info.param.constraint_width,
+                                info.param.constraint_height);
+    });
 #endif
 
 class GetDisplayMediaChangeSourceBrowserTest
     : public WebRtcTestBase,
-      public testing::WithParamInterface<std::tuple<bool, bool, bool>> {
+      public testing::WithParamInterface<std::tuple<bool, bool>> {
  public:
   GetDisplayMediaChangeSourceBrowserTest()
       : dynamic_surface_switching_requested_(std::get<0>(GetParam())),
-        feature_enabled_(std::get<1>(GetParam())),
-        user_shared_audio_(std::get<2>(GetParam())) {}
+        user_shared_audio_(std::get<1>(GetParam())) {}
   ~GetDisplayMediaChangeSourceBrowserTest() override = default;
 
   void SetUp() override {
     // TODO(crbug.com/40245399): Fix GetDisplayMediaChangeSourceBrowserTest with
     // audio requested on ChromeOS
 #if BUILDFLAG(IS_CHROMEOS)
-    if (dynamic_surface_switching_requested_ && feature_enabled_ &&
-        user_shared_audio_) {
+    if (dynamic_surface_switching_requested_ && user_shared_audio_) {
       GTEST_SKIP();
     }
 #endif
@@ -1147,9 +1204,6 @@ class GetDisplayMediaChangeSourceBrowserTest
   }
 
   void SetUpInProcessBrowserTestFixture() override {
-    feature_list_.InitWithFeatureState(
-        media::kShareThisTabInsteadButtonGetDisplayMedia, feature_enabled_);
-
     WebRtcTestBase::SetUpInProcessBrowserTestFixture();
 
     DetectErrorsInJavaScript();
@@ -1178,19 +1232,28 @@ class GetDisplayMediaChangeSourceBrowserTest
   }
 
   bool ShouldShowShareThisTabInsteadButton() const {
-    return dynamic_surface_switching_requested_ && feature_enabled_;
+    return dynamic_surface_switching_requested_;
   }
 
  private:
-  base::test::ScopedFeatureList feature_list_;
   const bool dynamic_surface_switching_requested_;
-  const bool feature_enabled_;
   const bool user_shared_audio_;
 };
 
-INSTANTIATE_TEST_SUITE_P(All,
-                         GetDisplayMediaChangeSourceBrowserTest,
-                         Combine(Bool(), Bool(), Bool()));
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    GetDisplayMediaChangeSourceBrowserTest,
+    Combine(Bool(), Bool()),
+    [](const testing::TestParamInfo<
+        GetDisplayMediaChangeSourceBrowserTest::ParamType>& info) {
+      return base::JoinString(
+          {
+              std::get<0>(info.param) ? "Dynamic" : "Static",
+              std::get<1>(info.param) ? "UserSharedAudio"
+                                      : "UserDidNotShareAudio",
+          },
+          "_");
+    });
 
 // TODO(crbug.com/40900706) Re-enable flaky test.
 IN_PROC_BROWSER_TEST_P(GetDisplayMediaChangeSourceBrowserTest,
@@ -1323,14 +1386,14 @@ IN_PROC_BROWSER_TEST_P(GetDisplayMediaChangeSourceBrowserTest,
   EXPECT_EQ(GetShareThisTabInsteadButtonLabel(other_tab),
             kShareThisTabInsteadMessage);
 
-  browser()->tab_strip_model()->ActivateTabAt(
-      browser()->tab_strip_model()->GetIndexOfWebContents(other_tab));
-  while (browser()->tab_strip_model()->GetActiveWebContents() != other_tab) {
+  browser()->GetTabStripModel()->ActivateTabAt(
+      browser()->GetTabStripModel()->GetIndexOfWebContents(other_tab));
+  while (browser()->GetTabStripModel()->GetActiveWebContents() != other_tab) {
     base::RunLoop().RunUntilIdle();
   }
 
-  browser()->profile()->GetPrefs()->SetBoolean(prefs::kScreenCaptureAllowed,
-                                               false);
+  browser()->GetProfile()->GetPrefs()->SetBoolean(prefs::kScreenCaptureAllowed,
+                                                  false);
 
   // Click the share-this-tab-instead secondary button. This is rejected since
   // screen capture is not allowed by the above policy.
@@ -1338,7 +1401,8 @@ IN_PROC_BROWSER_TEST_P(GetDisplayMediaChangeSourceBrowserTest,
 
   // When "Share this tab instead" fails for other_tab, the focus goes back to
   // the captured tab. Wait until that happens:
-  while (browser()->tab_strip_model()->GetActiveWebContents() != captured_tab) {
+  while (browser()->GetTabStripModel()->GetActiveWebContents() !=
+         captured_tab) {
     base::RunLoop().RunUntilIdle();
   }
 
@@ -1422,7 +1486,10 @@ class GetDisplayMediaSelfBrowserSurfaceBrowserTest
 
 INSTANTIATE_TEST_SUITE_P(All,
                          GetDisplayMediaSelfBrowserSurfaceBrowserTest,
-                         Values("", "include", "exclude"));
+                         Values("", "include", "exclude"),
+                         [](const testing::TestParamInfo<std::string>& info) {
+                           return info.param.empty() ? "Unset" : info.param;
+                         });
 
 IN_PROC_BROWSER_TEST_P(GetDisplayMediaSelfBrowserSurfaceBrowserTest,
                        SelfBrowserSurfaceChangesCapturedTab) {
@@ -1485,17 +1552,17 @@ class GetDisplayMediaTransientActivationRequiredTest
   static std::string GetDescription(
       const testing::TestParamInfo<
           GetDisplayMediaTransientActivationRequiredTest::ParamType>& info) {
-    std::string name = base::StrCat(
-        {std::get<0>(info.param) ? "WithUserGesture_" : "WithoutUserGesture_",
-         std::get<1>(info.param) ? "RequireGestureFeatureEnabled_"
-                                 : "_RequireGestureFeatureDisabled_",
-         std::get<2>(info.param) ? "PreferCurrentTab_"
-                                 : "DontPreferCurrentTab_",
+    std::string name = base::JoinString(
+        {std::get<0>(info.param) ? "WithUserGesture" : "WithoutUserGesture",
+         std::get<1>(info.param) ? "RequireGestureFeatureEnabled"
+                                 : "RequireGestureFeatureDisabled",
+         std::get<2>(info.param) ? "PreferCurrentTab" : "DontPreferCurrentTab",
          std::get<3>(info.param).has_value()
              ? (*std::get<3>(info.param) == kEmbeddedTestServerOrigin)
                    ? "Allowlisted"
                    : "OtherAllowlisted"
-             : "NoPolicySet"});
+             : "NoPolicySet"},
+        "_");
     return name;
   }
 
@@ -1539,7 +1606,7 @@ IN_PROC_BROWSER_TEST_P(GetDisplayMediaTransientActivationRequiredTest, Check) {
 
   if (policy_allowlist_value_.has_value()) {
     policy::PolicyMap policy_map;
-    base::Value::List allowed_origins;
+    base::ListValue allowed_origins;
     allowed_origins.Append(base::Value(*policy_allowlist_value_));
     policy_map.Set(policy::key::kScreenCaptureWithoutGestureAllowedForOrigins,
                    policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
@@ -1591,9 +1658,9 @@ class GetDisplayMediaConfersTransientActivationTest
     const bool prefer_current_tab = std::get<1>(info.param);
     const bool user_accepts = std::get<2>(info.param);
     return base::StrCat(
-        {"WithFeature", feature_enabled ? "Enabled" : "Disabled",
+        {"WithFeature", feature_enabled ? "Enabled" : "Disabled", "_",
          prefer_current_tab ? "PreferCurrentTabVariant" : "StandardVariant",
-         "User", user_accepts ? "Accepts" : "Rejects", "Prompt"});
+         "_User", user_accepts ? "Accepts" : "Rejects", "Prompt"});
   }
 
   GetDisplayMediaConfersTransientActivationTest()
@@ -1686,8 +1753,8 @@ class GetUserMediaDoesNotConferTransientActivationTest
     const bool video = std::get<0>(info.param);
     const bool audio = std::get<1>(info.param);
     const bool user_accepts = std::get<2>(info.param);
-    return base::StrCat({"Video", video ? "On" : "Off", "Audio",
-                         audio ? "On" : "Off", "User",
+    return base::StrCat({"Video", video ? "On" : "Off", "_Audio",
+                         audio ? "On" : "Off", "_User",
                          user_accepts ? "Accepts" : "Rejects", "Prompt"});
   }
 
@@ -1935,7 +2002,7 @@ class CaptureSessionDetails {
     content::EvalJsResult js_result = content::EvalJs(
         capturing_tab_->GetPrimaryMainFrame(), "getSupportedZoomLevels();");
 
-    const base::Value::List& list = js_result.ExtractList();
+    const base::ListValue& list = js_result.ExtractList();
     EXPECT_GE(list.size(), 1u);
     if (list.size() == 1u) {
       // Reserved for an error.
@@ -2085,11 +2152,6 @@ class CapturedSurfaceControlTest : public WebRtcTestBase {
   ~CapturedSurfaceControlTest() override = default;
 
   void SetUpInProcessBrowserTestFixture() override {
-    feature_list_.InitWithFeatures(
-        /*enabled_features=*/{media::kShareThisTabInsteadButtonGetDisplayMedia,
-                              blink::features::kCapturedSurfaceControl},
-        /*disabled_features=*/{});
-
     WebRtcTestBase::SetUpInProcessBrowserTestFixture();
 
     DetectErrorsInJavaScript();
@@ -2134,9 +2196,6 @@ class CapturedSurfaceControlTest : public WebRtcTestBase {
         /*other_tab=*/(OpenTestPageInNewTab(kMainHtmlPage)),
         /*capturing_tab=*/(OpenTestPageInNewTab(kMainHtmlPage)));
   }
-
- private:
-  base::test::ScopedFeatureList feature_list_;
 };
 
 using CscAction = CapturedSurfaceControlTest::Action;
@@ -2637,7 +2696,26 @@ INSTANTIATE_TEST_SUITE_P(,
                                 CscAction::kDecreaseZoomLevel,
                                 CscAction::kResetZoomLevel,
                                 CscAction::kGetZoomLevel,
-                                CscAction::kGetSupportedZoomLevels));
+                                CscAction::kGetSupportedZoomLevels),
+                         [](const testing::TestParamInfo<CscAction>& info) {
+                           switch (info.param) {
+                             case CscAction::kForwardWheel:
+                               return "ForwardWheel";
+                             case CscAction::kForwardWheelNull:
+                               return "ForwardWheelNull";
+                             case CscAction::kIncreaseZoomLevel:
+                               return "IncreaseZoomLevel";
+                             case CscAction::kDecreaseZoomLevel:
+                               return "DecreaseZoomLevel";
+                             case CscAction::kResetZoomLevel:
+                               return "ResetZoomLevel";
+                             case CscAction::kGetZoomLevel:
+                               return "GetZoomLevel";
+                             case CscAction::kGetSupportedZoomLevels:
+                               return "GetSupportedZoomLevels";
+                           }
+                           NOTREACHED();
+                         });
 
 IN_PROC_BROWSER_TEST_P(CapturedSurfaceControlIndicatorTest,
                        IndicatorNotShownBeforeApiInvocation) {
@@ -2749,7 +2827,12 @@ class WebRtcScreenCaptureBrowserTestUserRejection
   const bool prefer_current_tab_;
 };
 
-INSTANTIATE_TEST_SUITE_P(, WebRtcScreenCaptureBrowserTestUserRejection, Bool());
+INSTANTIATE_TEST_SUITE_P(,
+                         WebRtcScreenCaptureBrowserTestUserRejection,
+                         Bool(),
+                         [](const testing::TestParamInfo<bool>& info) {
+                           return info.param ? "PreferCurrentTab" : "Standard";
+                         });
 
 IN_PROC_BROWSER_TEST_P(WebRtcScreenCaptureBrowserTestUserRejection,
                        CorrectErrorReported) {
@@ -2808,7 +2891,6 @@ class GetDisplayMediaRestrictOwnAudioTest
   void SetUpInProcessBrowserTestFixture() override {
 #if BUILDFLAG(IS_MAC)
     feature_list_.InitWithFeatures({media::kMacCatapLoopbackAudioForCast,
-                                    media::kMacCatapLoopbackAudioForScreenShare,
                                     blink::features::kRestrictOwnAudio},
                                    {media::kUseSCContentSharingPicker});
 #elif BUILDFLAG(IS_WIN)
@@ -2865,11 +2947,23 @@ class GetDisplayMediaRestrictOwnAudioTest
   base::test::ScopedFeatureList feature_list_;
 };
 
-INSTANTIATE_TEST_SUITE_P(All,
-                         GetDisplayMediaRestrictOwnAudioTest,
-                         Combine(
-                             /*restrict_own_audio=*/Bool(),
-                             /*suppress_local_audio_playback=*/Bool()));
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    GetDisplayMediaRestrictOwnAudioTest,
+    Combine(
+        /*restrict_own_audio=*/Bool(),
+        /*suppress_local_audio_playback=*/Bool()),
+    [](const testing::TestParamInfo<
+        GetDisplayMediaRestrictOwnAudioTest::ParamType>& info) {
+      return base::JoinString(
+          {
+              std::get<0>(info.param) ? "RestrictOwnAudio"
+                                      : "NoRestrictOwnAudio",
+              std::get<1>(info.param) ? "SuppressLocalAudio"
+                                      : "NoSuppressLocalAudio",
+          },
+          "_");
+    });
 
 IN_PROC_BROWSER_TEST_P(GetDisplayMediaRestrictOwnAudioTest,
                        ScreenCaptureWithRestrictOwnAudio) {

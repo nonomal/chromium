@@ -11,6 +11,7 @@
 #include "cc/mojom/render_frame_metadata.mojom-shared.h"
 #include "components/viz/common/quads/compositor_frame_metadata.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/perfetto/include/perfetto/tracing/track_event_args.h"
 
 namespace blink {
 
@@ -102,15 +103,16 @@ void RenderFrameMetadataObserverImpl::OnRenderFrameSubmission(
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
     last_root_scroll_offset_ = metadata_copy.root_scroll_offset;
 #endif
-    TRACE_EVENT_WITH_FLOW1(
+    TRACE_EVENT(
         TRACE_DISABLED_BY_DEFAULT("viz.surface_id_flow"),
         "RenderFrameMetadataObserverImpl::OnRenderFrameSubmission",
-        metadata_copy.local_surface_id &&
-                metadata_copy.local_surface_id->is_valid()
-            ? metadata_copy.local_surface_id->submission_trace_id() +
-                  metadata_copy.local_surface_id->embed_trace_id()
-            : 0,
-        TRACE_EVENT_FLAG_FLOW_OUT, "local_surface_id",
+        perfetto::Flow::ProcessScoped(
+            metadata_copy.local_surface_id &&
+                    metadata_copy.local_surface_id->is_valid()
+                ? metadata_copy.local_surface_id->submission_trace_id() +
+                      metadata_copy.local_surface_id->embed_trace_id()
+                : 0),
+        "local_surface_id",
         metadata_copy.local_surface_id
             ? metadata_copy.local_surface_id->ToString()
             : "null");
@@ -187,9 +189,9 @@ bool RenderFrameMetadataObserverImpl::ShouldSendRenderFrameMetadata(
       rfm1.delegated_ink_metadata != rfm2.delegated_ink_metadata ||
       rfm1.device_scale_factor != rfm2.device_scale_factor ||
       rfm1.viewport_size_in_pixels != rfm2.viewport_size_in_pixels ||
-      rfm1.top_controls_height != rfm2.top_controls_height ||
-      rfm1.top_controls_shown_ratio != rfm2.top_controls_shown_ratio ||
+      rfm1.browser_controls_metadata != rfm2.browser_controls_metadata ||
       rfm1.local_surface_id != rfm2.local_surface_id ||
+      rfm1.tracked_element_rects != rfm2.tracked_element_rects ||
       rfm2.new_vertical_scroll_direction !=
           viz::VerticalScrollDirection::kNull ||
       (rfm2.primary_main_frame_item_sequence_number !=
@@ -201,13 +203,7 @@ bool RenderFrameMetadataObserverImpl::ShouldSendRenderFrameMetadata(
   }
 
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
-  if (rfm1.bottom_controls_height != rfm2.bottom_controls_height ||
-      rfm1.bottom_controls_shown_ratio != rfm2.bottom_controls_shown_ratio ||
-      rfm1.top_controls_min_height_offset !=
-          rfm2.top_controls_min_height_offset ||
-      rfm1.bottom_controls_min_height_offset !=
-          rfm2.bottom_controls_min_height_offset ||
-      rfm1.min_page_scale_factor != rfm2.min_page_scale_factor ||
+  if (rfm1.min_page_scale_factor != rfm2.min_page_scale_factor ||
       rfm1.max_page_scale_factor != rfm2.max_page_scale_factor ||
       rfm1.root_overflow_y_hidden != rfm2.root_overflow_y_hidden ||
       rfm1.scrollable_viewport_size != rfm2.scrollable_viewport_size ||
@@ -274,6 +270,15 @@ void RenderFrameMetadataObserverImpl::DidEndScroll() {
   render_frame_metadata_observer_client_->OnRootScrollOffsetChanged(
       root_scroll_offset.value());
   last_root_scroll_offset_ = root_scroll_offset;
+}
+#endif
+
+#if BUILDFLAG(IS_ANDROID)
+void RenderFrameMetadataObserverImpl::ReportScrollJankStats(
+    uint32_t total_frames,
+    uint32_t janky_frames) {
+  render_frame_metadata_observer_client_->ReportScrollJankStats(total_frames,
+                                                                janky_frames);
 }
 #endif
 

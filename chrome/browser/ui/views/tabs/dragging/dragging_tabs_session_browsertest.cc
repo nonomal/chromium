@@ -4,7 +4,6 @@
 
 #include "chrome/browser/ui/views/tabs/dragging/dragging_tabs_session.h"
 
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -15,6 +14,7 @@
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/test/browser_test.h"
 #include "ui/base/models/list_selection_model.h"
+#include "ui/gfx/animation/animation_test_api.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/views/view.h"
@@ -27,7 +27,7 @@ class DraggingTabsSessionBrowserTest : public InProcessBrowserTest {
 
   void SetUpOnMainThread() override {
     model_ = browser()->GetTabStripModel();
-    view_ = browser()->GetBrowserView().tab_strip_view();
+    view_ = BrowserView::GetBrowserViewForBrowser(browser())->tab_strip_view();
   }
 
   void TearDownOnMainThread() override {
@@ -40,9 +40,8 @@ class DraggingTabsSessionBrowserTest : public InProcessBrowserTest {
   std::tuple<tabs::TabInterface*, views::View*> AddTab(int index,
                                                        bool foreground) {
     chrome::AddTabAt(browser(), GURL("about:blank"), index, foreground);
-    view_->StopAnimating();
-    return std::make_tuple(model_->GetTabAtIndex(index),
-                           view_->GetTabAnchorViewAt(index));
+    tabs::TabInterface* tab = model_->GetTabAtIndex(index);
+    return std::make_tuple(tab, view_->GetTabAnchorView(tab->GetHandle()));
   }
 
   // Sets up model and view state, and populates a DragSessionData, to drag the
@@ -60,13 +59,14 @@ class DraggingTabsSessionBrowserTest : public InProcessBrowserTest {
 
     DragSessionData drag_data;
     for (int tab_index : tab_indices) {
-      Tab* const tab_view =
-          views::AsViewClass<Tab>(view_->GetTabAnchorViewAt(tab_index));
+      Tab* const tab_view = views::AsViewClass<Tab>(view_->GetTabAnchorView(
+          model_->GetTabAtIndex(tab_index)->GetHandle()));
       CHECK(tab_view) << "Anchor view did not return a horizontal tab";
       drag_data.tab_drag_data_.emplace_back(view_->GetDragContext(), tab_view);
       drag_data.tab_drag_data_.back().attached_view = tab_view;
     }
     drag_data.source_view_index_ = source_index;
+    drag_data.mouse_offset_to_size_ratios.set_x(0.5);
 
     view_->GetDragContext()->StartedDragging(drag_data.attached_views());
 
@@ -75,6 +75,10 @@ class DraggingTabsSessionBrowserTest : public InProcessBrowserTest {
 
   raw_ptr<TabStripModel> model_;
   raw_ptr<TabStripRegionView> view_;
+
+  const gfx::AnimationTestApi::RenderModeResetter disable_rich_animations_ =
+      gfx::AnimationTestApi::SetRichAnimationRenderMode(
+          gfx::Animation::RichAnimationRenderMode::FORCE_DISABLED);
 };
 
 // Flaky. http://crbug.com/417465013
@@ -96,7 +100,7 @@ IN_PROC_BROWSER_TEST_F(DraggingTabsSessionBrowserTest, MAYBE_BasicTest) {
   ASSERT_NE(drag_position_delegate, nullptr);
   const gfx::Point start_point = tab_0_view->GetBoundsInScreen().CenterPoint();
   DraggingTabsSession session(drag_data, *drag_context, *drag_position_delegate,
-                              0.5, true, start_point);
+                              true, start_point);
 
   // Swap them.
   const gfx::Point target_point =

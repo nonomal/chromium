@@ -8,7 +8,6 @@
 #include <cstddef>
 #include <memory>
 
-#include "base/memory/memory_pressure_listener.h"
 #include "base/memory/raw_ptr.h"
 #include "base/threading/thread.h"
 #include "components/viz/service/viz_service_export.h"
@@ -26,15 +25,12 @@ class DawnContextProvider;
 class GpuChannelManager;
 class VulkanImplementation;
 class VulkanDeviceQueue;
+class VulkanContextProvider;
 }  // namespace gpu
 
 namespace viz {
 
-class VulkanContextProvider;
-
-class VIZ_SERVICE_EXPORT CompositorGpuThread
-    : public base::Thread,
-      public base::MemoryPressureListener {
+class VIZ_SERVICE_EXPORT CompositorGpuThread : public base::Thread {
  public:
   using GetVideoMemoryUsageStatsCallback =
       base::OnceCallback<void(const ::gpu::VideoMemoryUsageStats&)>;
@@ -63,7 +59,7 @@ class VIZ_SERVICE_EXPORT CompositorGpuThread
 
   scoped_refptr<gpu::SharedContextState> GetSharedContextState();
 
-  VulkanContextProvider* vulkan_context_provider() const {
+  gpu::VulkanContextProvider* vulkan_context_provider() const {
     return vulkan_context_provider_.get();
   }
 
@@ -93,15 +89,13 @@ class VIZ_SERVICE_EXPORT CompositorGpuThread
 
   bool Initialize();
 
-  void OnMemoryPressure(
-      base::MemoryPressureLevel memory_pressure_level) override;
   void OnBackgroundedOnCompositorGpuThread();
 
   raw_ptr<gpu::GpuChannelManager> gpu_channel_manager_;
   const bool enable_watchdog_;
   bool init_succeeded_ = false;
 
-  scoped_refptr<VulkanContextProvider> vulkan_context_provider_;
+  scoped_refptr<gpu::VulkanContextProvider> vulkan_context_provider_;
 
 #if BUILDFLAG(SKIA_USE_DAWN)
   std::unique_ptr<gpu::DawnContextProvider> dawn_context_provider_;
@@ -117,10 +111,6 @@ class VIZ_SERVICE_EXPORT CompositorGpuThread
   // before it.
   std::unique_ptr<gpu::GpuWatchdogThread> watchdog_thread_;
   scoped_refptr<gpu::SharedContextState> shared_context_state_;
-
-  // Listens to the memory pressure signals from the platform.
-  std::unique_ptr<base::AsyncMemoryPressureListenerRegistration>
-      memory_pressure_listener_registration_;
 
   base::WeakPtrFactory<CompositorGpuThread> weak_ptr_factory_;
 };

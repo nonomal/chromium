@@ -26,6 +26,10 @@ class CORE_EXPORT CSSCustomIdentValue : public CSSValue {
   explicit CSSCustomIdentValue(const CSSFunctionValue& ident_function);
 
   const TreeScope* GetTreeScope() const { return tree_scope_.Get(); }
+  const TreeScope* GetPopulatedTreeScope() const {
+    CHECK(IsScopedValue());
+    return GetTreeScope();
+  }
   const AtomicString& Value() const {
     DCHECK(!IsKnownPropertyID());
     return string_;
@@ -52,9 +56,7 @@ class CORE_EXPORT CSSCustomIdentValue : public CSSValue {
 
   bool Equals(const CSSCustomIdentValue& other) const;
 
-  const CSSValue* CopyRandomValueWithPropertyNameAndValueIndexIfNeeded(
-      const CSSPropertyName&,
-      wtf_size_t property_value_index) const;
+  bool HasRandomFunctions() const;
 
   void TraceAfterDispatch(blink::Visitor*) const;
 

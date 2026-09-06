@@ -5,6 +5,7 @@
 #include "ui/gfx/font_util.h"
 
 #include "build/build_config.h"
+#include "skia/ext/font_utils.h"
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #include <fontconfig/fontconfig.h>
@@ -25,13 +26,17 @@ void InitializeFonts() {
   // the long delay the user would have seen on first rendering.
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-  // Early initialize FontConfig.
-  InitializeGlobalFontConfigAsync();
+  // Ensures the config is created on this thread. It's generally safe to send
+  // concurrent match requests to fontconfig, but it's unsafe to send match
+  // requests concurrently to fontconfig initialization.
+  FcConfig* config = GetGlobalFontConfig();
+  DCHECK(config);
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_WIN)
   gfx::win::InitializeDirectWrite();
 #endif  // BUILDFLAG(IS_WIN)
+  skia::InitializeFontRendering();
 }
 
 }  // namespace gfx

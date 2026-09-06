@@ -11,8 +11,7 @@
 #include "base/test/run_until.h"
 #include "build/buildflag.h"
 #include "chrome/browser/apps/app_service/app_registry_cache_waiter.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/web_applications/test/web_app_install_test_utils.h"
 #include "chrome/browser/web_applications/web_app_command_manager.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
@@ -33,18 +32,12 @@ WebAppNavigationCapturingBrowserTestBase::
   parameters["link_capturing_state"] = "reimpl_default_on";
   scoped_feature_list_.InitAndEnableFeatureWithParameters(
       features::kPwaNavigationCapturing, parameters);
-
-#if BUILDFLAG(IS_CHROMEOS)
-  // TODO(crbug.com/366547977): CrOS doesn't use our nav capturing
-  // implementation.
-  NOTREACHED();
-#endif
 }
 
 WebAppNavigationCapturingBrowserTestBase::
     ~WebAppNavigationCapturingBrowserTestBase() = default;
 
-Browser*
+BrowserWindowInterface*
 WebAppNavigationCapturingBrowserTestBase::CallWindowOpenExpectNewBrowser(
     content::WebContents* contents,
     const GURL& url,

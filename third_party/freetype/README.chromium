@@ -1,9 +1,9 @@
 Name: FreeType
 URL: http://www.freetype.org/
-Version: VER-2-14-1-31-g23b6cd27f
-Revision: 23b6cd27ff19b70cbf98e058cd2cf0647d5284ff
-Update Mechanism: Manual
-CPEPrefix: cpe:/a:freetype:freetype:2.14.1
+Version: VER-2-14-3-93-g3db2c32d6
+Revision: 3db2c32d6ef2a3ac94d61585b65417ec7bf454e1
+Update Mechanism: Autoroll
+CPEPrefix: cpe:/a:freetype:freetype:2.14.3
 License: FTL
 License File: src/docs/FTL.TXT
 Security Critical: yes

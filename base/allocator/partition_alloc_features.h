@@ -26,6 +26,10 @@ enum class PAFeatureEnabledProcesses {
   kBrowserAndRenderer,
   // Enabled in all processes, except renderer.
   kNonRenderer,
+  // Enabled only in the GPU process.
+  kGPUOnly,
+  // Enabled only in the browser and tne GPU process.
+  kBrowserAndGPU,
   // Enabled only in renderer processes.
   kRendererOnly,
   // Enabled in all child processes, except zygote.
@@ -81,6 +85,9 @@ using PartitionAllocWithAdvancedChecksEnabledProcesses =
 BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocLargeThreadCacheSize);
 
 BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocLargeEmptySlotSpanRing);
+BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
+    int,
+    kPartitionAllocLargeEmptySlotSpanRingSize);
 
 BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocWithAdvancedChecks);
 BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
@@ -92,13 +99,6 @@ BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
     std::string,
     kPartitionAllocSchedulerLoopQuarantineConfig);
 
-using PartitionAllocSchedulerLoopQuarantineTaskControlledPurgeEnabledProcesses =
-    internal::PAFeatureEnabledProcesses;
-BASE_EXPORT BASE_DECLARE_FEATURE(
-    kPartitionAllocSchedulerLoopQuarantineTaskControlledPurge);
-BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
-    PartitionAllocSchedulerLoopQuarantineTaskControlledPurgeEnabledProcesses,
-    kPartitionAllocSchedulerLoopQuarantineTaskControlledPurgeEnabledProcessesParam);
 
 // Eventually zero out most PartitionAlloc memory. This is not meant as a
 // security guarantee, but to increase the compression ratio of PartitionAlloc's
@@ -126,13 +126,6 @@ enum class MemtagMode {
   kAsync,
 };
 
-enum class RetagMode {
-  // Allocations are retagged by incrementing the current tag.
-  kIncrement,
-
-  // Allocations are retagged with a random tag.
-  kRandom,
-};
 
 using MemoryTaggingEnabledProcesses = internal::PAFeatureEnabledProcesses;
 
@@ -156,7 +149,6 @@ BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
     kBackupRefPtrSuppressCorruptionDetectedCrash);
 BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocMemoryTagging);
 BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(MemtagMode, kMemtagModeParam);
-BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(RetagMode, kRetagModeParam);
 BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(MemoryTaggingEnabledProcesses,
                                        kMemoryTaggingEnabledProcessesParam);
 // Kill switch for memory tagging. Skips any code related to memory tagging when
@@ -175,6 +167,19 @@ BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocUseDenserDistribution);
 BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocMemoryReclaimer);
 BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(TimeDelta,
                                        kPartitionAllocMemoryReclaimerInterval);
+BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocAdaptiveMemoryReclaimInterval);
+BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
+    TimeDelta,
+    kPartitionAllocAdaptiveMemoryReclaimMinInterval);
+BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
+    TimeDelta,
+    kPartitionAllocAdaptiveMemoryReclaimMaxInterval);
+BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
+    TimeDelta,
+    kPartitionAllocAdaptiveMemoryReclaimDefaultInterval);
+BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
+    int,
+    kPartitionAllocAdaptiveMemoryReclaimMinDecommittableBytes);
 BASE_EXPORT BASE_DECLARE_FEATURE(
     kPartitionAllocStraightenLargerSlotSpanFreeLists);
 BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
@@ -182,10 +187,6 @@ BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
     kPartitionAllocStraightenLargerSlotSpanFreeListsMode);
 BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocSortSmallerSlotSpanFreeLists);
 BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocSortActiveSlotSpans);
-
-#if BUILDFLAG(IS_WIN)
-BASE_EXPORT BASE_DECLARE_FEATURE(kPageAllocatorRetryOnCommitFailure);
-#endif
 
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
 BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
@@ -196,6 +197,12 @@ BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
 // When set, partitions use a larger ring buffer and free memory less
 // aggressively when in the foreground.
 BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocAdjustSizeWhenInForeground);
+BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
+    int,
+    kPartitionAllocForegroundEmptySlotSpanRingSize);
+BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
+    int,
+    kPartitionAllocBackgroundEmptySlotSpanRingSize);
 
 // When enabled, uses a more nuanced heuristic to determine if slot
 // spans can be treated as "single-slot."
@@ -207,14 +214,7 @@ BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocUseSmallSingleSlotSpans);
 BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocUsePriorityInheritanceLocks);
 #endif  // PA_BUILDFLAG(ENABLE_PARTITION_LOCK_PRIORITY_INHERITANCE)
 
-BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocFreeWithSize);
-BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(bool,
-                                       kPartitionAllocStrictFreeSizeCheck);
-
-#if BUILDFLAG(IS_ANDROID) && defined(ARCH_CPU_ARM64)
-BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocLockTuneSpin);
-BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(int, kPartitionAllocLockSpinCount);
-#endif  // BUILDFLAG(IS_ANDROID) && defined(ARCH_CPU_ARM64)
+BASE_EXPORT BASE_DECLARE_FEATURE(kPartitionAllocTighterAlignedAllocBound);
 
 }  // namespace base::features
 

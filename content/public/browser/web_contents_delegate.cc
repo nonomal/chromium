@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/notreached.h"
@@ -26,6 +25,7 @@
 #include "third_party/blink/public/common/security/protocol_handler_security_level.h"
 #include "third_party/blink/public/mojom/input/pointer_lock_result.mojom.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
+#include "third_party/blink/public/mojom/picture_in_picture/picture_in_picture.mojom.h"
 #include "ui/base/mojom/window_show_state.mojom.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/geometry/rect.h"
@@ -162,8 +162,10 @@ WebContents* WebContentsDelegate::CreateCustomWebContents(
     const GURL& opener_url,
     const std::string& frame_name,
     const GURL& target_url,
+    WindowOpenDisposition disposition,
+    const blink::mojom::WindowFeatures& window_features,
     const StoragePartitionConfig& partition_config,
-    SessionStorageNamespace* session_storage_namespace) {
+    SessionStorageNamespaceHandle* session_storage_namespace) {
   return nullptr;
 }
 
@@ -180,6 +182,10 @@ void WebContentsDelegate::CreateSmsPrompt(
     base::OnceCallback<void()> on_cancel) {}
 
 bool WebContentsDelegate::GetCanResize() {
+  return false;
+}
+
+bool WebContentsDelegate::GetIsAlwaysOnTop() {
   return false;
 }
 
@@ -220,6 +226,11 @@ blink::mojom::DisplayMode WebContentsDelegate::GetDisplayMode(
   return blink::mojom::DisplayMode::kBrowser;
 }
 
+blink::mojom::ApplicationContext WebContentsDelegate::GetApplicationContext(
+    const WebContents* web_contents) {
+  return blink::mojom::ApplicationContext::kNone;
+}
+
 blink::ProtocolHandlerSecurityLevel
 WebContentsDelegate::GetProtocolHandlerSecurityLevel(RenderFrameHost*) {
   return blink::ProtocolHandlerSecurityLevel::kStrict;
@@ -230,6 +241,11 @@ void WebContentsDelegate::RequestPointerLock(WebContents* web_contents,
                                              bool last_unlocked_by_target) {
   web_contents->GotResponseToPointerLockRequest(
       blink::mojom::PointerLockResult::kUnknownError);
+}
+
+bool WebContentsDelegate::AllowKeyboardLockForInnerContents(
+    WebContents* web_contents) {
+  return false;
 }
 
 void WebContentsDelegate::RequestKeyboardLock(WebContents* web_contents,
@@ -330,12 +346,12 @@ WebContentsDelegate::~WebContentsDelegate() {
 }
 
 void WebContentsDelegate::Attach(WebContents* web_contents) {
-  DCHECK(!base::Contains(attached_contents_, web_contents));
+  DCHECK(!attached_contents_.contains(web_contents));
   attached_contents_.insert(web_contents);
 }
 
 void WebContentsDelegate::Detach(WebContents* web_contents) {
-  DCHECK(base::Contains(attached_contents_, web_contents));
+  DCHECK(attached_contents_.contains(web_contents));
   attached_contents_.erase(web_contents);
 }
 
@@ -392,6 +408,10 @@ int WebContentsDelegate::GetVirtualKeyboardHeight(WebContents* web_contents) {
 }
 
 bool WebContentsDelegate::OnlyExpandTopControlsAtPageTop() {
+  return false;
+}
+
+bool WebContentsDelegate::IsDocumentPictureInPictureBlockedBySystem() const {
   return false;
 }
 
@@ -461,8 +481,10 @@ bool WebContentsDelegate::MaybeCopyContentAreaAsBitmap(
 void WebContentsDelegate::GetAIPageContent(
     WebContents* web_contents,
     bool include_actionable_elements,
-    base::OnceCallback<void(const std::string&)> callback) {
-  std::move(callback).Run(std::string());
+    base::OnceCallback<void(base::expected<std::string, std::string>)>
+        callback) {
+  std::move(callback).Run(base::unexpected(
+      "Annotated page content is not available for this browser target."));
 }
 
 bool WebContentsDelegate::IsWaitingForPointerLockPrompt(
@@ -499,6 +521,22 @@ WebContentsDelegate::GetSavedRelatedApplications(WebContents* web_contents) {
 WebContents* WebContentsDelegate::GetResponsibleWebContents(
     WebContents* web_contents) {
   return nullptr;
+}
+
+bool WebContentsDelegate::IsPictureInPictureEnabled() const {
+  return true;
+}
+
+bool WebContentsDelegate::IsImmersivePlaybackEnabled() const {
+  return false;
+}
+
+void WebContentsDelegate::RequestImmersivePlaybackConfirmation(
+    const ImmersiveOptions& default_options,
+    base::OnceCallback<void(ImmersivePlaybackConfirmationResult)> callback) {
+  ImmersivePlaybackConfirmationResult result;
+  result.status = ImmersivePlaybackConfirmationStatus::kFailed;
+  std::move(callback).Run(std::move(result));
 }
 
 }  // namespace content

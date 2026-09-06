@@ -72,15 +72,15 @@ void ProfileDownloader::StartForAccount(const CoreAccountId& account_id) {
 }
 
 std::u16string ProfileDownloader::GetProfileFullName() const {
-  return base::UTF8ToUTF16(account_info_.full_name);
+  return base::UTF8ToUTF16(account_info_.GetFullName().value_or(""));
 }
 
 std::u16string ProfileDownloader::GetProfileGivenName() const {
-  return base::UTF8ToUTF16(account_info_.given_name);
+  return base::UTF8ToUTF16(account_info_.GetGivenName().value_or(""));
 }
 
 std::string ProfileDownloader::GetProfileLocale() const {
-  return account_info_.locale;
+  return std::string(account_info_.GetLocale().value_or(""));
 }
 
 SkBitmap ProfileDownloader::GetProfilePicture() const {
@@ -147,7 +147,7 @@ void ProfileDownloader::FetchImageData() {
 
   if (account_info_.GetAvatarUrl().has_value() &&
       account_info_.GetAvatarUrl()->empty()) {
-    VLOG(1) << "No picture URL for account " << account_info_.email
+    VLOG(1) << "No picture URL for account " << account_info_.GetEmail()
             << ". Using the default profile picture.";
     picture_status_ = PICTURE_DEFAULT;
     delegate_->OnProfileDownloadSuccess(this);
@@ -294,7 +294,7 @@ void ProfileDownloader::OnAccessTokenFetchComplete(
 }
 
 void ProfileDownloader::OnExtendedAccountInfoUpdated(const AccountInfo& info) {
-  if (info.account_id == account_id_ && info.IsValid()) {
+  if (info.GetAccountId() == account_id_ && info.IsValid()) {
     account_info_ = info;
 
     // If the StartFetchingImage was called before we had valid info, the

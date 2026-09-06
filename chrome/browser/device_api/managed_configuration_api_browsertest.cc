@@ -7,13 +7,11 @@
 #include <optional>
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/test/gtest_tags.h"
 #include "base/test/test_future.h"
 #include "base/values.h"
 #include "chrome/browser/device_api/managed_configuration_api_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -72,7 +70,7 @@ struct ResponseTemplate {
 std::unique_ptr<net::test_server::HttpResponse> HandleRequest(
     std::map<std::string, ResponseTemplate> templates,
     const net::test_server::HttpRequest& request) {
-  if (!base::Contains(templates, request.relative_url)) {
+  if (!templates.contains(request.relative_url)) {
     return std::make_unique<net::test_server::HungResponse>();
   }
 
@@ -91,7 +89,7 @@ std::unique_ptr<net::test_server::HttpResponse> HandleRequest(
   return http_response;
 }
 
-bool DictValueEquals(std::optional<base::Value::Dict> value,
+bool DictValueEquals(std::optional<base::DictValue> value,
                      const std::map<std::string, std::string>& expected) {
   DCHECK(value);
   std::map<std::string, std::string> actual;
@@ -116,8 +114,8 @@ class ManagedConfigurationAPITestBase : public MixinBasedInProcessBrowserTest {
 
   void SetConfiguration(const std::string& conf_url,
                         const std::string& conf_hash) {
-    base::Value::List trusted_apps;
-    base::Value::Dict entry;
+    base::ListValue trusted_apps;
+    base::DictValue entry;
     entry.Set(ManagedConfigurationAPI::kOriginKey, kOrigin);
     entry.Set(ManagedConfigurationAPI::kManagedConfigurationUrlKey,
               embedded_test_server()->GetURL(conf_url).spec());
@@ -129,18 +127,18 @@ class ManagedConfigurationAPITestBase : public MixinBasedInProcessBrowserTest {
 
   void ClearConfiguration() {
     profile()->GetPrefs()->SetList(prefs::kManagedConfigurationPerOrigin,
-                                   base::Value::List());
+                                   base::ListValue());
   }
 
-  std::optional<base::Value::Dict> GetValues(
+  std::optional<base::DictValue> GetValues(
       const std::vector<std::string>& keys) {
-    base::test::TestFuture<std::optional<base::Value::Dict>> value_future;
+    base::test::TestFuture<std::optional<base::DictValue>> value_future;
     api()->GetOriginPolicyConfiguration(origin_, keys,
                                         value_future.GetCallback());
     return value_future.Take();
   }
 
-  Profile* profile() { return browser()->profile(); }
+  Profile* profile() { return browser()->GetProfile(); }
   const url::Origin& origin() const { return origin_; }
   ManagedConfigurationAPI* api() {
     return ManagedConfigurationAPIFactory::GetForProfile(profile());
@@ -226,6 +224,25 @@ IN_PROC_BROWSER_TEST_F(ManagedConfigurationAPITest, AppRemovedFromPolicyList) {
   ClearConfiguration();
   WaitForUpdate();
   ASSERT_EQ(GetValues({kKey1, kKey2}), std::nullopt);
+}
+
+IN_PROC_BROWSER_TEST_F(ManagedConfigurationAPITest,
+                       ReapplySameConfigurationAfterRemoval) {
+  EnableTestServer({{kConfigurationUrl1, {kConfigurationData1}}});
+  SetConfiguration(kConfigurationUrl1, kConfigurationHash1);
+  WaitForUpdate();
+  ASSERT_TRUE(DictValueEquals(GetValues({kKey1, kKey2}),
+                              {{kKey1, kValue1}, {kKey2, kValue2}}));
+
+  ClearConfiguration();
+  WaitForUpdate();
+  ASSERT_EQ(GetValues({kKey1, kKey2}), std::nullopt);
+
+  // Re-applying the same configuration should re-download and restore values.
+  SetConfiguration(kConfigurationUrl1, kConfigurationHash1);
+  WaitForUpdate();
+  ASSERT_TRUE(DictValueEquals(GetValues({kKey1, kKey2}),
+                              {{kKey1, kValue1}, {kKey2, kValue2}}));
 }
 
 IN_PROC_BROWSER_TEST_F(ManagedConfigurationAPITest, UnknownKeys) {
@@ -319,7 +336,7 @@ class ManagedConfigurationAPIGuestTest
       ADD_FAILURE() << "No tab active";
       return {base::Value(), std::string()};
     }
-    base::Value::List keys_value;
+    base::ListValue keys_value;
     for (const auto& key : keys) {
       keys_value.Append(key);
     }

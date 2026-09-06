@@ -5,7 +5,9 @@
 
 import unittest
 
-import private_metrics_model_shared
+import setup_modules  # pylint: disable=unused-import
+
+import chromium_src.tools.metrics.private_metrics.private_metrics_model_shared as private_metrics_model_shared
 
 PRETTY_XML = """
 <!-- Comment1 -->
@@ -81,7 +83,8 @@ CONFIG_EVENT_NAMES_UNSORTED = """
 """.strip()
 
 TEST_XML_TYPE = private_metrics_model_shared.create_event_based_document_type(
-    'test-configuration')
+  'test-configuration'
+)
 
 
 def prettify_xml(original_xml):
@@ -90,7 +93,6 @@ def prettify_xml(original_xml):
 
 
 class ConfigurationXmlTest(unittest.TestCase):
-
   def __init__(self, *args, **kwargs) -> None:
     super(ConfigurationXmlTest, self).__init__(*args, **kwargs)
     self.maxDiff = None

@@ -62,7 +62,9 @@ class Extension;
 //      the filepath in case-insensitive systems and trimming ignored suffixes
 //      if appropriate.
 //      See content_verifier_utils::CanonicalizeRelativePath() for details.
-class ContentVerifier : public base::RefCountedThreadSafe<ContentVerifier>,
+class ContentVerifier : public base::RefCountedThreadSafe<
+                            ContentVerifier,
+                            content::BrowserThread::DeleteOnIOThread>,
                         public ExtensionRegistryObserver {
  public:
   class TestObserver {
@@ -112,7 +114,7 @@ class ContentVerifier : public base::RefCountedThreadSafe<ContentVerifier>,
   // TODO(lazyboy): `force_missing_computed_hashes_creation` should always be
   // true, handing its behavior adds extra complexity in HashHelper and this
   // param should be removed when we can unify/fix computed_hashes.json
-  // treatment, see https://crbug.com/819832 for details.
+  // treatment, see https://crbug.com/40566167 for details.
   void CreateContentHash(const ExtensionId& extension_id,
                          const base::FilePath& extension_root,
                          const base::Version& extension_version,
@@ -147,7 +149,8 @@ class ContentVerifier : public base::RefCountedThreadSafe<ContentVerifier>,
 
   // Test helper to recompute `io_data_` for `extension` without having to
   // call `OnExtensionLoaded`.
-  void ResetIODataForTesting(const Extension* extension);
+  void ResetIODataForTesting(const Extension* extension,
+                             base::OnceClosure callback);
 
   // Test helper to clear all cached ContentHash entries from `cache_`.
   void ClearCacheForTesting();
@@ -165,7 +168,12 @@ class ContentVerifier : public base::RefCountedThreadSafe<ContentVerifier>,
       std::unique_ptr<ContentVerifierDelegate> delegate);
 
  private:
-  friend class base::RefCountedThreadSafe<ContentVerifier>;
+  friend class base::RefCountedThreadSafe<
+      ContentVerifier,
+      content::BrowserThread::DeleteOnIOThread>;
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::IO>;
+  friend class base::DeleteHelper<ContentVerifier>;
   friend class HashHelper;
   ~ContentVerifier() override;
 
@@ -231,12 +239,10 @@ class ContentVerifier : public base::RefCountedThreadSafe<ContentVerifier>,
   void OnExtensionDataReady(const ExtensionId& extension_id);
 
   // Called (typically by a verification job) to indicate that verification
-  // failed while reading some file in `extension_id`. `failed_file_types` and
-  // `manifest_version` indicate additional data about which file was detected
-  // as corrupted.
+  // failed while reading some file in `extension_id`. `failed_file_types`
+  // indicates additional data about which file was detected as corrupted.
   void VerifyFailed(const ExtensionId& extension_id,
                     const std::vector<VerifiedFileType>& failed_file_types,
-                    int manifest_version,
                     ContentVerifyJob::FailureReason reason);
 
   // Returns the HashHelper instance, making sure we create it at most once.
@@ -271,8 +277,7 @@ class ContentVerifier : public base::RefCountedThreadSafe<ContentVerifier>,
   bool hash_helper_created_ = false;
 
   // Created and used on IO thread.
-  std::unique_ptr<HashHelper, content::BrowserThread::DeleteOnIOThread>
-      hash_helper_;
+  std::unique_ptr<HashHelper> hash_helper_;
 
   std::map<CacheKey, scoped_refptr<const ContentHash>> cache_;
 

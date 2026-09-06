@@ -7,11 +7,11 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/blob/blob_url_store.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/web_url_request.h"
-#include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
@@ -37,9 +37,7 @@ struct GlobalScopeCreationParams;
 // This instance lives either on the main thread (main thread worklet) or a
 // worker thread (threaded worklet). It's determined by constructors. See
 // comments on the constructors.
-class CORE_EXPORT WorkletGlobalScope
-    : public WorkerOrWorkletGlobalScope,
-      public ActiveScriptWrappable<WorkletGlobalScope> {
+class CORE_EXPORT WorkletGlobalScope : public WorkerOrWorkletGlobalScope {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -124,9 +122,6 @@ class CORE_EXPORT WorkletGlobalScope
 
   void Trace(Visitor*) const override;
 
-  // ActiveScriptWrappable.
-  bool HasPendingActivity() const override;
-
   HttpsState GetHttpsState() const override { return https_state_; }
 
   // Constructs an instance as a main thread worklet. Must be called on the main
@@ -195,7 +190,8 @@ class CORE_EXPORT WorkletGlobalScope
   // |frame_| is available only when |thread_type_| is kMainThread.
   Member<LocalFrame> frame_;
   // |worker_thread_| is available only when |thread_type_| is kOffMainThread.
-  WorkerThread* worker_thread_;
+  raw_ptr<WorkerThread, UnprotectedInRelease | DanglingUntriaged>
+      worker_thread_;
 
   // The token identifying the LocalFrame that caused this scope to be created.
   const LocalFrameToken frame_token_;

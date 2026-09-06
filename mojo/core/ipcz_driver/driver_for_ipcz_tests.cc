@@ -3,14 +3,13 @@
 // found in the LICENSE file.
 
 #include <memory>
-#include <set>
 #include <string>
 #include <utility>
 
 #include "base/base_switches.h"
 #include "base/check.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
+#include "base/containers/flat_set.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/raw_ref.h"
 #include "base/memory/scoped_refptr.h"
@@ -30,7 +29,7 @@
 namespace mojo::core::ipcz_driver {
 namespace {
 
-const char kParentHandle[] = "mojo-ipcz-test-parent-handle";
+constexpr char kParentHandle[] = "mojo-ipcz-test-parent-handle";
 
 const char kMojoIpczInProcessTestDriverName[] = "MojoIpczInProcess";
 const char kMojoIpczMultiprocessTestDriverName[] = "MojoIpczMultiprocess";
@@ -163,7 +162,9 @@ class MojoIpczTestDriver : public ipcz::test::TestDriver {
   };
   explicit MojoIpczTestDriver(Mode mode) : mode_(mode) {}
 
-  const IpczDriver& GetIpczDriver() const override { return kDriver; }
+  const IpczDriver& GetIpczDriver() const override {
+    return ::mojo::core::ipcz_driver::GetIpczDriver();
+  }
 
   const char* GetName() const override {
     if (mode_ == kInProcess) {
@@ -179,6 +180,12 @@ class MojoIpczTestDriver : public ipcz::test::TestDriver {
     transports = Transport::CreatePair(
         Transport::kBroker,
         for_broker_target ? Transport::kBroker : Transport::kNonBroker);
+    if (for_broker_target) {
+      // Cooperating broker test nodes explicitly trust each other so that
+      // each end may convey broker-destined transports to the other.
+      transports.first->set_is_peer_trusted(true);
+      transports.second->set_is_peer_trusted(true);
+    }
     return {
         .ours = Transport::ReleaseAsHandle(std::move(transports.first)),
         .theirs = Transport::ReleaseAsHandle(std::move(transports.second)),
@@ -224,10 +231,14 @@ class MojoIpczTestDriver : public ipcz::test::TestDriver {
     }
 #endif  // BUILDFLAG(IS_WIN)
     const bool is_broker = parent_process.IsValid();
-    return Transport::ReleaseAsHandle(Transport::Create(
+    scoped_refptr<Transport> transport = Transport::Create(
         {.source = is_broker ? Transport::kBroker : Transport::kNonBroker,
          .destination = Transport::kBroker},
-        std::move(endpoint), std::move(parent_process)));
+        std::move(endpoint), std::move(parent_process));
+    if (is_broker) {
+      transport->set_is_peer_trusted(true);
+    }
+    return Transport::ReleaseAsHandle(std::move(transport));
   }
 
  private:
@@ -262,17 +273,18 @@ class MojoIpczTestDriver : public ipcz::test::TestDriver {
     base::CommandLine command_line(
         base::GetMultiProcessTestChildBaseCommandLine().GetProgram());
 
-    std::set<std::string> uninherited_args;
-    uninherited_args.insert(PlatformChannel::kHandleSwitch);
-    uninherited_args.insert(kParentHandle);
-    uninherited_args.insert(switches::kTestChildProcess);
+    const auto kUninheritedArgs = base::flat_set<std::string_view>({
+        PlatformChannel::kHandleSwitch,
+        kParentHandle,
+        switches::kTestChildProcess,
+    });
 
     // Copy commandline switches from the parent process, except for the
     // multiprocess client name and mojo message pipe handle; this allows test
     // clients to spawn other test clients.
     for (const auto& entry :
          base::CommandLine::ForCurrentProcess()->GetSwitches()) {
-      if (!base::Contains(uninherited_args, entry.first)) {
+      if (!kUninheritedArgs.contains(entry.first)) {
         command_line.AppendSwitchNative(entry.first, entry.second);
       }
     }

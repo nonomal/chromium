@@ -12,7 +12,6 @@
 // Must come after all headers that specialize FromJniType() / ToJniType().
 #include "android_webview/browser_jni_headers/AwPermissionRequest_jni.h"
 
-using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaRef;
 using base::android::ScopedJavaLocalRef;
 using jni_zero::AttachCurrentThread;
@@ -39,7 +38,7 @@ AwPermissionRequest::AwPermissionRequest(
 
   JNIEnv* env = AttachCurrentThread();
   *java_peer = Java_AwPermissionRequest_create(
-      env, reinterpret_cast<jlong>(this), GetOrigin().spec(), GetResources());
+      env, reinterpret_cast<int64_t>(this), GetOrigin().spec(), GetResources());
   java_ref_ = JavaObjectWeakGlobalRef(env, *java_peer);
 }
 
@@ -47,8 +46,7 @@ AwPermissionRequest::~AwPermissionRequest() {
   OnAcceptInternal(false);
 }
 
-void AwPermissionRequest::OnAccept(JNIEnv* env,
-                                   jboolean accept) {
+void AwPermissionRequest::OnAccept(bool accept) {
   OnAcceptInternal(accept);
 }
 
@@ -66,7 +64,7 @@ void AwPermissionRequest::DeleteThis() {
   Java_AwPermissionRequest_destroyNative(AttachCurrentThread(), j_request);
 }
 
-void AwPermissionRequest::Destroy(JNIEnv* env) {
+void AwPermissionRequest::Destroy() {
   delete this;
 }
 

@@ -64,24 +64,22 @@ void Set(const IDeviceInfo& info) {
   holder.emplace(info);
 }
 
-static void JNI_DeviceInfo_FillFields(JNIEnv* env,
-                                      std::string& gmsVersionCode,
-                                      jboolean isTV,
-                                      jboolean isAutomotive,
-                                      jboolean isFoldable,
-                                      jboolean isDesktop,
-                                      jint vulkanDeqpLevel,
-                                      jboolean isXr,
-                                      jboolean wasLaunchedOnLargeDisplay) {
+static void JNI_DeviceInfo_FillFields(const std::string& gmsVersionCode,
+                                      bool isTV,
+                                      bool isAutomotive,
+                                      bool isFoldable,
+                                      bool isDesktop,
+                                      int32_t vulkanDeqpLevel,
+                                      bool isXr,
+                                      bool wasLaunchedOnLargeDisplay) {
   Set(IDeviceInfo{.gmsVersionCode = gmsVersionCode,
-                  .isAutomotive = static_cast<bool>(isAutomotive),
-                  .isDesktop = static_cast<bool>(isDesktop),
-                  .isFoldable = static_cast<bool>(isFoldable),
-                  .isTv = static_cast<bool>(isTV),
+                  .isAutomotive = isAutomotive,
+                  .isDesktop = isDesktop,
+                  .isFoldable = isFoldable,
+                  .isTv = isTV,
                   .vulkanDeqpLevel = vulkanDeqpLevel,
-                  .isXr = static_cast<bool>(isXr),
-                  .wasLaunchedOnLargeDisplay =
-                      static_cast<bool>(wasLaunchedOnLargeDisplay)});
+                  .isXr = isXr,
+                  .wasLaunchedOnLargeDisplay = wasLaunchedOnLargeDisplay});
 }
 
 const std::string& gms_version_code() {
@@ -135,9 +133,7 @@ bool was_launched_on_large_display() {
 }
 
 std::string device_name() {
-  JNIEnv* env = base::android::AttachCurrentThread();
-  return base::android::ConvertJavaStringToUTF8(
-      env, Java_DeviceInfo_getDeviceName(env));
+  return Java_DeviceInfo_getDeviceName(AttachCurrentThread());
 }
 
 void set_is_xr_for_testing() {
@@ -149,6 +145,29 @@ void reset_is_xr_for_testing() {
   Java_DeviceInfo_resetIsXrForTesting(AttachCurrentThread());  // IN-TEST
   get_holder().reset();
 }
+
+void set_is_desktop_for_testing(bool is_desktop) {
+  Java_DeviceInfo_setIsDesktopForTesting(AttachCurrentThread(),  // IN-TEST
+                                         is_desktop);
+  get_holder().reset();
+}
+
+void reset_is_desktop_for_testing() {
+  Java_DeviceInfo_resetIsDesktopForTesting(AttachCurrentThread());  // IN-TEST
+  get_holder().reset();
+}
+
+void set_is_foldable_for_testing(bool is_foldable) {
+  Java_DeviceInfo_setIsFoldableForTesting(AttachCurrentThread(),
+                                          is_foldable);  // IN-TEST
+  get_holder().reset();
+}
+
+void reset_is_foldable_for_testing() {
+  Java_DeviceInfo_resetIsFoldableForTesting(AttachCurrentThread());  // IN-TEST
+  get_holder().reset();
+}
+
 }  // namespace base::android::device_info
 
 DEFINE_JNI(DeviceInfo)

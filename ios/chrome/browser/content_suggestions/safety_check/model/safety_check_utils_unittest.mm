@@ -12,13 +12,14 @@
 #import "base/test/task_environment.h"
 #import "base/time/time.h"
 #import "components/password_manager/core/browser/password_form.h"
+#import "components/password_manager/core/browser/password_string.h"
 #import "components/password_manager/core/browser/ui/credential_ui_entry.h"
 #import "components/password_manager/core/browser/ui/password_check_referrer.h"
 #import "ios/chrome/browser/content_suggestions/safety_check/public/safety_check_constants.h"
 #import "ios/chrome/browser/content_suggestions/safety_check/ui/safety_check_item_type.h"
 #import "ios/chrome/browser/passwords/model/password_checkup_utils.h"
 #import "ios/chrome/browser/safety_check/model/ios_chrome_safety_check_manager_constants.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "testing/gtest/include/gtest/gtest.h"
@@ -37,6 +38,7 @@ using password_manager::InsecureType;
 using password_manager::InsecurityMetadata;
 using password_manager::PasswordCheckReferrer;
 using password_manager::PasswordForm;
+using password_manager::PasswordString;
 using password_manager::WarningType;
 
 const char kTestUrl[] = "http://www.example.com/";
@@ -47,7 +49,7 @@ CredentialUIEntry CreateCredential(
     const std::vector<InsecureType>& issues = {}) {
   PasswordForm form;
   form.username_value = username;
-  form.password_value = u"password";
+  form.password_value = PasswordString(u"password");
   form.signon_realm = kTestUrl;
   form.url = GURL(kTestUrl);
   form.date_created = base::Time::Now();
@@ -68,7 +70,7 @@ class SafetyCheckUtilsTest : public PlatformTest {
 
   void SetUp() override {
     PlatformTest::SetUp();
-    mock_application_handler_ = OCMProtocolMock(@protocol(ApplicationCommands));
+    mock_application_handler_ = OCMProtocolMock(@protocol(SceneCommands));
     mock_settings_handler_ = OCMProtocolMock(@protocol(SettingsCommands));
   }
 

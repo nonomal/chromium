@@ -16,7 +16,6 @@
 #include "base/strings/string_util.h"
 #include "base/system/sys_info.h"
 #include "build/branding_buildflags.h"
-#include "chrome/common/chrome_switches.h"
 #include "chromeos/ash/components/system/statistics_provider.h"
 #include "content/public/common/content_switches.h"
 #include "third_party/re2/src/re2/re2.h"
@@ -76,10 +75,11 @@ bool IsCorrectExceptionalHWID(std::string_view hwid) {
   std::string hwid_without_dashes;
   base::RemoveChars(hwid, "-", &hwid_without_dashes);
   LOG_ASSERT(hwid_without_dashes.length() >= 2);
-  std::string not_checksum =
-      hwid_without_dashes.substr(0, hwid_without_dashes.length() - 2);
-  std::string checksum =
-      hwid_without_dashes.substr(hwid_without_dashes.length() - 2);
+  std::string_view not_checksum =
+      std::string_view(hwid_without_dashes)
+          .substr(0, hwid_without_dashes.length() - 2);
+  std::string_view checksum = std::string_view(hwid_without_dashes)
+                                  .substr(hwid_without_dashes.length() - 2);
   return CalculateExceptionalHWIDChecksum(not_checksum) == checksum;
 }
 

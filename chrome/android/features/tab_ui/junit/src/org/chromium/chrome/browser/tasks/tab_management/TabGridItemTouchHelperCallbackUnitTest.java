@@ -32,11 +32,14 @@ import static org.chromium.ui.test.util.MockitoHelper.doCallback;
 import android.graphics.Canvas;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.InputDevice;
+import android.view.MotionEvent;
 import android.view.View;
 
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.RecyclerView;
+import androidx.recyclerview.widget.RecyclerView.OnItemTouchListener;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -47,19 +50,20 @@ import org.mockito.Spy;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLooper;
 
+import org.chromium.base.CallbackUtils;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Token;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.TabGroupModelFilter;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabUngrouper;
-import org.chromium.chrome.browser.tasks.tab_management.TabListCoordinator.TabListMode;
+import org.chromium.chrome.browser.tasks.tab_management.TabListMediator.TabListLayoutType;
 import org.chromium.chrome.browser.tasks.tab_management.TabListModel.AnimationStatus;
 import org.chromium.chrome.browser.tasks.tab_management.TabListModel.CardProperties;
 import org.chromium.chrome.browser.tasks.tab_management.TabListModel.CardProperties.ModelType;
@@ -79,7 +83,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 @SuppressWarnings({"ResultOfMethodCallIgnored", "DirectInvocationOnMock"})
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(
-        manifest = Config.NONE,
         instrumentedPackages = {
             "androidx.recyclerview.widget.RecyclerView" // required to mock final
         })
@@ -108,9 +111,8 @@ public class TabGridItemTouchHelperCallbackUnitTest {
     @Mock private RecyclerView.Adapter mAdapter;
     @Spy private TabModel mTabModel;
     @Mock private TabActionListener mTabClosedListener;
-    @Mock private TabGroupModelFilter mTabGroupModelFilter;
     @Mock private TabUngrouper mTabUngrouper;
-    @Mock private TabListMediator.TabGridDialogHandler mTabGridDialogHandler;
+    @Mock private TabGridItemTouchHelperCallback.UngroupBarStatusHandler mUngroupBarStatusHandler;
     @Mock private Profile mProfile;
     @Mock private Tracker mTracker;
     @Mock private GridLayoutManager mGridLayoutManager;
@@ -119,8 +121,8 @@ public class TabGridItemTouchHelperCallbackUnitTest {
 
     @Mock private TabGridItemLongPressOrchestrator mTabGridItemLongPressOrchestrator;
 
-    private final ObservableSupplierImpl<TabGroupModelFilter> mTabGroupModelFilterSupplier =
-            new ObservableSupplierImpl<>();
+    private final SettableMonotonicObservableSupplier<TabModel> mTabModelSupplier =
+            ObservableSuppliers.createMonotonic();
 
     private SimpleRecyclerViewAdapter mSimpleAdapter;
     private ViewHolder mMockViewHolder1;
@@ -165,10 +167,9 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         mItemView3 = prepareItemView(0, 5, 4, 9);
         mItemView4 = prepareItemView(5, 5, 9, 9);
 
-        mTabGroupModelFilterSupplier.set(mTabGroupModelFilter);
-        when(mTabGroupModelFilter.getTabUngrouper()).thenReturn(mTabUngrouper);
+        mTabModelSupplier.set(mTabModel);
+        when(mTabModel.getTabUngrouper()).thenReturn(mTabUngrouper);
         doReturn(mProfile).when(mTabModel).getProfile();
-        doReturn(mTabModel).when(mTabGroupModelFilter).getTabModel();
         doReturn(mTab1).when(mTabModel).getTabAt(POSITION1);
         doReturn(mTab2).when(mTabModel).getTabAt(POSITION2);
         doReturn(mTab3).when(mTabModel).getTabAt(POSITION3);
@@ -178,14 +179,10 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         doReturn(mTab3).when(mTabModel).getTabById(TAB3_ID);
         doReturn(mTab4).when(mTabModel).getTabById(TAB4_ID);
         doReturn(4).when(mTabModel).getCount();
-        doReturn(mTab1).when(mTabGroupModelFilter).getRepresentativeTabAt(POSITION1);
-        doReturn(mTab2).when(mTabGroupModelFilter).getRepresentativeTabAt(POSITION2);
-        doReturn(mTab3).when(mTabGroupModelFilter).getRepresentativeTabAt(POSITION3);
-        doReturn(mTab4).when(mTabGroupModelFilter).getRepresentativeTabAt(POSITION4);
-        doReturn(TAB1_ID).when(mTab1).getRootId();
-        doReturn(TAB2_ID).when(mTab2).getRootId();
-        doReturn(TAB3_ID).when(mTab3).getRootId();
-        doReturn(TAB4_ID).when(mTab4).getRootId();
+        doReturn(mTab1).when(mTabModel).getRepresentativeTabAt(POSITION1);
+        doReturn(mTab2).when(mTabModel).getRepresentativeTabAt(POSITION2);
+        doReturn(mTab3).when(mTabModel).getRepresentativeTabAt(POSITION3);
+        doReturn(mTab4).when(mTabModel).getRepresentativeTabAt(POSITION4);
         initAndAssertAllProperties();
 
         setupRecyclerView();
@@ -224,14 +221,14 @@ public class TabGridItemTouchHelperCallbackUnitTest {
                         ContextUtils.getApplicationContext(),
                         mTabGroupCreationDialogManager,
                         mModel,
-                        mTabGroupModelFilterSupplier,
+                        mTabModelSupplier,
                         mTabClosedListener,
-                        isDialog ? mTabGridDialogHandler : null,
+                        isDialog ? mUngroupBarStatusHandler : null,
                         "",
-                        !isDialog,
-                        TabListMode.GRID);
+                        isDialog ? TabListLayoutType.FLAT : TabListLayoutType.GROUPED,
+                        CallbackUtils.emptyRunnable());
         mItemTouchHelperCallback.setupCallback(THRESHOLD, MERGE_AREA_THRESHOLD, THRESHOLD);
-        mItemTouchHelperCallback.getMovementFlags(mRecyclerView, mMockViewHolder1);
+        mItemTouchHelperCallback.setRecyclerView(mRecyclerView);
     }
 
     @Test
@@ -280,6 +277,36 @@ public class TabGridItemTouchHelperCallbackUnitTest {
     }
 
     @Test
+    public void onReleaseTab_MovedDuringDrag() {
+        // Start dragging card at position 1 (tab 2).
+        mItemTouchHelperCallback.onSelectedChanged(
+                mMockViewHolder2, ItemTouchHelper.ACTION_STATE_DRAG);
+        assertThat(
+                mModel.get(POSITION2).model.get(CardProperties.CARD_ANIMATION_STATUS),
+                equalTo(AnimationStatus.SELECTED_CARD_ZOOM_IN));
+        assertThat(mModel.get(POSITION2).model.get(CARD_ALPHA), equalTo(0.8f));
+
+        // Simulate the tab being pinned or moved to index 0 during drag.
+        mModel.move(POSITION2, POSITION1);
+
+        // Now release drag.
+        mItemTouchHelperCallback.onSelectedChanged(
+                mMockViewHolder2, ItemTouchHelper.ACTION_STATE_IDLE);
+
+        // Tab 2 (now at position 0) should be unzoomed/deselected.
+        assertThat(
+                mModel.get(POSITION1).model.get(CardProperties.CARD_ANIMATION_STATUS),
+                equalTo(AnimationStatus.SELECTED_CARD_ZOOM_OUT));
+        assertThat(mModel.get(POSITION1).model.get(CARD_ALPHA), equalTo(1f));
+
+        // Tab 1 (now at position 1) should remain unaffected.
+        assertThat(
+                mModel.get(POSITION2).model.get(CardProperties.CARD_ANIMATION_STATUS),
+                equalTo(AnimationStatus.CARD_RESTORE));
+        assertThat(mModel.get(POSITION2).model.get(CARD_ALPHA), equalTo(1f));
+    }
+
+    @Test
     public void onReleaseTab_NoMergeCollaboration() {
         // Dragged object is a collaboration.
         when(mTabGroupColorViewProvider.hasCollaborationId()).thenReturn(true);
@@ -302,7 +329,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         mItemTouchHelperCallback.onSelectedChanged(
                 mMockViewHolder1, ItemTouchHelper.ACTION_STATE_IDLE);
 
-        verify(mTabGroupModelFilter, never()).mergeTabsToGroup(anyInt(), anyInt());
+        verify(mTabModel, never()).mergeTabsToGroup(anyInt(), anyInt());
         verify(mGridLayoutManager, never()).removeView(any());
     }
 
@@ -324,7 +351,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         mItemTouchHelperCallback.onSelectedChanged(
                 mMockViewHolder1, ItemTouchHelper.ACTION_STATE_IDLE);
 
-        verify(mTabGroupModelFilter).mergeTabsToGroup(TAB1_ID, TAB2_ID);
+        verify(mTabModel).mergeTabsToGroup(TAB1_ID, TAB2_ID);
         verify(mGridLayoutManager).removeView(mItemView1);
         verify(mTracker).notifyEvent(eq(EventConstants.TAB_DRAG_AND_DROP_TO_GROUP));
         assertThat(
@@ -352,7 +379,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         mItemTouchHelperCallback.onSelectedChanged(
                 mMockViewHolder1, ItemTouchHelper.ACTION_STATE_IDLE);
 
-        verify(mTabGroupModelFilter).mergeTabsToGroup(TAB1_ID, TAB2_ID);
+        verify(mTabModel).mergeTabsToGroup(TAB1_ID, TAB2_ID);
         verify(mGridLayoutManager, never()).removeView(mItemView1);
         verify(mTracker).notifyEvent(eq(EventConstants.TAB_DRAG_AND_DROP_TO_GROUP));
         assertThat(
@@ -379,7 +406,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
                 mMockViewHolder2, ItemTouchHelper.ACTION_STATE_IDLE);
 
         verify(mGridLayoutManager).removeView(mItemView2);
-        verify(mTabGroupModelFilter).mergeTabsToGroup(TAB2_ID, TAB1_ID);
+        verify(mTabModel).mergeTabsToGroup(TAB2_ID, TAB1_ID);
         verify(mTracker).notifyEvent(eq(EventConstants.TAB_DRAG_AND_DROP_TO_GROUP));
         assertThat(
                 mModel.get(0).model.get(CardProperties.CARD_ANIMATION_STATUS),
@@ -401,7 +428,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
                 mMockViewHolder2, ItemTouchHelper.ACTION_STATE_IDLE);
 
         verify(mGridLayoutManager, never()).removeView(mItemView2);
-        verify(mTabGroupModelFilter, never()).mergeTabsToGroup(TAB2_ID, TAB1_ID);
+        verify(mTabModel, never()).mergeTabsToGroup(TAB2_ID, TAB1_ID);
         verify(mTracker, never()).notifyEvent(eq(EventConstants.TAB_DRAG_AND_DROP_TO_GROUP));
     }
 
@@ -420,7 +447,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
                 mMockViewHolder2, ItemTouchHelper.ACTION_STATE_IDLE);
 
         verify(mGridLayoutManager, never()).removeView(mItemView2);
-        verify(mTabGroupModelFilter, never()).mergeTabsToGroup(TAB2_ID, TAB1_ID);
+        verify(mTabModel, never()).mergeTabsToGroup(TAB2_ID, TAB1_ID);
         verify(mTracker, never()).notifyEvent(eq(EventConstants.TAB_DRAG_AND_DROP_TO_GROUP));
     }
 
@@ -431,7 +458,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         mItemTouchHelperCallback.onSelectedChanged(
                 mMockViewHolder1, ItemTouchHelper.ACTION_STATE_IDLE);
 
-        verify(mTabGridDialogHandler)
+        verify(mUngroupBarStatusHandler)
                 .updateUngroupBarStatus(TabGridDialogView.UngroupBarStatus.HIDE);
     }
 
@@ -448,7 +475,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
                         List.of(mTabModel.getTabById(TAB1_ID)),
                         /* trailing= */ true,
                         /* allowDialog= */ true);
-        verify(mTabGridDialogHandler)
+        verify(mUngroupBarStatusHandler)
                 .updateUngroupBarStatus(TabGridDialogView.UngroupBarStatus.HIDE);
         verify(mGridLayoutManager).removeView(mItemView1);
     }
@@ -469,7 +496,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
                         List.of(mTabModel.getTabById(TAB1_ID)),
                         /* trailing= */ true,
                         /* allowDialog= */ true);
-        verify(mTabGridDialogHandler)
+        verify(mUngroupBarStatusHandler)
                 .updateUngroupBarStatus(TabGridDialogView.UngroupBarStatus.HIDE);
         verify(mGridLayoutManager, never()).removeView(mItemView1);
     }
@@ -490,7 +517,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
                         List.of(mTabModel.getTabById(TAB1_ID)),
                         /* trailing= */ true,
                         /* allowDialog= */ true);
-        verify(mTabGridDialogHandler)
+        verify(mUngroupBarStatusHandler)
                 .updateUngroupBarStatus(TabGridDialogView.UngroupBarStatus.HIDE);
         verify(mGridLayoutManager, never()).removeView(mItemView1);
     }
@@ -610,7 +637,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
     @Test
     public void onDragTab_Hovered_NonGts() {
         // Suppose drag happens in components other than GTS.
-        mItemTouchHelperCallback.setActionsOnAllRelatedTabsForTesting(false);
+        setupItemTouchHelperCallback(true);
 
         // Hovering shouldn't make any difference.
         verifyDrag(mMockViewHolder1, 5, 0, POSITION2, AnimationStatus.CARD_RESTORE);
@@ -638,7 +665,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
                 ItemTouchHelper.ACTION_STATE_DRAG,
                 true);
 
-        verify(mTabGridDialogHandler)
+        verify(mUngroupBarStatusHandler)
                 .updateUngroupBarStatus(TabGridDialogView.UngroupBarStatus.HOVERED);
 
         // Simulate dragging card#3 down to the ungroup bar.
@@ -651,7 +678,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
                 ItemTouchHelper.ACTION_STATE_DRAG,
                 true);
 
-        verify(mTabGridDialogHandler)
+        verify(mUngroupBarStatusHandler)
                 .updateUngroupBarStatus(TabGridDialogView.UngroupBarStatus.HOVERED);
     }
 
@@ -682,10 +709,10 @@ public class TabGridItemTouchHelperCallbackUnitTest {
                 ItemTouchHelper.ACTION_STATE_DRAG,
                 true);
 
-        verify(mTabGridDialogHandler, times(2))
+        verify(mUngroupBarStatusHandler, times(2))
                 .updateUngroupBarStatus(TabGridDialogView.UngroupBarStatus.SHOW);
 
-        verify(mTabGridDialogHandler, never())
+        verify(mUngroupBarStatusHandler, never())
                 .updateUngroupBarStatus(TabGridDialogView.UngroupBarStatus.HOVERED);
     }
 
@@ -706,7 +733,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
                 ItemTouchHelper.ACTION_STATE_DRAG,
                 true);
 
-        verify(mTabGridDialogHandler, never()).updateUngroupBarStatus(anyInt());
+        verify(mUngroupBarStatusHandler, never()).updateUngroupBarStatus(anyInt());
     }
 
     private void clearViewBeforePost() {
@@ -726,7 +753,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
     @Test
     public void onDraggingAnimationEnd_Stale() {
         clearViewBeforePost();
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         verify(mGridLayoutManager).removeView(mItemView1);
     }
@@ -737,7 +764,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
 
         when(mItemView1.getParent()).thenReturn(null);
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         verify(mGridLayoutManager, never()).removeView(mItemView1);
     }
@@ -748,7 +775,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
 
         when(mRecyclerView.getLayoutManager()).thenReturn(null);
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         verify(mGridLayoutManager, never()).removeView(mItemView1);
     }
@@ -759,7 +786,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
 
         when(mRecyclerView.getChildCount()).thenReturn(0);
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         verify(mGridLayoutManager, never()).removeView(mItemView1);
     }
@@ -770,7 +797,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
 
         when(mAdapter.getItemCount()).thenReturn(1);
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         verify(mGridLayoutManager, never()).removeView(mItemView1);
     }
@@ -781,7 +808,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
 
         when(mRecyclerView.getAdapter()).thenReturn(null);
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         verify(mGridLayoutManager, never()).removeView(mItemView1);
     }
@@ -809,7 +836,8 @@ public class TabGridItemTouchHelperCallbackUnitTest {
     public void messageItemSwipeable() {
         when(mMockViewHolder1.getItemViewType()).thenReturn(UiType.IPH_MESSAGE);
         setupItemTouchHelperCallback(false);
-        assertTrue(mItemTouchHelperCallback.hasSwipeFlag(mRecyclerView, mMockViewHolder1));
+        assertTrue(
+                mItemTouchHelperCallback.hasSwipeFlagForTesting(mRecyclerView, mMockViewHolder1));
     }
 
     @Test
@@ -820,7 +848,8 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         mMockViewHolder1.model = model;
 
         setupItemTouchHelperCallback(false);
-        assertFalse(mItemTouchHelperCallback.hasSwipeFlag(mRecyclerView, mMockViewHolder1));
+        assertFalse(
+                mItemTouchHelperCallback.hasSwipeFlagForTesting(mRecyclerView, mMockViewHolder1));
     }
 
     @Test
@@ -828,7 +857,8 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         mMockViewHolder1.model.set(IS_PINNED, true);
 
         setupItemTouchHelperCallback(false);
-        assertFalse(mItemTouchHelperCallback.hasSwipeFlag(mRecyclerView, mMockViewHolder1));
+        assertFalse(
+                mItemTouchHelperCallback.hasSwipeFlagForTesting(mRecyclerView, mMockViewHolder1));
     }
 
     @Test
@@ -882,7 +912,8 @@ public class TabGridItemTouchHelperCallbackUnitTest {
     public void largeMessageItemSwipeable() {
         when(mMockViewHolder1.getItemViewType()).thenReturn(UiType.INCOGNITO_REAUTH_PROMO_MESSAGE);
         setupItemTouchHelperCallback(false);
-        assertTrue(mItemTouchHelperCallback.hasSwipeFlag(mRecyclerView, mMockViewHolder1));
+        assertTrue(
+                mItemTouchHelperCallback.hasSwipeFlagForTesting(mRecyclerView, mMockViewHolder1));
     }
 
     @Test
@@ -941,7 +972,6 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         AtomicInteger recordedTabId = new AtomicInteger(TabModel.INVALID_TAB_INDEX);
 
         mItemTouchHelperCallback.setOnDropOnArchivalMessageCardEventListener(recordedTabId::set);
-        mItemTouchHelperCallback.setActionsOnAllRelatedTabsForTesting(true);
 
         // Simulate the selection of card#1 in TabListModel.
         mItemTouchHelperCallback.setSelectedTabIndexForTesting(POSITION1);
@@ -975,7 +1005,6 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         AtomicInteger recordedTabId = new AtomicInteger(TabModel.INVALID_TAB_INDEX);
 
         mItemTouchHelperCallback.setOnDropOnArchivalMessageCardEventListener(recordedTabId::set);
-        mItemTouchHelperCallback.setActionsOnAllRelatedTabsForTesting(true);
 
         // Simulate the selection of card#1 in TabListModel.
         mItemTouchHelperCallback.setSelectedTabIndexForTesting(POSITION1);
@@ -995,8 +1024,6 @@ public class TabGridItemTouchHelperCallbackUnitTest {
     public void onHoverOverArchivalCard() {
         setupItemTouchHelperCallback(false);
         addArchivedMessageCard();
-
-        mItemTouchHelperCallback.setActionsOnAllRelatedTabsForTesting(true);
 
         // Simulate the selection of card#1 in TabListModel.
         mItemTouchHelperCallback.setSelectedTabIndexForTesting(POSITION1);
@@ -1038,7 +1065,6 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         AtomicInteger recordedTabId = new AtomicInteger(TabModel.INVALID_TAB_INDEX);
 
         mItemTouchHelperCallback.setOnDropOnArchivalMessageCardEventListener(recordedTabId::set);
-        mItemTouchHelperCallback.setActionsOnAllRelatedTabsForTesting(true);
 
         // Simulate the selection of card#1 in TabListModel.
         mItemTouchHelperCallback.setSelectedTabIndexForTesting(POSITION1);
@@ -1080,8 +1106,6 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         setupItemTouchHelperCallback(false);
         addArchivedMessageCard();
 
-        mItemTouchHelperCallback.setActionsOnAllRelatedTabsForTesting(true);
-
         // Simulate the selection of card#1 in TabListModel.
         mItemTouchHelperCallback.setSelectedTabIndexForTesting(POSITION1);
 
@@ -1115,7 +1139,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
 
     @Test
     public void onTabMergeToGroup_willMergingCreateNewGroup() {
-        doReturn(true).when(mTabGroupModelFilter).willMergingCreateNewGroup(any());
+        doReturn(true).when(mTabModel).willMergingCreateNewGroup(any());
 
         // Simulate the selection of card#1 in TabListModel.
         mItemTouchHelperCallback.setSelectedTabIndexForTesting(POSITION1);
@@ -1126,9 +1150,9 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         mItemTouchHelperCallback.onSelectedChanged(
                 mMockViewHolder1, ItemTouchHelper.ACTION_STATE_IDLE);
 
-        verify(mTabGroupModelFilter).mergeTabsToGroup(TAB1_ID, TAB2_ID);
+        verify(mTabModel).mergeTabsToGroup(TAB1_ID, TAB2_ID);
         verify(mTabGroupCreationDialogManager)
-                .showDialog(mTabModel.getTabById(TAB2_ID).getTabGroupId(), mTabGroupModelFilter);
+                .showDialog(mTabModel.getTabById(TAB2_ID).getTabGroupId(), mTabModel);
     }
 
     @Test
@@ -1190,7 +1214,8 @@ public class TabGridItemTouchHelperCallbackUnitTest {
     @Test
     public void getMovementFlags_mouseInput_disablesSwipe() {
         mItemTouchHelperCallback.setIsMouseInputSource(true);
-        assertFalse(mItemTouchHelperCallback.hasSwipeFlag(mRecyclerView, mMockViewHolder1));
+        assertFalse(
+                mItemTouchHelperCallback.hasSwipeFlagForTesting(mRecyclerView, mMockViewHolder1));
         assertTrue(mItemTouchHelperCallback.hasDragFlagForTesting(mRecyclerView, mMockViewHolder1));
     }
 
@@ -1210,8 +1235,8 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         when(mTab2.getIsPinned()).thenReturn(true);
         when(mTab3.getIsPinned()).thenReturn(false);
         when(mTab4.getIsPinned()).thenReturn(false);
-        when(mTabGroupModelFilter.getRelatedTabList(TAB1_ID)).thenReturn(List.of(mTab1));
-        when(mTabGroupModelFilter.getRelatedTabList(TAB2_ID)).thenReturn(List.of(mTab2));
+        when(mTabModel.getRelatedTabList(TAB1_ID)).thenReturn(List.of(mTab1));
+        when(mTabModel.getRelatedTabList(TAB2_ID)).thenReturn(List.of(mTab2));
         when(mTabModel.indexOf(mTab1)).thenReturn(0);
         when(mTabModel.indexOf(mTab2)).thenReturn(1);
         when(mTabModel.findFirstNonPinnedTabIndex()).thenReturn(2);
@@ -1219,7 +1244,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         // Drag pinned tab1 to pinned tab2's position.
         mItemTouchHelperCallback.onMove(mRecyclerView, mMockViewHolder1, mMockViewHolder2);
         // Verify that tab1 is moved to index 1.
-        verify(mTabGroupModelFilter).moveRelatedTabs(TAB1_ID, 1);
+        verify(mTabModel).moveRelatedTabs(TAB1_ID, 1);
     }
 
     @Test
@@ -1229,8 +1254,8 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         when(mTab2.getIsPinned()).thenReturn(true);
         when(mTab3.getIsPinned()).thenReturn(false);
         when(mTab4.getIsPinned()).thenReturn(false);
-        when(mTabGroupModelFilter.getRelatedTabList(TAB3_ID)).thenReturn(List.of(mTab3));
-        when(mTabGroupModelFilter.getRelatedTabList(TAB4_ID)).thenReturn(List.of(mTab4));
+        when(mTabModel.getRelatedTabList(TAB3_ID)).thenReturn(List.of(mTab3));
+        when(mTabModel.getRelatedTabList(TAB4_ID)).thenReturn(List.of(mTab4));
         when(mTabModel.indexOf(mTab1)).thenReturn(0);
         when(mTabModel.indexOf(mTab2)).thenReturn(1);
         when(mTabModel.indexOf(mTab3)).thenReturn(2);
@@ -1241,7 +1266,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         mItemTouchHelperCallback.onMove(mRecyclerView, mMockViewHolder3, mMockViewHolder4);
 
         // Verify that tab3 is moved to index 3.
-        verify(mTabGroupModelFilter).moveRelatedTabs(TAB3_ID, 3);
+        verify(mTabModel).moveRelatedTabs(TAB3_ID, 3);
     }
 
     @Test
@@ -1255,10 +1280,10 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         when(mTab3.getTabGroupId()).thenReturn(groupId);
         when(mTab4.getTabGroupId()).thenReturn(groupId);
 
-        when(mTabGroupModelFilter.getRelatedTabList(TAB1_ID)).thenReturn(List.of(mTab1));
-        when(mTabGroupModelFilter.getRelatedTabList(TAB2_ID)).thenReturn(List.of(mTab2));
-        when(mTabGroupModelFilter.getRelatedTabList(TAB3_ID)).thenReturn(List.of(mTab3, mTab4));
-        when(mTabGroupModelFilter.getRelatedTabList(TAB4_ID)).thenReturn(List.of(mTab3, mTab4));
+        when(mTabModel.getRelatedTabList(TAB1_ID)).thenReturn(List.of(mTab1));
+        when(mTabModel.getRelatedTabList(TAB2_ID)).thenReturn(List.of(mTab2));
+        when(mTabModel.getRelatedTabList(TAB3_ID)).thenReturn(List.of(mTab3, mTab4));
+        when(mTabModel.getRelatedTabList(TAB4_ID)).thenReturn(List.of(mTab3, mTab4));
 
         when(mTabModel.indexOf(mTab1)).thenReturn(0);
         when(mTabModel.indexOf(mTab2)).thenReturn(1);
@@ -1270,7 +1295,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         mItemTouchHelperCallback.onMove(mRecyclerView, mMockViewHolder1, mMockViewHolder4);
 
         // Verify that the tab is moved to index 1, the last possible position for a pinned tab.
-        verify(mTabGroupModelFilter).moveRelatedTabs(TAB1_ID, 1);
+        verify(mTabModel).moveRelatedTabs(TAB1_ID, 1);
     }
 
     @Test
@@ -1284,10 +1309,10 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         when(mTab3.getTabGroupId()).thenReturn(groupId);
         when(mTab4.getTabGroupId()).thenReturn(groupId);
 
-        when(mTabGroupModelFilter.getRelatedTabList(TAB1_ID)).thenReturn(List.of(mTab1));
-        when(mTabGroupModelFilter.getRelatedTabList(TAB2_ID)).thenReturn(List.of(mTab2));
-        when(mTabGroupModelFilter.getRelatedTabList(TAB3_ID)).thenReturn(List.of(mTab3, mTab4));
-        when(mTabGroupModelFilter.getRelatedTabList(TAB4_ID)).thenReturn(List.of(mTab3, mTab4));
+        when(mTabModel.getRelatedTabList(TAB1_ID)).thenReturn(List.of(mTab1));
+        when(mTabModel.getRelatedTabList(TAB2_ID)).thenReturn(List.of(mTab2));
+        when(mTabModel.getRelatedTabList(TAB3_ID)).thenReturn(List.of(mTab3, mTab4));
+        when(mTabModel.getRelatedTabList(TAB4_ID)).thenReturn(List.of(mTab3, mTab4));
 
         when(mTabModel.indexOf(mTab1)).thenReturn(0);
         when(mTabModel.indexOf(mTab2)).thenReturn(1);
@@ -1300,7 +1325,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
 
         // Verify that the tab is moved to index 2, the first possible position for an unpinned
         // tab.
-        verify(mTabGroupModelFilter).moveRelatedTabs(TAB3_ID, 2);
+        verify(mTabModel).moveRelatedTabs(TAB3_ID, 2);
     }
 
     @Test
@@ -1310,8 +1335,8 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         when(mTab2.getIsPinned()).thenReturn(false);
         when(mTab3.getIsPinned()).thenReturn(false);
         when(mTab4.getIsPinned()).thenReturn(false);
-        when(mTabGroupModelFilter.getRelatedTabList(TAB1_ID)).thenReturn(List.of(mTab1));
-        when(mTabGroupModelFilter.getRelatedTabList(TAB4_ID)).thenReturn(List.of(mTab4));
+        when(mTabModel.getRelatedTabList(TAB1_ID)).thenReturn(List.of(mTab1));
+        when(mTabModel.getRelatedTabList(TAB4_ID)).thenReturn(List.of(mTab4));
         when(mTabModel.indexOf(mTab1)).thenReturn(0);
         when(mTabModel.indexOf(mTab4)).thenReturn(3);
         when(mTabModel.findFirstNonPinnedTabIndex()).thenReturn(0);
@@ -1320,7 +1345,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         mItemTouchHelperCallback.onMove(mRecyclerView, mMockViewHolder1, mMockViewHolder4);
 
         // Verify that tab1 is moved to index 3.
-        verify(mTabGroupModelFilter).moveRelatedTabs(TAB1_ID, 3);
+        verify(mTabModel).moveRelatedTabs(TAB1_ID, 3);
     }
 
     @Test
@@ -1330,8 +1355,8 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         when(mTab2.getIsPinned()).thenReturn(true);
         when(mTab3.getIsPinned()).thenReturn(true);
         when(mTab4.getIsPinned()).thenReturn(true);
-        when(mTabGroupModelFilter.getRelatedTabList(TAB1_ID)).thenReturn(List.of(mTab1));
-        when(mTabGroupModelFilter.getRelatedTabList(TAB4_ID)).thenReturn(List.of(mTab4));
+        when(mTabModel.getRelatedTabList(TAB1_ID)).thenReturn(List.of(mTab1));
+        when(mTabModel.getRelatedTabList(TAB4_ID)).thenReturn(List.of(mTab4));
         when(mTabModel.indexOf(mTab1)).thenReturn(0);
         when(mTabModel.indexOf(mTab4)).thenReturn(3);
         // All tabs are pinned, so the first non-pinned tab is at the end of the list.
@@ -1341,7 +1366,7 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         mItemTouchHelperCallback.onMove(mRecyclerView, mMockViewHolder1, mMockViewHolder4);
 
         // Verify that tab1 is moved to index 3.
-        verify(mTabGroupModelFilter).moveRelatedTabs(TAB1_ID, 3);
+        verify(mTabModel).moveRelatedTabs(TAB1_ID, 3);
     }
 
     @Test
@@ -1392,6 +1417,60 @@ public class TabGridItemTouchHelperCallbackUnitTest {
 
         // Drag pinned card#1 rightwards to hover on pinned card#2.
         verifyDrag(mMockViewHolder1, 5, 0, POSITION2, AnimationStatus.CARD_RESTORE);
+    }
+
+    @Test
+    public void testClearCardState() {
+        mItemTouchHelperCallback.onSelectedChanged(
+                mMockViewHolder1, ItemTouchHelper.ACTION_STATE_DRAG);
+        assertThat(
+                mModel.get(POSITION1).model.get(CardProperties.CARD_ANIMATION_STATUS),
+                equalTo(AnimationStatus.SELECTED_CARD_ZOOM_IN));
+        assertThat(mModel.get(POSITION1).model.get(CARD_ALPHA), equalTo(0.8f));
+
+        mItemTouchHelperCallback.setHoveredTabIndexForTesting(POSITION2);
+        mModel.updateHoveredCardForHover(POSITION2, true);
+        assertThat(
+                mModel.get(POSITION2).model.get(CardProperties.CARD_ANIMATION_STATUS),
+                equalTo(AnimationStatus.HOVERED_CARD_ZOOM_IN));
+
+        mItemTouchHelperCallback.clearCardState();
+
+        assertThat(
+                mModel.get(POSITION1).model.get(CardProperties.CARD_ANIMATION_STATUS),
+                equalTo(AnimationStatus.SELECTED_CARD_ZOOM_OUT));
+        assertThat(mModel.get(POSITION1).model.get(CARD_ALPHA), equalTo(1f));
+        assertThat(
+                mModel.get(POSITION2).model.get(CardProperties.CARD_ANIMATION_STATUS),
+                equalTo(AnimationStatus.HOVERED_CARD_ZOOM_OUT));
+    }
+
+    @Test
+    public void testClearCardState_ArchivedMessage() {
+        setupItemTouchHelperCallback(false);
+        addArchivedMessageCard();
+
+        mItemTouchHelperCallback.setSelectedTabIndexForTesting(POSITION1);
+
+        // Pretend a drag over the archived message card has started.
+        mItemTouchHelperCallback.onChildDraw(
+                mCanvas,
+                mRecyclerView,
+                mMockViewHolder1,
+                4,
+                8,
+                ItemTouchHelper.ACTION_STATE_DRAG,
+                true);
+
+        assertEquals(
+                AnimationStatus.HOVERED_CARD_ZOOM_IN,
+                mModel.get(ARCHIVED_MSG_CARD_POSITION).model.get(CARD_ANIMATION_STATUS));
+
+        mItemTouchHelperCallback.clearCardState();
+
+        assertEquals(
+                AnimationStatus.HOVERED_CARD_ZOOM_OUT,
+                mModel.get(ARCHIVED_MSG_CARD_POSITION).model.get(CARD_ANIMATION_STATUS));
     }
 
     private void verifyDrag(
@@ -1523,5 +1602,63 @@ public class TabGridItemTouchHelperCallbackUnitTest {
         doReturn(bottom - top).when(view).getHeight();
         when(view.isAttachedToWindow()).thenReturn(true);
         return view;
+    }
+
+    @Test
+    public void testBeforeOnItemTouchListener_SetsMouseInputSource() {
+        OnItemTouchListener listener =
+                TabListItemTouchHelperCallback.createBeforeOnItemTouchListener(
+                        mItemTouchHelperCallback);
+
+        // Test mouse input source.
+        MotionEvent mouseEvent = mock(MotionEvent.class);
+        when(mouseEvent.getSource()).thenReturn(InputDevice.SOURCE_MOUSE);
+
+        assertFalse(listener.onInterceptTouchEvent(mRecyclerView, mouseEvent));
+        // Verify that the callback has mIsMouseInputSource set to true.
+        // We can verify this via getMovementFlags() which disables swiping for mouse.
+        mItemTouchHelperCallback.getMovementFlags(mRecyclerView, mMockViewHolder1);
+        assertFalse(
+                mItemTouchHelperCallback.hasSwipeFlagForTesting(mRecyclerView, mMockViewHolder1));
+
+        // Test touch screen input source.
+        MotionEvent touchEvent = mock(MotionEvent.class);
+        when(touchEvent.getSource()).thenReturn(InputDevice.SOURCE_TOUCHSCREEN);
+
+        assertFalse(listener.onInterceptTouchEvent(mRecyclerView, touchEvent));
+        // Verify that the callback has mIsMouseInputSource set to false.
+        // Swipe flag should be enabled now.
+        mItemTouchHelperCallback.getMovementFlags(mRecyclerView, mMockViewHolder1);
+        assertTrue(
+                mItemTouchHelperCallback.hasSwipeFlagForTesting(mRecyclerView, mMockViewHolder1));
+    }
+
+    @Test
+    public void testAfterOnItemTouchListener_BlocksUpEventWhenRequested() {
+        OnItemTouchListener listener =
+                TabListItemTouchHelperCallback.createAfterOnItemTouchListener(
+                        mItemTouchHelperCallback);
+
+        // Enable touch block.
+        mItemTouchHelperCallback.setShouldBlockActionForTesting(true);
+
+        // Test ACTION_UP is intercepted/blocked.
+        MotionEvent upEvent = mock(MotionEvent.class);
+        when(upEvent.getActionMasked()).thenReturn(MotionEvent.ACTION_UP);
+
+        assertTrue(listener.onInterceptTouchEvent(mRecyclerView, upEvent));
+
+        // The block bit is consumed single-use, so subsequent actions should not be blocked.
+        MotionEvent upEvent2 = mock(MotionEvent.class);
+        when(upEvent2.getActionMasked()).thenReturn(MotionEvent.ACTION_UP);
+
+        assertFalse(listener.onInterceptTouchEvent(mRecyclerView, upEvent2));
+
+        // Test ACTION_DOWN is NOT blocked even if block is enabled.
+        mItemTouchHelperCallback.setShouldBlockActionForTesting(true);
+        MotionEvent downEvent = mock(MotionEvent.class);
+        when(downEvent.getActionMasked()).thenReturn(MotionEvent.ACTION_DOWN);
+
+        assertFalse(listener.onInterceptTouchEvent(mRecyclerView, downEvent));
     }
 }

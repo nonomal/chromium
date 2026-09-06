@@ -6,7 +6,10 @@
 
 #include "base/check.h"
 #include "base/compiler_specific.h"
+#include "base/containers/span.h"
+#include "base/functional/bind.h"
 #include "base/threading/scoped_blocking_call.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/trace_event/trace_event.h"
 #include "base/tracing_buildflags.h"
 
@@ -21,9 +24,8 @@ WaitableEvent::~WaitableEvent() {
   if (!only_used_while_idle_) {
     // Check the tracing state to avoid an unnecessary syscall on destruction
     // (which can be performance sensitive, crbug.com/40275035).
-    static const uint8_t* flow_enabled =
-        TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED("wakeup.flow,toplevel.flow");
-    if (*flow_enabled && IsSignaled()) {
+    if (TRACE_EVENT_CATEGORY_ENABLED("wakeup.flow,toplevel.flow") &&
+        IsSignaled()) {
       TRACE_EVENT_INSTANT("wakeup.flow,toplevel.flow",
                           "~WaitableEvent while Signaled",
                           perfetto::TerminatingFlow::FromPointer(this));
@@ -41,22 +43,29 @@ void WaitableEvent::Signal() {
   SignalImpl();
 }
 
-void WaitableEvent::Wait() {
-  const bool result = TimedWait(TimeDelta::Max());
+void WaitableEvent::Wait(const Location& location) {
+  const bool result = TimedWait(TimeDelta::Max(), location);
   DCHECK(result) << "TimedWait() should never fail with infinite timeout";
 }
 
-bool WaitableEvent::TimedWait(TimeDelta wait_delta) {
+bool WaitableEvent::TimedWait(TimeDelta wait_delta, const Location& location) {
   if (wait_delta <= TimeDelta()) {
     return IsSignaled();
   }
 
-  // Consider this thread blocked for scheduling purposes. Ignore this for
-  // non-blocking WaitableEvents.
+  // Consider this thread blocked unless the event is already signaled. Ignore
+  // this for non-blocking WaitableEvents.
   std::optional<internal::ScopedBlockingCallWithBaseSyncPrimitives>
       scoped_blocking_call;
+
   if (!only_used_while_idle_) {
-    scoped_blocking_call.emplace(FROM_HERE, BlockingType::MAY_BLOCK);
+    // Always verify thread restrictions to avoid fortuitous allowance if it's
+    // already signaled.
+    internal::AssertBaseSyncPrimitivesAllowed();
+    if (IsDefinitelySignaled()) {
+      return true;
+    }
+    scoped_blocking_call.emplace(location, BlockingType::WILL_BLOCK);
   }
 
   const bool result = TimedWaitImpl(wait_delta);
@@ -72,8 +81,15 @@ bool WaitableEvent::TimedWait(TimeDelta wait_delta) {
 
 size_t WaitableEvent::WaitMany(base::span<WaitableEvent*> events) {
   DCHECK(!events.empty()) << "Cannot wait on no events";
+
+  for (size_t i = 0; i < events.size(); ++i) {
+    if (events[i]->IsDefinitelySignaled()) {
+      return i;
+    }
+  }
+
   internal::ScopedBlockingCallWithBaseSyncPrimitives scoped_blocking_call(
-      FROM_HERE, BlockingType::MAY_BLOCK);
+      FROM_HERE, BlockingType::WILL_BLOCK);
 
   const size_t signaled_id = WaitManyImpl(events);
   WaitableEvent* const signaled_event = events[signaled_id];
@@ -83,6 +99,10 @@ size_t WaitableEvent::WaitMany(base::span<WaitableEvent*> events) {
                         perfetto::TerminatingFlow::FromPointer(signaled_event));
   }
   return signaled_id;
+}
+
+OnceClosure WaitableEvent::GetWaitCallbackForTesting() {
+  return BindOnce(&WaitableEvent::Wait, Unretained(this), FROM_HERE);
 }
 
 }  // namespace base

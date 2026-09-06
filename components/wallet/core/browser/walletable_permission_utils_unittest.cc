@@ -21,7 +21,7 @@ class WalletablePermissionUtilsTest : public testing::Test {
  public:
   WalletablePermissionUtilsTest() {
     feature_list_.InitWithFeaturesAndParameters(
-        {{kWalletablePassDetection,
+        {{features::kWalletablePassDetection,
           {{"walletable_supported_country_allowlist", "US"}}}},
         {});
     wallet::prefs::RegisterProfilePrefs(prefs_.registry());
@@ -102,7 +102,7 @@ TEST_F(WalletablePermissionUtilsTest, OptInStatus_TiedToAccount) {
 
   // Switch back to the first account.
   identity_test_env().ClearPrimaryAccount();
-  identity_test_env().SetPrimaryAccount(account1.email,
+  identity_test_env().SetPrimaryAccount(std::string(account1.GetEmail()),
                                         signin::ConsentLevel::kSignin);
   EXPECT_TRUE(
       GetWalletablePassDetectionOptInStatus(prefs(), identity_manager()));
@@ -134,7 +134,7 @@ class WalletablePermissionUtilsForEligibilityTest
  public:
   WalletablePermissionUtilsForEligibilityTest() {
     feature_list_.InitWithFeaturesAndParameters(
-        {{kWalletablePassDetection,
+        {{features::kWalletablePassDetection,
           {{"walletable_supported_country_allowlist", "US,BR"}}}},
         {});
   }
@@ -185,7 +185,7 @@ TEST_F(WalletablePermissionUtilsForEligibilityTest,
 TEST_F(WalletablePermissionUtilsForEligibilityTest,
        IsEligibleForWalletablePassDetection_WalletPassDetectionDisabled) {
   base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(kWalletablePassDetection);
+  feature_list.InitAndDisableFeature(features::kWalletablePassDetection);
   identity_test_env().MakePrimaryAccountAvailable(
       "test @gmail.com", signin::ConsentLevel::kSignin);
 

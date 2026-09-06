@@ -21,7 +21,6 @@
 #include "base/test/test_future.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_content_browser_client_parts.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/webrtc/media_stream_capture_indicator.h"
@@ -29,7 +28,6 @@
 #include "chrome/browser/notifications/notification_display_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/https_upgrades_util.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/web_applications/test/web_app_browsertest_util.h"
 #include "chrome/browser/web_applications/test/web_app_install_test_utils.h"
@@ -292,7 +290,7 @@ class GetAllScreensMediaBrowserTestBase
   void SetAllowedOriginsPolicy(
       const std::vector<std::string>& allow_listed_origins) {
     policy::PolicyMap policies;
-    base::Value::List allowed_origins;
+    base::ListValue allowed_origins;
     for (const auto& allowed_origin : allow_listed_origins) {
       allowed_origins.Append(base::Value(allowed_origin));
     }

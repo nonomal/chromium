@@ -24,6 +24,7 @@
 #include "components/search/ntp_features.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/browser_task_environment.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "services/network/test/test_utils.h"
@@ -995,7 +996,7 @@ TEST_F(OutlookCalendarPageHandlerTest, NoAttachmentUrlOnRequestFailure) {
       future.Get();
 
   EXPECT_EQ(events2.size(), 3u);
-  EXPECT_EQ(events[0]->attachments.size(), 1u);
+  EXPECT_EQ(events2[0]->attachments.size(), 1u);
 
   ntp::calendar::mojom::AttachmentPtr attachment2 =
       std::move(events2[0]->attachments[0]);

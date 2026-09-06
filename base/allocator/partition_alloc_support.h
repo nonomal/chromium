@@ -23,7 +23,13 @@
 #include "partition_alloc/partition_alloc_constants.h"
 #endif
 
+namespace base {
+class LockMetricTagList;
+}
+
 namespace base::allocator {
+
+BASE_EXPORT const LockMetricTagList& GetPartitionAllocLockMetricTagList();
 
 // Starts a periodic timer on the current thread to purge all thread caches.
 BASE_EXPORT void StartThreadCachePeriodicPurge();
@@ -49,10 +55,29 @@ BASE_EXPORT void InstallUnretainedDanglingRawPtrChecks();
 // Does nothing if allocator shim support is not built.
 BASE_EXPORT void MakeFreeNoOp();
 
+// Checks if the scheduler loop quarantine feature is enabled for the given
+// process type.
+BASE_EXPORT bool IsSchedulerLoopQuarantineEnabled(
+    std::string_view process_type);
 // Apply specialized configuration to the quarantine branch for the current
 // thread.
 BASE_EXPORT void ReconfigureSchedulerLoopQuarantineBranch(
     SchedulerLoopQuarantineBranchType branch_type);
+
+// Returns a "process type identifier" for the current process.
+// It is the process type (e.g. "renderer", "gpu-process") for non-utility
+// processes. For the browser process, it is "browser".
+// For utility processes, it is "utility" followed by "." and the utility
+// sub-type name (e.g. "utility.network.mojom.NetworkService").
+//
+// Must be called after `CommandLine::Init()`.
+BASE_EXPORT std::string GetProcessTypeIdentifier();
+
+// Configuration for `ReconfigureAfterFeatureListInit()`.
+struct BASE_EXPORT FeatureListConfiguration {
+  bool configure_dangling_pointer_detector = true;
+  bool is_in_death_test_child = false;
+};
 
 // Allows to re-configure PartitionAlloc at run-time.
 class BASE_EXPORT PartitionAllocSupport {
@@ -90,13 +115,11 @@ class BASE_EXPORT PartitionAllocSupport {
   //
   // *AfterTaskRunnerInit() may be called more than once.
   void ReconfigureForTests();
-  void ReconfigureEarlyish(const std::string& process_type);
-  void ReconfigureAfterZygoteFork(const std::string& process_type);
-  void ReconfigureAfterFeatureListInit(
-      const std::string& process_type,
-      bool configure_dangling_pointer_detector = true,
-      bool is_in_death_test_child = false);
-  void ReconfigureAfterTaskRunnerInit(const std::string& process_type);
+  void ReconfigureEarlyish(std::string_view process_type);
+  void ReconfigureAfterZygoteFork(std::string_view process_type);
+  void ReconfigureAfterFeatureListInit(std::string_view process_type,
+                                       FeatureListConfiguration config = {});
+  void ReconfigureAfterTaskRunnerInit(std::string_view process_type);
 
   // |has_main_frame| tells us if the renderer contains a main frame.
   // The default value is intended for other process types, where the parameter
@@ -106,16 +129,16 @@ class BASE_EXPORT PartitionAllocSupport {
 
 #if PA_BUILDFLAG(ENABLE_DANGLING_RAW_PTR_CHECKS)
   static std::string ExtractDanglingPtrSignatureForTests(
-      std::string stacktrace);
+      std::string_view stacktrace);
 #endif
 
   static PartitionAllocSupport* Get();
 
-  static BrpConfiguration GetBrpConfiguration(const std::string& process_type);
+  static BrpConfiguration GetBrpConfiguration(std::string_view process_type);
 
   // Returns true if memory tagging should be enabled if available for the given
   // process type. May be called multiple times per process.
-  static bool ShouldEnableMemoryTagging(const std::string& process_type);
+  static bool ShouldEnableMemoryTagging(std::string_view process_type);
 
   // For calling from within third_party/blink/.
   static bool ShouldEnableMemoryTaggingInRendererProcess();
@@ -123,7 +146,7 @@ class BASE_EXPORT PartitionAllocSupport {
   // Returns true if PA advanced checks should be enabled if available for the
   // given process type. May be called multiple times per process.
   static bool ShouldEnablePartitionAllocWithAdvancedChecks(
-      const std::string& process_type);
+      std::string_view process_type);
 
  private:
   PartitionAllocSupport();
@@ -168,13 +191,6 @@ class BASE_EXPORT MemoryReclaimerSupport {
   bool in_foreground_ = true;
   bool has_pending_task_ = false;
 };
-
-// Utility function to detect Double-Free or Out-of-Bounds writes.
-// This function can be called to memory assumed to be valid.
-// If not, this may crash (not guaranteed).
-// This is useful if you want to investigate crashes at `free()`,
-// to know which point at execution it goes wrong.
-BASE_EXPORT void CheckHeapIntegrity(const void* ptr);
 
 // The function here is called right before crashing with
 // `DoubleFreeOrCorruptionDetected()`. We provide an address for the slot start

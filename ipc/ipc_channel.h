@@ -21,7 +21,6 @@
 #include "base/synchronization/lock.h"
 #include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
-#include "ipc/ipc.mojom-forward.h"
 #include "ipc/ipc.mojom.h"
 #include "ipc/ipc_message_pipe_reader.h"
 #include "mojo/public/cpp/bindings/generic_pending_associated_receiver.h"
@@ -165,9 +164,6 @@ class COMPONENT_EXPORT(IPC) Channel final
   void OnPipeError() override;
   void OnAssociatedInterfaceRequest(
       mojo::GenericPendingAssociatedReceiver receiver) override;
-
-  // Generates a channel ID that's non-predictable and unique.
-  static std::string GenerateUniqueRandomChannelID();
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   // Sandboxed processes live in a PID namespace, so when sending the IPC hello

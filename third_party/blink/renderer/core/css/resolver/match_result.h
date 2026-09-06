@@ -55,7 +55,7 @@ struct CORE_EXPORT MatchedProperties {
     // not used at all for the UA origin. Hence, it is not possible to compare
     // tree_orders from two different origins.
     //
-    // https://drafts.csswg.org/css-scoping/#shadow-cascading
+    // https://drafts.csswg.org/css-shadow/#shadow-cascading
     uint16_t tree_order = 0;
     uint8_t link_match_type : 2 = CSSSelector::kMatchAll;
     uint8_t valid_property_filter : 4 =
@@ -76,7 +76,7 @@ struct CORE_EXPORT MatchedProperties {
     uint8_t padding = 0;
 
     bool operator==(const Data& other) const {
-      return UNSAFE_TODO(memcmp(this, &other, sizeof(*this))) == 0;
+      return UNSAFE_BUFFERS(memcmp(this, &other, sizeof(*this))) == 0;
     }
   };
 
@@ -189,11 +189,11 @@ class CORE_EXPORT MatchResult {
   bool DependsOnDynamicViewportUnits() const {
     return depends_on_dynamic_viewport_units_;
   }
-  void SetDependsOnRootFontContainerQueries() {
-    depends_on_root_font_container_queries_ = true;
+  void SetDependsOnRootUnitContainerQueries() {
+    depends_on_root_unit_container_queries_ = true;
   }
-  bool DependsOnRootFontContainerQueries() const {
-    return depends_on_root_font_container_queries_;
+  bool DependsOnRootUnitContainerQueries() const {
+    return depends_on_root_unit_container_queries_;
   }
   void SetConditionallyAffectsAnimations() {
     conditionally_affects_animations_ = true;
@@ -206,6 +206,12 @@ class CORE_EXPORT MatchResult {
   }
   bool HasNonUniversalHighlightPseudoStyles() const {
     return has_non_universal_highlight_pseudo_styles_;
+  }
+  void SetHasCustomHighlightUniversalSelector() {
+    has_custom_highlight_universal_selector_ = true;
+  }
+  bool HasCustomHighlightUniversalSelector() const {
+    return has_custom_highlight_universal_selector_;
   }
   void SetHasNonUaHighlightPseudoStyles() {
     has_non_ua_highlight_pseudo_styles_ = true;
@@ -270,10 +276,11 @@ class CORE_EXPORT MatchResult {
   bool first_line_depends_on_size_container_queries_{false};
   bool depends_on_static_viewport_units_{false};
   bool depends_on_dynamic_viewport_units_{false};
-  bool depends_on_root_font_container_queries_{false};
+  bool depends_on_root_unit_container_queries_{false};
   bool conditionally_affects_animations_{false};
   bool has_non_universal_highlight_pseudo_styles_{false};
   bool has_non_ua_highlight_pseudo_styles_{false};
+  bool has_custom_highlight_universal_selector_{false};
   bool highlights_depend_on_size_container_queries_{false};
   MatchFlags flags_{0};
 #if DCHECK_IS_ON()

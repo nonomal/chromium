@@ -94,7 +94,9 @@ class MockScrollableAreaForAnimatorTest
   PhysicalOffset LocalToScrollOriginOffset() const override { return {}; }
   bool UserInputScrollable(ScrollbarOrientation) const override { return true; }
   bool ShouldPlaceVerticalScrollbarOnLeft() const override { return false; }
-  gfx::Vector2d ScrollOffsetInt() const override { return gfx::Vector2d(); }
+  gfx::Vector2d PixelSnappedScrollOffset() const override {
+    return gfx::Vector2d();
+  }
   int VisibleHeight() const override { return 768; }
   int VisibleWidth() const override { return 1024; }
   CompositorElementId GetScrollElementId() const override {
@@ -118,21 +120,7 @@ class MockScrollableAreaForAnimatorTest
   ScrollOffset GetScrollOffset() const override {
     if (animator)
       return animator->CurrentOffset();
-    return ScrollOffsetInt();
-  }
-
-  bool SetScrollOffset(
-      const ScrollOffset& offset,
-      mojom::blink::ScrollType type,
-      cc::ScrollSourceType source_type = cc::ScrollSourceType::kNone,
-      mojom::blink::ScrollBehavior behavior =
-          mojom::blink::ScrollBehavior::kInstant,
-      ScrollCallback on_finish = ScrollCallback(),
-      bool targeted_scroll = false) override {
-    if (animator)
-      animator->SetCurrentOffset(offset);
-    return ScrollableArea::SetScrollOffset(offset, type, source_type, behavior,
-                                           std::move(on_finish));
+    return PixelSnappedScrollOffset();
   }
 
   scoped_refptr<base::SingleThreadTaskRunner> GetTimerTaskRunner() const final {
@@ -274,7 +262,7 @@ TEST(ScrollAnimatorTest, MainThreadEnabled) {
 
   EXPECT_FALSE(scroll_animator->HasAnimationThatRequiresService());
 
-  ScrollResult result = scroll_animator->UserScroll(
+  ScrollConsumption result = scroll_animator->UserScroll(
       ui::ScrollGranularity::kScrollByLine, ScrollOffset(-100, 0),
       cc::ScrollSourceType::kNone, ScrollableArea::ScrollCallback());
   EXPECT_FALSE(scroll_animator->HasAnimationThatRequiresService());
@@ -367,7 +355,7 @@ TEST(ScrollAnimatorTest, AnimatedScrollAborted) {
   EXPECT_FALSE(scroll_animator->HasAnimationThatRequiresService());
 
   // Smooth scroll.
-  ScrollResult result = scroll_animator->UserScroll(
+  ScrollConsumption result = scroll_animator->UserScroll(
       ui::ScrollGranularity::kScrollByLine, ScrollOffset(100, 0),
       cc::ScrollSourceType::kNone, ScrollableArea::ScrollCallback());
   EXPECT_TRUE(scroll_animator->HasAnimationThatRequiresService());
@@ -423,7 +411,7 @@ TEST(ScrollAnimatorTest, AnimatedScrollTakeover) {
   EXPECT_FALSE(scroll_animator->HasAnimationThatRequiresService());
 
   // Smooth scroll.
-  ScrollResult result = scroll_animator->UserScroll(
+  ScrollConsumption result = scroll_animator->UserScroll(
       ui::ScrollGranularity::kScrollByLine, ScrollOffset(100, 0),
       cc::ScrollSourceType::kNone, ScrollableArea::ScrollCallback());
   EXPECT_TRUE(scroll_animator->HasAnimationThatRequiresService());
@@ -735,7 +723,7 @@ TEST(ScrollAnimatorTest, CancellingCompositorAnimation) {
   EXPECT_FALSE(scroll_animator->HasAnimationThatRequiresService());
 
   // First user scroll.
-  ScrollResult result = scroll_animator->UserScroll(
+  ScrollConsumption result = scroll_animator->UserScroll(
       ui::ScrollGranularity::kScrollByLine, ScrollOffset(100, 0),
       cc::ScrollSourceType::kNone, ScrollableArea::ScrollCallback());
   EXPECT_TRUE(scroll_animator->HasAnimationThatRequiresService());

@@ -4,7 +4,9 @@
 
 #include "components/component_updater/installer_policies/trust_token_key_commitments_component_installer_policy.h"
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -83,7 +85,7 @@ bool TrustTokenKeyCommitmentsComponentInstallerPolicy::
 
 update_client::CrxInstaller::Result
 TrustTokenKeyCommitmentsComponentInstallerPolicy::OnCustomInstall(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) {
   return update_client::CrxInstaller::Result(0);  // Nothing custom here.
 }
@@ -105,7 +107,7 @@ TrustTokenKeyCommitmentsComponentInstallerPolicy::GetInstalledPath(
 void TrustTokenKeyCommitmentsComponentInstallerPolicy::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
-    base::Value::Dict manifest) {
+    base::DictValue manifest) {
   VLOG(1) << "Component ready, version " << version.GetString() << " in "
           << install_dir.value();
 
@@ -116,7 +118,7 @@ void TrustTokenKeyCommitmentsComponentInstallerPolicy::ComponentReady(
 
 // Called during startup and installation before ComponentReady().
 bool TrustTokenKeyCommitmentsComponentInstallerPolicy::VerifyInstallation(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) const {
   // No need to actually validate the commitments here, since we'll do the
   // checking in NetworkService::SetTrustTokenKeyCommitments.
@@ -148,8 +150,7 @@ TrustTokenKeyCommitmentsComponentInstallerPolicy::GetInstallerAttributes()
 void TrustTokenKeyCommitmentsComponentInstallerPolicy::GetPublicKeyHash(
     std::vector<uint8_t>* hash) {
   DCHECK(hash);
-  hash->assign(std::begin(kTrustTokenKeyCommitmentsPublicKeySHA256),
-               std::end(kTrustTokenKeyCommitmentsPublicKeySHA256));
+  hash->assign_range(kTrustTokenKeyCommitmentsPublicKeySHA256);
 }
 
 // static

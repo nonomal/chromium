@@ -16,10 +16,7 @@
 // Must come after all headers that specialize FromJniType() / ToJniType().
 #include "chrome/android/chrome_jni_headers/RecentTabsPagePrefs_jni.h"
 
-using base::android::ConvertJavaStringToUTF8;
-using base::android::JavaRef;
-
-static jlong JNI_RecentTabsPagePrefs_Init(JNIEnv* env, Profile* profile) {
+static int64_t JNI_RecentTabsPagePrefs_Init(Profile* profile) {
   RecentTabsPagePrefs* recent_tabs_page_prefs =
       new RecentTabsPagePrefs(profile);
   return reinterpret_cast<intptr_t>(recent_tabs_page_prefs);
@@ -28,57 +25,50 @@ static jlong JNI_RecentTabsPagePrefs_Init(JNIEnv* env, Profile* profile) {
 RecentTabsPagePrefs::RecentTabsPagePrefs(Profile* profile)
     : profile_(profile) {}
 
-void RecentTabsPagePrefs::Destroy(JNIEnv* env) {
+void RecentTabsPagePrefs::Destroy() {
   delete this;
 }
 
 RecentTabsPagePrefs::~RecentTabsPagePrefs() = default;
 
-jboolean RecentTabsPagePrefs::GetSnapshotDocumentCollapsed(JNIEnv* env) {
+bool RecentTabsPagePrefs::GetSnapshotDocumentCollapsed() {
   return profile_->GetPrefs()->GetBoolean(prefs::kNtpCollapsedSnapshotDocument);
 }
 
-void RecentTabsPagePrefs::SetSnapshotDocumentCollapsed(
-    JNIEnv* env,
-    jboolean is_collapsed) {
+void RecentTabsPagePrefs::SetSnapshotDocumentCollapsed(bool is_collapsed) {
   PrefService* prefs = profile_->GetPrefs();
   prefs->SetBoolean(prefs::kNtpCollapsedSnapshotDocument, is_collapsed);
 }
 
-jboolean RecentTabsPagePrefs::GetRecentlyClosedTabsCollapsed(JNIEnv* env) {
+bool RecentTabsPagePrefs::GetRecentlyClosedTabsCollapsed() {
   return profile_->GetPrefs()->GetBoolean(
       prefs::kNtpCollapsedRecentlyClosedTabs);
 }
 
-void RecentTabsPagePrefs::SetRecentlyClosedTabsCollapsed(
-    JNIEnv* env,
-    jboolean is_collapsed) {
+void RecentTabsPagePrefs::SetRecentlyClosedTabsCollapsed(bool is_collapsed) {
   PrefService* prefs = profile_->GetPrefs();
   prefs->SetBoolean(prefs::kNtpCollapsedRecentlyClosedTabs, is_collapsed);
 }
 
-jboolean RecentTabsPagePrefs::GetSyncPromoCollapsed(JNIEnv* env) {
+bool RecentTabsPagePrefs::GetSyncPromoCollapsed() {
   return profile_->GetPrefs()->GetBoolean(prefs::kNtpCollapsedSyncPromo);
 }
 
-void RecentTabsPagePrefs::SetSyncPromoCollapsed(
-    JNIEnv* env,
-    jboolean is_collapsed) {
+void RecentTabsPagePrefs::SetSyncPromoCollapsed(bool is_collapsed) {
   PrefService* prefs = profile_->GetPrefs();
   prefs->SetBoolean(prefs::kNtpCollapsedSyncPromo, is_collapsed);
 }
 
-jboolean RecentTabsPagePrefs::GetForeignSessionCollapsed(
-    JNIEnv* env,
-    std::string& session_tag) {
-  const base::Value::Dict& dict =
+bool RecentTabsPagePrefs::GetForeignSessionCollapsed(
+    const std::string& session_tag) {
+  const base::DictValue& dict =
       profile_->GetPrefs()->GetDict(prefs::kNtpCollapsedForeignSessions);
   return dict.contains(session_tag);
 }
 
-void RecentTabsPagePrefs::SetForeignSessionCollapsed(JNIEnv* env,
-                                                     std::string& session_tag,
-                                                     jboolean is_collapsed) {
+void RecentTabsPagePrefs::SetForeignSessionCollapsed(
+    const std::string& session_tag,
+    bool is_collapsed) {
   // Store session tags for collapsed sessions in a preference so that the
   // collapsed state persists.
   PrefService* prefs = profile_->GetPrefs();

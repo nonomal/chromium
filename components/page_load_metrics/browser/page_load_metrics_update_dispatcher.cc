@@ -397,12 +397,20 @@ PageLoadMetricsUpdateDispatcher::PageLoadMetricsUpdateDispatcher(
       pending_merged_page_timing_(CreatePageLoadTiming()),
       main_frame_metadata_(mojom::FrameMetadata::New()),
       subframe_metadata_(mojom::FrameMetadata::New()),
-      page_input_timing_(mojom::InputTiming::New()),
-      is_prerendered_page_load_(navigation_handle->IsInPrerenderedMainFrame()) {
-}
+      is_prerendered_page_load_(navigation_handle->IsInPrerenderedMainFrame()),
+      soft_navigation_tracker_(client) {}
 
 PageLoadMetricsUpdateDispatcher::~PageLoadMetricsUpdateDispatcher() {
   ShutDown();
+}
+
+void PageLoadMetricsUpdateDispatcher::OnHidden(
+    base::TimeDelta background_time) {
+  soft_navigation_tracker_.OnHidden(background_time);
+}
+
+void PageLoadMetricsUpdateDispatcher::OnShown(base::TimeDelta shown_time) {
+  soft_navigation_tracker_.OnShown(shown_time);
 }
 
 void PageLoadMetricsUpdateDispatcher::ShutDown() {
@@ -416,6 +424,12 @@ void PageLoadMetricsUpdateDispatcher::ShutDown() {
   if (should_dispatch) {
     DispatchTimingUpdates();
   }
+
+  // Finalize and report any currently active soft navigation before page
+  // teardown completes. This is not tied to `should_dispatch` because it is not
+  // about flushing buffered timer events, but rather forcing active soft
+  // navigations to wrap up and notify observers.
+  FlushSoftNavigationMetrics();
 }
 
 void PageLoadMetricsUpdateDispatcher::UpdateMetrics(
@@ -426,10 +440,13 @@ void PageLoadMetricsUpdateDispatcher::UpdateMetrics(
     const std::vector<mojom::ResourceDataUpdatePtr>& resources,
     mojom::FrameRenderDataUpdatePtr render_data,
     mojom::CpuTimingPtr new_cpu_timing,
-    mojom::InputTimingPtr input_timing_delta,
+    std::vector<mojom::EventTimingPtr> event_timings,
     const std::optional<blink::SubresourceLoadMetrics>&
         subresource_load_metrics,
-    mojom::SoftNavigationMetricsPtr soft_navigation_metrics,
+    std::vector<mojom::SoftNavigationMetricsPtr> soft_navigation_metrics,
+    std::vector<mojom::LargestContentfulPaintTimingPtr>
+        soft_largest_contentful_paint,
+    mojom::FontLoadingMetricsPtr font_loading_metrics,
     internal::PageLoadTrackerPageType page_type) {
   if (embedder_interface_->IsExtensionUrl(
           render_frame_host->GetLastCommittedURL())) {
@@ -454,9 +471,13 @@ void PageLoadMetricsUpdateDispatcher::UpdateMetrics(
     if (subresource_load_metrics) {
       UpdateMainFrameSubresourceLoadMetrics(*subresource_load_metrics);
     }
-    UpdateSoftNavigationIntervalResponsivenessMetrics(*input_timing_delta);
-    UpdateSoftNavigationIntervalLayoutShift(*render_data);
-    UpdateSoftNavigation(std::move(*soft_navigation_metrics));
+    if (font_loading_metrics) {
+      UpdateMainFrameFontLoadingMetrics(*font_loading_metrics);
+    }
+    if (!soft_largest_contentful_paint.empty()) {
+      client_->OnSoftNavigationLargestContentfulPaint(
+          soft_largest_contentful_paint.size());
+    }
   } else {
     if (!render_frame_host->GetParentOrOuterDocument()) {
       // TODO(crbug.com/40065854): This can be removed once
@@ -469,14 +490,26 @@ void PageLoadMetricsUpdateDispatcher::UpdateMetrics(
 
     UpdateSubFrameMetadata(render_frame_host, std::move(new_metadata));
     UpdateSubFrameTiming(render_frame_host, std::move(new_timing));
-    // This path is just for the AMP metrics.
-    UpdateSubFrameInputTiming(render_frame_host, *input_timing_delta);
+    UpdateSubFrameEventTiming(render_frame_host, event_timings);
   }
-  UpdatePageInputTiming(*input_timing_delta);
+  UpdatePageEventTiming(render_frame_host, event_timings);
   UpdatePageRenderData(*render_data, is_main_frame);
   if (!is_main_frame) {
     // This path is just for the AMP metrics.
     OnSubFrameRenderDataChanged(render_frame_host, *render_data);
+  }
+
+  // Route metrics to SoftNavigationTracker. Main frame and subframe metrics
+  // arrive in separate, mutually exclusive per-frame IPC batches.
+  if (is_main_frame) {
+    soft_navigation_tracker_.UpdateMainFrameMetrics(
+        render_frame_host->GetGlobalFrameToken(), soft_navigation_metrics,
+        event_timings, render_data->new_layout_shifts,
+        soft_largest_contentful_paint);
+  } else {
+    soft_navigation_tracker_.UpdateSubFrameMetrics(
+        render_frame_host->GetGlobalFrameToken(), event_timings,
+        render_data->new_layout_shifts);
   }
 
   client_->UpdateFeaturesUsage(render_frame_host, new_features);
@@ -506,16 +539,6 @@ void PageLoadMetricsUpdateDispatcher::UpdateFeatures(
     return;
   }
   client_->UpdateFeaturesUsage(render_frame_host, new_features);
-}
-
-void PageLoadMetricsUpdateDispatcher::SetUpSharedMemoryForDroppedFrames(
-    content::RenderFrameHost* render_frame_host,
-    base::ReadOnlySharedMemoryRegion dropped_frames_memory) {
-  const bool is_main_frame = client_->IsPageMainFrame(render_frame_host);
-  if (is_main_frame) {
-    client_->SetUpSharedMemoryForDroppedFrames(
-        std::move(dropped_frames_memory));
-  }
 }
 
 void PageLoadMetricsUpdateDispatcher::DidFinishSubFrameNavigation(
@@ -562,10 +585,10 @@ void PageLoadMetricsUpdateDispatcher::UpdateSubFrameTiming(
   MaybeDispatchTimingUpdates(merger.should_buffer_timing_update_callback());
 }
 
-void PageLoadMetricsUpdateDispatcher::UpdateSubFrameInputTiming(
+void PageLoadMetricsUpdateDispatcher::UpdateSubFrameEventTiming(
     content::RenderFrameHost* render_frame_host,
-    const mojom::InputTiming& input_timing_delta) {
-  client_->OnSubFrameInputTimingChanged(render_frame_host, input_timing_delta);
+    const std::vector<mojom::EventTimingPtr>& event_timings) {
+  client_->OnSubFrameEventTimingChanged(render_frame_host, event_timings);
 }
 
 void PageLoadMetricsUpdateDispatcher::UpdateFrameCpuTiming(
@@ -589,18 +612,10 @@ void PageLoadMetricsUpdateDispatcher::UpdateFrameCpuTiming(
 void PageLoadMetricsUpdateDispatcher::UpdateSubFrameMetadata(
     content::RenderFrameHost* render_frame_host,
     mojom::FrameMetadataPtr subframe_metadata) {
-  if (subframe_metadata->main_frame_viewport_rect) {
-    mojo::ReportBadMessage(
-        "Unexpected main_frame_viewport_rect set for a subframe.");
-    return;
-  }
-
   // Merge the subframe loading behavior flags with any we've already observed,
   // possibly from other subframes.
   subframe_metadata_->behavior_flags |= subframe_metadata->behavior_flags;
   client_->OnSubframeMetadataChanged(render_frame_host, *subframe_metadata);
-
-  MaybeUpdateMainFrameIntersectionRect(render_frame_host, subframe_metadata);
 }
 
 void PageLoadMetricsUpdateDispatcher::UpdateMainFrameSubresourceLoadMetrics(
@@ -608,63 +623,26 @@ void PageLoadMetricsUpdateDispatcher::UpdateMainFrameSubresourceLoadMetrics(
   subresource_load_metrics_ = subresource_load_metrics;
 }
 
-void PageLoadMetricsUpdateDispatcher::UpdateSoftNavigation(
-    const mojom::SoftNavigationMetrics& soft_navigation_metrics) {
-  client_->OnSoftNavigationChanged(soft_navigation_metrics);
+void PageLoadMetricsUpdateDispatcher::UpdateMainFrameFontLoadingMetrics(
+    const mojom::FontLoadingMetrics& font_loading_metrics) {
+  font_loading_metrics_ = font_loading_metrics.Clone();
 }
 
-void PageLoadMetricsUpdateDispatcher::UpdateSoftNavigationIntervalLayoutShift(
-    const mojom::FrameRenderDataUpdate& render_data) {
-  soft_nav_interval_render_data_.layout_shift_score +=
-      render_data.layout_shift_delta;
-  soft_nav_interval_layout_shift_normalization_.AddNewLayoutShifts(
-      render_data.new_layout_shifts, base::TimeTicks::Now(),
-      soft_nav_interval_render_data_.layout_shift_score);
+void PageLoadMetricsUpdateDispatcher::FlushSoftNavigationMetrics() {
+  soft_navigation_tracker_.CompleteActiveNavigationAndFlush();
 }
 
-void PageLoadMetricsUpdateDispatcher::
-    UpdateSoftNavigationIntervalResponsivenessMetrics(
-        const mojom::InputTiming& input_timing_delta) {
-  if (!page_load_metrics::IsEmpty(input_timing_delta)) {
-    soft_navigation_interval_responsiveness_metrics_normalization_
-        .AddNewUserInteractionLatencies(
-            input_timing_delta.user_interaction_latencies);
-  }
-}
-
-void PageLoadMetricsUpdateDispatcher::MaybeUpdateMainFrameIntersectionRect(
-    content::RenderFrameHost* render_frame_host,
+void PageLoadMetricsUpdateDispatcher::MaybeUpdateMainFrameRect(
     const mojom::FrameMetadataPtr& frame_metadata) {
-  // Handle intersection updates if included in the metadata.
-  if (!frame_metadata->main_frame_intersection_rect)
-    return;
-
-  // Do not notify intersections for untracked loads,
-  // subframe_navigation_start_offset_ excludes untracked loads.
-  // TODO(crbug.com/40679417): Document definition of untracked loads in page
-  // load metrics.
-  const content::FrameTreeNodeId frame_tree_node_id =
-      render_frame_host->GetFrameTreeNodeId();
-  bool is_main_frame = client_->IsPageMainFrame(render_frame_host);
-  if (!is_main_frame &&
-      subframe_navigation_start_offset_.find(frame_tree_node_id) ==
-          subframe_navigation_start_offset_.end()) {
+  // Handle main frame rect updates if included in the metadata.
+  if (!frame_metadata->main_frame_rect) {
     return;
   }
 
-  auto existing_intersection_it =
-      main_frame_intersection_rects_.find(frame_tree_node_id);
-
-  // Check if we already have a frame intersection rect for the frame, dispatch
-  // updates for the first frame intersection rect or if the intersection has
-  // changed.
-  if (existing_intersection_it == main_frame_intersection_rects_.end() ||
-      existing_intersection_it->second !=
-          *frame_metadata->main_frame_intersection_rect) {
-    main_frame_intersection_rects_[frame_tree_node_id] =
-        *frame_metadata->main_frame_intersection_rect;
-    client_->OnMainFrameIntersectionRectChanged(
-        render_frame_host, *frame_metadata->main_frame_intersection_rect);
+  if (!main_frame_rect_ ||
+      *frame_metadata->main_frame_rect != *main_frame_rect_) {
+    main_frame_rect_ = *frame_metadata->main_frame_rect;
+    client_->OnMainFrameRectChanged(*main_frame_rect_);
   }
 }
 
@@ -753,8 +731,7 @@ void PageLoadMetricsUpdateDispatcher::UpdateMainFrameMetadata(
   client_->OnMainFrameMetadataChanged();
 
   if (!main_frame_metadata_.is_null()) {
-    MaybeUpdateMainFrameIntersectionRect(render_frame_host,
-                                         main_frame_metadata_);
+    MaybeUpdateMainFrameRect(main_frame_metadata_);
     MaybeUpdateMainFrameViewportRect(main_frame_metadata_);
 
     client_->OnMainFrameAdRectsChanged(
@@ -762,35 +739,48 @@ void PageLoadMetricsUpdateDispatcher::UpdateMainFrameMetadata(
   }
 }
 
-void PageLoadMetricsUpdateDispatcher::UpdatePageInputTiming(
-    const mojom::InputTiming& input_timing_delta) {
-  if (!page_load_metrics::IsEmpty(input_timing_delta)) {
-    responsiveness_metrics_normalization_.AddNewUserInteractionLatencies(
-        input_timing_delta.user_interaction_latencies);
-    client_->OnPageInputTimingChanged(
-        input_timing_delta.user_interaction_latencies.size());
+void PageLoadMetricsUpdateDispatcher::UpdatePageEventTiming(
+    content::RenderFrameHost* render_frame_host,
+    const std::vector<mojom::EventTimingPtr>& event_timings) {
+  if (!event_timings.empty()) {
+    uint64_t old_num_interactions =
+        interaction_to_next_paint_calculator_.num_user_interactions();
+    interaction_to_next_paint_calculator_.AddNewEventTimings(
+        render_frame_host->GetGlobalFrameToken(), event_timings);
+    uint64_t new_num_interactions =
+        interaction_to_next_paint_calculator_.num_user_interactions();
+    client_->OnPageEventTimingChanged(new_num_interactions -
+                                      old_num_interactions);
   }
 }
 
 void PageLoadMetricsUpdateDispatcher::UpdatePageRenderData(
     const mojom::FrameRenderDataUpdate& render_data,
     bool is_main_frame) {
-  page_render_data_.layout_shift_score += render_data.layout_shift_delta;
-  layout_shift_normalization_.AddNewLayoutShifts(
-      render_data.new_layout_shifts, base::TimeTicks::Now(),
-      page_render_data_.layout_shift_score);
+  for (const auto& entry : render_data.new_layout_shifts) {
+    page_render_data_.layout_shift_score += entry->layout_shift_score;
+  }
+  layout_shift_normalization_.AddNewLayoutShifts(render_data.new_layout_shifts,
+                                                 base::TimeTicks::Now());
   layout_shift_normalization_for_bfcache_.AddNewLayoutShifts(
-      render_data.new_layout_shifts, base::TimeTicks::Now(),
-      page_render_data_.layout_shift_score -
-          cumulative_layout_shift_score_for_bfcache_);
+      render_data.new_layout_shifts, base::TimeTicks::Now());
 
   // Stop accumulating page-wide layout_shift_score_before_input_or_scroll after
   // input or scroll in any frame. Note that we can't unconditionally accumulate
   // layout_shift_delta_before_input_or_scroll, because that field only reflects
   // input/scroll in the same frame as the shift.
+  // TODO: The moment at which the boolean has_seen_input_or_scroll_ is set
+  // potentially depends on timing behavior between the frames; therefore this
+  // filtering can be inaccurate. It would be better to compare each candidate
+  // layout shift timestamp with the earliest timestamp from any inputs or
+  // scrolls in any frame.
   if (!has_seen_input_or_scroll_) {
-    page_render_data_.layout_shift_score_before_input_or_scroll +=
-        render_data.layout_shift_delta_before_input_or_scroll;
+    for (const auto& entry : render_data.new_layout_shifts) {
+      if (!entry->after_input_or_scroll) {
+        page_render_data_.layout_shift_score_before_input_or_scroll +=
+            entry->layout_shift_score;
+      }
+    }
   }
 
   client_->OnPageRenderDataChanged(render_data, is_main_frame);
@@ -798,13 +788,16 @@ void PageLoadMetricsUpdateDispatcher::UpdatePageRenderData(
 
 void PageLoadMetricsUpdateDispatcher::UpdateMainFrameRenderData(
     const mojom::FrameRenderDataUpdate& render_data) {
-  main_frame_render_data_.layout_shift_score += render_data.layout_shift_delta;
-
-  // Track main frame cumulative score up to the first input or scroll in the
-  // main frame. For this we do not care about inputs sent to subframes, so we
-  // should not check has_seen_input_or_scroll_ (but see crbug.com/1136207).
-  main_frame_render_data_.layout_shift_score_before_input_or_scroll +=
-      render_data.layout_shift_delta_before_input_or_scroll;
+  for (const auto& entry : render_data.new_layout_shifts) {
+    main_frame_render_data_.layout_shift_score += entry->layout_shift_score;
+    // Track main frame cumulative score up to the first input or scroll in the
+    // main frame. For this we do not care about inputs sent to subframes, so we
+    // should not check has_seen_input_or_scroll_ (but see crbug.com/1136207).
+    if (!entry->after_input_or_scroll) {
+      main_frame_render_data_.layout_shift_score_before_input_or_scroll +=
+          entry->layout_shift_score;
+    }
+  }
 }
 
 void PageLoadMetricsUpdateDispatcher::OnSubFrameRenderDataChanged(

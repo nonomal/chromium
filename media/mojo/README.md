@@ -1,4 +1,4 @@
-# media/mojo
+# //media/mojo
 
 This folder contains mojo interfaces, clients and implementations that extend
 the core "media" target to support most out-of-process use cases, including
@@ -398,7 +398,7 @@ in the browser process. They must defend against compromised media components.
 * MediaService (in progress)
     * `MediaService` in the GPU process (registered in `GpuServiceFactory` with
       `GpuMojoMediaClient`)
-    * `MojoVideoDecoder` + hardware video decoders such as D3D11VideoDecoder
+    * `MojoVideoDecoder` + hardware video decoders such as D3DVideoDecoder
 
 ## Other Services
 

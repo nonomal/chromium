@@ -11,6 +11,7 @@
 #include "base/memory/raw_ref.h"
 #include "base/memory/weak_ptr.h"
 #include "components/sync/protocol/webauthn_credential_specifics.pb.h"
+#include "components/webauthn/core/browser/import/passkey_import_candidate.h"
 
 namespace webauthn {
 
@@ -23,7 +24,6 @@ struct ImportProcessingResult;
 //
 // The caller should initiate the process by calling `StartImport`.
 // TODO(crbug.com/458337350): Add more unit tests.
-// TODO(crbug.com/458337350): Add metrics.
 class PasskeyImporter {
  public:
   using ProcessingCallback =
@@ -40,7 +40,8 @@ class PasskeyImporter {
   // * valid passkeys, ready to be imported
   // Caches the passkeys after processing and runs `processing_callback` to let
   // the caller display some UI, so the user can resolve conflicts (if any).
-  void StartImport(std::vector<sync_pb::WebauthnCredentialSpecifics> passkeys,
+  void StartImport(std::vector<PasskeyImportCandidate> passkeys,
+                   std::vector<uint8_t> trusted_vault_key,
                    ProcessingCallback processing_callback);
 
   // Finalizes the import process by actually storing the previously cached
@@ -53,9 +54,9 @@ class PasskeyImporter {
 
  private:
   // Performs the async work described in `StartImport()`.
-  void ProcessPasskeys(
-      std::vector<sync_pb::WebauthnCredentialSpecifics> passkeys,
-      ProcessingCallback processing_callback);
+  void ProcessPasskeys(std::vector<PasskeyImportCandidate> passkeys,
+                       std::vector<uint8_t> trusted_vault_key,
+                       ProcessingCallback processing_callback);
 
   // Performs the async work described in `FinishImport()`.
   void ImportPasskeys(std::vector<int> selected_conflicting_passkey_ids,

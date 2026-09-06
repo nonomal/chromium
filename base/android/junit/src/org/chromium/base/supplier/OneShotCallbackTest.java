@@ -18,14 +18,12 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
-import org.robolectric.annotation.Config;
 
 import org.chromium.base.Callback;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 
 /** Unit tests for {@link OneShotCallback}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
 public class OneShotCallbackTest {
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
 
@@ -34,7 +32,8 @@ public class OneShotCallbackTest {
     @Test
     public void testNotCalledWithNoValue() {
         Handler handler = new Handler();
-        ObservableSupplierImpl<Integer> supplier = new ObservableSupplierImpl<>();
+        SettableMonotonicObservableSupplier<Integer> supplier =
+                ObservableSuppliers.createMonotonic();
 
         handler.post(() -> new OneShotCallback<>(supplier, mCallbackMock));
 
@@ -47,8 +46,7 @@ public class OneShotCallbackTest {
     @Test
     public void testCalledWithPresetValue() {
         Handler handler = new Handler();
-        ObservableSupplierImpl<Integer> supplier = new ObservableSupplierImpl<>();
-        supplier.set(5);
+        SettableNonNullObservableSupplier<Integer> supplier = ObservableSuppliers.createNonNull(5);
 
         handler.post(
                 () -> {
@@ -64,7 +62,8 @@ public class OneShotCallbackTest {
     @Test
     public void testCalledWithSet() {
         Handler handler = new Handler();
-        ObservableSupplierImpl<Integer> supplier = new ObservableSupplierImpl<>();
+        SettableMonotonicObservableSupplier<Integer> supplier =
+                ObservableSuppliers.createMonotonic();
 
         handler.post(() -> new OneShotCallback<>(supplier, mCallbackMock));
         handler.post(
@@ -82,8 +81,7 @@ public class OneShotCallbackTest {
     @Test
     public void testNotCalledWithPresetValueOnlyOnce() {
         Handler handler = new Handler();
-        ObservableSupplierImpl<Integer> supplier = new ObservableSupplierImpl<>();
-        supplier.set(5);
+        SettableNonNullObservableSupplier<Integer> supplier = ObservableSuppliers.createNonNull(5);
         supplier.set(10);
 
         handler.post(
@@ -100,7 +98,8 @@ public class OneShotCallbackTest {
     @Test
     public void testCalledWithSetOnlyOnce() {
         Handler handler = new Handler();
-        ObservableSupplierImpl<Integer> supplier = new ObservableSupplierImpl<>();
+        SettableMonotonicObservableSupplier<Integer> supplier =
+                ObservableSuppliers.createMonotonic();
 
         handler.post(() -> new OneShotCallback<>(supplier, mCallbackMock));
         handler.post(

@@ -5,15 +5,22 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_BROWSER_PAYMENTS_PAYMENTS_REQUESTS_PAYMENTS_REQUEST_H_
 #define COMPONENTS_AUTOFILL_CORE_BROWSER_PAYMENTS_PAYMENTS_REQUESTS_PAYMENTS_REQUEST_H_
 
-#include <string>
+#include <stdint.h>
 
+#include <optional>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "base/time/time.h"
 #include "base/values.h"
 #include "components/autofill/core/browser/data_model/addresses/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/form_group.h"
 #include "components/autofill/core/browser/data_model/payments/credit_card.h"
+#include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/payments/client_behavior_constants.h"
 #include "components/autofill/core/browser/payments/payments_autofill_client.h"
-#include "components/autofill/core/common/autofill_payments_features.h"
 
 namespace autofill::payments {
 
@@ -22,6 +29,9 @@ namespace autofill::payments {
 inline constexpr int kUnmaskPaymentMethodBillableServiceNumber = 70154;
 inline constexpr int kUploadPaymentMethodBillableServiceNumber = 70073;
 inline constexpr int kMigrateCardsBillableServiceNumber = 70264;
+// TODO(crbug.com/556547813): Replace the temporary placeholder when a
+// dedicated Billable Service Number is assigned for Wallet Passes.
+inline constexpr int kWalletPassBillableServiceNumber = -1;
 
 // Shared class for the various Payments request types.
 class PaymentsRequest {
@@ -45,7 +55,7 @@ class PaymentsRequest {
   virtual std::string GetRequestContent() = 0;
 
   // Parses the required elements of the HTTP response.
-  virtual void ParseResponse(const base::Value::Dict& response) = 0;
+  virtual void ParseResponse(const base::DictValue& response) = 0;
 
   // Returns true if all of the required elements were successfully retrieved by
   // a call to ParseResponse.
@@ -53,6 +63,9 @@ class PaymentsRequest {
 
   // Invokes the appropriate callback in the delegate based on what type of
   // request this is.
+  // Note: In `PaymentsNetworkInterfaceBase`, the request object is destroyed
+  // immediately after this method returns. Callers must not rely on the
+  // request object or any of its members staying alive after this call.
   virtual void RespondToDelegate(
       PaymentsAutofillClient::PaymentsRpcResult result) = 0;
 
@@ -81,52 +94,50 @@ class PaymentsRequest {
   virtual std::optional<base::TimeDelta> GetTimeout() const;
 
   // Shared helper function to build the risk data sent in the request.
-  static base::Value::Dict BuildRiskDictionary(
+  static base::DictValue BuildRiskDictionary(
       std::string_view encoded_risk_data);
 
   // Shared helper function to build the customer context sent in the request.
-  static base::Value::Dict BuildCustomerContextDictionary(
+  static base::DictValue BuildCustomerContextDictionary(
       int64_t external_customer_id);
 
  protected:
-  // Shared helper function that builds the Chrome user context which is then
+  // Shared helper functions that builds the Chrome user context which is then
   // set in the payment requests.
-  // Note: `full_sync_enabled` is being deprecated. Don't call this in new code.
-  // Use the below function instead.
-  base::Value::Dict BuildChromeUserContext(
+  base::DictValue BuildChromeUserContext();
+  base::DictValue BuildChromeUserContext(
+      const std::vector<ClientBehaviorConstants>& client_behavior_signals);
+  base::DictValue BuildChromeUserContext(
       const std::vector<ClientBehaviorConstants>& client_behavior_signals,
       bool full_sync_enabled);
-  base::Value::Dict BuildChromeUserContext(
-      const std::vector<ClientBehaviorConstants>& client_behavior_signals);
 
   // Shared helper functoin that returns a dictionary with the structure
   // expected by Payments RPCs, containing each of the fields in |profile|,
   // formatted according to |app_locale|. If |include_non_location_data| is
   // false, the name and phone number in |profile| are not included.
-  base::Value::Dict BuildAddressDictionary(const AutofillProfile& profile,
-                                           const std::string& app_locale,
-                                           bool include_non_location_data);
+  base::DictValue BuildAddressDictionary(const AutofillProfile& profile,
+                                         const std::string& app_locale,
+                                         bool include_non_location_data);
 
   // Shared helper function that returns a dictionary of the credit card with
   // the structure expected by Payments RPCs, containing expiration month,
   // expiration year and cardholder name (if any) fields in |credit_card|,
   // formatted according to |app_locale|. |pan_field_name| is the field name for
   // the encrypted pan. We use each credit card's guid as the unique id.
-  base::Value::Dict BuildCreditCardDictionary(
-      const CreditCard& credit_card,
-      const std::string& app_locale,
-      const std::string& pan_field_name);
+  base::DictValue BuildCreditCardDictionary(const CreditCard& credit_card,
+                                            const std::string& app_locale,
+                                            const std::string& pan_field_name);
 
   // Shared helper functions for string operations.
   static void AppendStringIfNotEmpty(const AutofillProfile& profile,
                                      const FieldType& type,
                                      const std::string& app_locale,
-                                     base::Value::List& list);
+                                     base::ListValue& list);
   static void SetStringIfNotEmpty(const FormGroup& form_group,
                                   const FieldType& type,
                                   const std::string& app_locale,
                                   const std::string& path,
-                                  base::Value::Dict& dictionary);
+                                  base::DictValue& dictionary);
 
   // Helper for ParseResponse(). Input format should be "1234,30000-55555,765",
   // where ranges are separated by commas and items separated with a dash means
@@ -134,6 +145,27 @@ class PaymentsRequest {
   // and end (ex. 1234-1234).
   std::vector<std::pair<int, int>> ParseSupportedCardBinRangesString(
       const std::string& supported_card_bin_ranges_string);
+
+ private:
+  friend class PaymentsRequestTestApi;
+
+  // Represents the client type, based on expectations in the
+  // ChromeUserContext::ClientType enum in the internal Payments proto. This
+  // list must stay consistent with that enum.
+  enum class ClientType {
+    kUnknown = 0,
+    kWindows = 1,
+    kMac = 2,
+    kLinux = 3,
+    kChromeOs = 4,
+    kClank = 5,
+    kBling = 6,
+    kMaxValue = kBling,
+  };
+
+  // Returns the user's client type, based on expectations in the
+  // ChromeUserContext::ClientType enum in the internal Payments proto.
+  PaymentsRequest::ClientType GetChromeUserContextClientType();
 };
 
 }  // namespace autofill::payments

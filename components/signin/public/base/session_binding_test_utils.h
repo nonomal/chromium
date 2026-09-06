@@ -11,7 +11,7 @@
 
 #include "base/containers/span.h"
 #include "base/values.h"
-#include "crypto/signature_verifier.h"
+#include "crypto/sign.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class HybridEncryptionKey;
@@ -21,14 +21,14 @@ namespace signin {
 // Verifies that `jwt` is well-formed and properly signed.
 [[nodiscard]] testing::AssertionResult VerifyJwtSignature(
     std::string_view jwt,
-    crypto::SignatureVerifier::SignatureAlgorithm algorithm,
+    crypto::sign::SignatureKind algorithm,
     base::span<const uint8_t> public_key);
 
 // Returns a parsed header part of `jwt` or std::nullopt if parsing fails.
-std::optional<base::Value::Dict> ExtractHeaderFromJwt(std::string_view jwt);
+std::optional<base::DictValue> ExtractHeaderFromJwt(std::string_view jwt);
 
 // Returns a parsed payload part of `jwt` or std::nullopt if parsing fails.
-std::optional<base::Value::Dict> ExtractPayloadFromJwt(std::string_view jwt);
+std::optional<base::DictValue> ExtractPayloadFromJwt(std::string_view jwt);
 
 // Encrypts `value` with `ephemeral_key`. Produced string can be later decrypted
 // by `DecryptValueWithEphemeralKey()`.

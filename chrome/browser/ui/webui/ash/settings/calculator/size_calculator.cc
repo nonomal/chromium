@@ -4,12 +4,12 @@
 
 #include "chrome/browser/ui/webui/ash/settings/calculator/size_calculator.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <numeric>
 #include <type_traits>
 
 #include "ash/constants/ash_features.h"
-#include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/scoped_refptr.h"
@@ -24,9 +24,8 @@
 #include "chrome/browser/ash/drive/drive_integration_service.h"
 #include "chrome/browser/ash/drive/file_system_util.h"
 #include "chrome/browser/ash/file_manager/path_util.h"
-#include "chrome/browser/ash/profiles/profile_helper.h"
-#include "chrome/browser/browsing_data/browsing_data_file_system_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chromeos/ash/components/browser_context_helper/browser_context_helper.h"
 #include "chromeos/ash/components/cryptohome/userdataauth_util.h"
 #include "chromeos/ash/components/dbus/concierge/concierge_client.h"
 #include "chromeos/ash/components/dbus/spaced/spaced_client.h"
@@ -422,7 +421,7 @@ void AppsSizeCalculator::UpdateBorealisAppsSize() {
   }
   vm_tools::concierge::ListVmDisksRequest request;
   request.set_cryptohome_id(
-      ash::ProfileHelper::GetUserIdHashFromProfile(profile_));
+      ash::BrowserContextHelper::GetUserIdHashFromBrowserContext(profile_));
   request.set_storage_location(vm_tools::concierge::STORAGE_CRYPTOHOME_ROOT);
   request.set_vm_name("borealis");
   ash::ConciergeClient::Get()->ListVmDisks(
@@ -481,7 +480,7 @@ void CrostiniSizeCalculator::PerformCalculation() {
 
   vm_tools::concierge::ListVmDisksRequest request;
   request.set_cryptohome_id(
-      ash::ProfileHelper::GetUserIdHashFromProfile(profile_));
+      ash::BrowserContextHelper::GetUserIdHashFromBrowserContext(profile_));
   request.set_storage_location(vm_tools::concierge::STORAGE_CRYPTOHOME_ROOT);
   ash::ConciergeClient::Get()->ListVmDisks(
       std::move(request),
@@ -563,7 +562,7 @@ void OtherUsersSizeCalculator::OnGetOtherUserSize(
 
   // If all the requests succeed, shows the total bytes in the UI.
   const int64_t other_users_total_bytes =
-      base::Contains(user_sizes_, -1)
+      std::ranges::contains(user_sizes_, -1)
           ? -1
           : std::accumulate(user_sizes_.begin(), user_sizes_.end(), 0LL);
   NotifySizeCalculated(other_users_total_bytes);

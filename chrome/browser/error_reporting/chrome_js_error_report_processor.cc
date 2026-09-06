@@ -70,8 +70,7 @@ void RemoveErrorMessageFromStackTrace(const std::string& error_message,
 }
 
 std::string RedactErrorMessage(const std::string& message) {
-  return redaction::RedactionTool(/*first_party_extension_ids=*/nullptr)
-      .Redact(message);
+  return redaction::RedactionTool().Redact(message);
 }
 
 // Truncate the error message to no more than 1000 characters. Long messages
@@ -190,11 +189,11 @@ void ChromeJsErrorReportProcessor::OnConsentCheckCompleted(
 
   const crash_reporter::ProductInfo product_info = GetProductInfo();
   const GURL source(error_report->url);
-  const std::string product_name = error_report->product.empty()
-                                       ? product_info.product_name
-                                       : error_report->product;
+  const std::string product_name =
+      error_report->product.empty() ? std::string(product_info.product_name())
+                                    : error_report->product;
   const std::string version = error_report->version.empty()
-                                  ? product_info.version
+                                  ? std::string(product_info.version())
                                   : error_report->version;
 
   ParameterMap params;
@@ -204,8 +203,8 @@ void ChromeJsErrorReportProcessor::OnConsentCheckCompleted(
   params["type"] = "JavascriptError";
   params["error_message"] = TruncateErrorMessage(error_report->message);
   params["browser"] = "Chrome";
-  params["browser_version"] = product_info.version;
-  params["channel"] = product_info.channel;
+  params["browser_version"] = std::string(product_info.version());
+  params["channel"] = std::string(product_info.channel());
 #if BUILDFLAG(IS_CHROMEOS)
   // base::SysInfo::OperatingSystemName() returns "Linux" on ChromeOS devices.
   params["os"] = "ChromeOS";
@@ -225,6 +224,9 @@ void ChromeJsErrorReportProcessor::OnConsentCheckCompleted(
       break;
     case JavaScriptErrorReport::SourceSystem::kDevToolsObserver:
       params[kSourceSystemParamName] = "devtools_observer";
+      break;
+    case JavaScriptErrorReport::SourceSystem::kExtensionObserver:
+      params[kSourceSystemParamName] = "extension_observer";
       break;
   }
   params["full_url"] = source.spec();

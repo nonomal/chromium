@@ -21,6 +21,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import static org.chromium.base.test.transit.ViewElement.expectInvisibleOption;
+import static org.chromium.base.test.transit.ViewFinder.waitForView;
 import static org.chromium.chrome.browser.autofill.AutofillTestHelper.createClickActionWithFlags;
 import static org.chromium.chrome.browser.keyboard_accessory.sheet_component.AccessorySheetProperties.ACTIVE_TAB_INDEX;
 import static org.chromium.chrome.browser.keyboard_accessory.sheet_component.AccessorySheetProperties.BACKGROUND;
@@ -41,6 +43,7 @@ import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 import android.view.Gravity;
+import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -57,7 +60,9 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
@@ -66,15 +71,15 @@ import org.chromium.chrome.browser.keyboard_accessory.AccessoryTabType;
 import org.chromium.chrome.browser.keyboard_accessory.R;
 import org.chromium.chrome.browser.keyboard_accessory.data.KeyboardAccessoryData.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
+import org.chromium.chrome.test.transit.AutoResetCtaTransitTestRule;
 import org.chromium.chrome.test.transit.ChromeTransitTestRules;
-import org.chromium.chrome.test.transit.FreshCtaTransitTestRule;
 import org.chromium.chrome.test.transit.page.WebPageStation;
 import org.chromium.ui.AsyncViewProvider;
 import org.chromium.ui.AsyncViewStub;
 import org.chromium.ui.ViewProvider;
+import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.modelutil.LazyConstructionPropertyMcp;
 import org.chromium.ui.modelutil.PropertyModel;
-import org.chromium.ui.test.util.ViewUtils;
 
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -82,24 +87,22 @@ import java.util.concurrent.BlockingQueue;
 /** View tests for the keyboard accessory sheet component. */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+@Batch(Batch.PER_CLASS)
 public class AccessorySheetViewTest {
     private WebPageStation mPage;
     private PropertyModel mModel;
     private BlockingQueue<AccessorySheetView> mViewPager;
 
     @Rule
-    public FreshCtaTransitTestRule mActivityTestRule =
-            ChromeTransitTestRules.freshChromeTabbedActivityRule();
+    public AutoResetCtaTransitTestRule mActivityTestRule =
+            ChromeTransitTestRules.fastAutoResetCtaActivityRule();
 
     @Before
     public void setUp() throws InterruptedException {
         mPage = mActivityTestRule.startOnBlankPage();
         ThreadUtils.runOnUiThreadBlocking(
                 () -> {
-                    AsyncViewStub viewStub =
-                            mActivityTestRule
-                                    .getActivity()
-                                    .findViewById(R.id.keyboard_accessory_sheet_stub);
+                    AsyncViewStub viewStub = getOrResetSheetStub();
                     int height =
                             mActivityTestRule
                                     .getActivity()
@@ -118,6 +121,37 @@ public class AccessorySheetViewTest {
                 });
     }
 
+    private AsyncViewStub getOrResetSheetStub() {
+        AsyncViewStub viewStub =
+                mActivityTestRule.getActivity().findViewById(R.id.keyboard_accessory_sheet_stub);
+        if (viewStub != null) {
+            return viewStub;
+        }
+
+        View container =
+                mActivityTestRule
+                        .getActivity()
+                        .findViewById(R.id.keyboard_accessory_sheet_container);
+        assertNotNull(
+                "Neither keyboard_accessory_sheet_stub nor"
+                        + " keyboard_accessory_sheet_container was found in layout",
+                container);
+        ViewGroup parent = (ViewGroup) container.getParent();
+        int index = parent.indexOfChild(container);
+        parent.removeView(container);
+
+        ViewGroup testLayout =
+                (ViewGroup)
+                        LayoutInflater.from(mActivityTestRule.getActivity())
+                                .inflate(R.layout.test_main, null);
+        viewStub = testLayout.findViewById(R.id.keyboard_accessory_sheet_stub);
+        testLayout.removeView(viewStub);
+        viewStub.setLayoutResource(R.layout.keyboard_accessory_sheet);
+        viewStub.setShouldInflateOnBackgroundThread(true);
+        parent.addView(viewStub, index);
+        return viewStub;
+    }
+
     @Test
     @MediumTest
     public void testAccessoryVisibilityChangedByModel() throws InterruptedException {
@@ -125,18 +159,12 @@ public class AccessorySheetViewTest {
         assertNull(mViewPager.poll());
 
         // After setting the visibility to true, the view should exist and be visible.
-        ThreadUtils.runOnUiThreadBlocking(
-                () -> {
-                    mModel.set(VISIBLE, true);
-                });
+        ThreadUtils.runOnUiThreadBlocking(() -> mModel.set(VISIBLE, true));
         AccessorySheetView viewPager = mViewPager.take();
         assertEquals(View.VISIBLE, viewPager.getVisibility());
 
         // After hiding the view, the view should still exist but be invisible.
-        ThreadUtils.runOnUiThreadBlocking(
-                () -> {
-                    mModel.set(VISIBLE, false);
-                });
+        ThreadUtils.runOnUiThreadBlocking(() -> mModel.set(VISIBLE, false));
         assertNotEquals(viewPager.getVisibility(), View.VISIBLE);
     }
 
@@ -150,7 +178,7 @@ public class AccessorySheetViewTest {
                             .add(
                                     new Tab(
                                             "Passwords",
-                                            null,
+                                            0,
                                             null,
                                             R.layout.empty_accessory_sheet,
                                             AccessoryTabType.PASSWORDS,
@@ -240,10 +268,7 @@ public class AccessorySheetViewTest {
 
         // Remove the last tab.
         onViewWaiting(withText(kFirstTab)).check(matches(isDisplayed()));
-        ThreadUtils.runOnUiThreadBlocking(
-                () -> {
-                    mModel.get(TABS).remove(mModel.get(TABS).get(0));
-                });
+        ThreadUtils.runOnUiThreadBlocking(() -> mModel.get(TABS).remove(mModel.get(TABS).get(0)));
         onView(withText(kFirstTab)).check(doesNotExist());
 
         // Add a new first tab.
@@ -265,15 +290,13 @@ public class AccessorySheetViewTest {
                     mModel.set(TOP_SHADOW_VISIBLE, false);
                     mModel.set(VISIBLE, true);
                 }); // Render view.
-        ViewUtils.waitForViewCheckingState(
-                withId(R.id.accessory_sheet_shadow), ViewUtils.VIEW_INVISIBLE);
+        waitForView(withId(R.id.accessory_sheet_shadow), expectInvisibleOption());
 
         ThreadUtils.runOnUiThreadBlocking(() -> mModel.set(TOP_SHADOW_VISIBLE, true));
         onView(withId(R.id.accessory_sheet_shadow)).check(matches(isDisplayed()));
 
         ThreadUtils.runOnUiThreadBlocking(() -> mModel.set(TOP_SHADOW_VISIBLE, false));
-        ViewUtils.waitForViewCheckingState(
-                withId(R.id.accessory_sheet_shadow), ViewUtils.VIEW_INVISIBLE);
+        waitForView(withId(R.id.accessory_sheet_shadow), expectInvisibleOption());
     }
 
     @Test
@@ -299,8 +322,7 @@ public class AccessorySheetViewTest {
                 }); // Render view.
         AccessorySheetView view = mViewPager.take();
 
-        ViewUtils.waitForViewCheckingState(
-                withId(R.id.sheet_header_shadow), ViewUtils.VIEW_INVISIBLE);
+        waitForView(withId(R.id.sheet_header_shadow), expectInvisibleOption());
 
         assertEquals(kMaxWidth, view.getWidth());
         assertEquals(kPadding, view.getPaddingStart());
@@ -323,6 +345,7 @@ public class AccessorySheetViewTest {
 
     @Test
     @MediumTest
+    @DisableIf.Device(DeviceFormFactor.DESKTOP_FREEFORM) // crbug.com/511287120
     public void testHeader() {
         Runnable runnable = mock(Runnable.class);
 
@@ -364,6 +387,7 @@ public class AccessorySheetViewTest {
     @Test
     @MediumTest
     @EnableFeatures({ChromeFeatureList.AUTOFILL_ENABLE_SECURITY_TOUCH_EVENT_FILTERING_ANDROID})
+    @DisableFeatures({ChromeFeatureList.HOME_BUTTON_REMOVAL})
     public void testFiltersTouchesWhenObscured() {
         Runnable runnable = mock(Runnable.class);
 
@@ -388,7 +412,7 @@ public class AccessorySheetViewTest {
     private Tab createTestTabWithTextView(String textViewCaption) {
         return new Tab(
                 "Passwords",
-                null,
+                0,
                 null,
                 R.layout.empty_accessory_sheet,
                 AccessoryTabType.PASSWORDS,

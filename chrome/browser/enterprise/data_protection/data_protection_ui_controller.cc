@@ -12,13 +12,13 @@
 #include "chrome/browser/enterprise/data_protection/data_protection_navigation_observer.h"
 #include "chrome/browser/enterprise/watermark/settings.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "components/enterprise/watermarking/content/watermark_text_container.h"
 #include "components/enterprise/watermarking/watermark.h"
 #include "components/tabs/public/tab_interface.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 
@@ -53,8 +53,14 @@ void DataProtectionUIController::ContentsViewDataProtectionController::
     return;
   }
 
+  // TODO(alshawwa): GetFromContents() crashes in PWAs in the ChromeOS case. We
+  // therefore use MaybeGetFromContents() and perform a nullptr check. Resolve
+  // the ChromeOS PWA case.
   tabs::TabInterface* tab =
-      tabs::TabInterface::GetFromContents(web_view->web_contents());
+      tabs::TabInterface::MaybeGetFromContents(web_view->web_contents());
+  if (!tab) {
+    return;
+  }
 
   enterprise_data_protection::DataProtectionNavigationController* controller =
       tab->GetTabFeatures()->data_protection_controller();

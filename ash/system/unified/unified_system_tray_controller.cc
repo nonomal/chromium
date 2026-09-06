@@ -59,7 +59,6 @@
 #include "ash/system/unified/feature_pod_controller_base.h"
 #include "ash/system/unified/feature_tile.h"
 #include "ash/system/unified/feature_tiles_container_view.h"
-#include "ash/system/unified/quick_settings_metrics_util.h"
 #include "ash/system/unified/quick_settings_view.h"
 #include "ash/system/unified/quiet_mode_feature_pod_controller.h"
 #include "ash/system/unified/unified_system_tray_bubble.h"
@@ -67,7 +66,6 @@
 #include "ash/system/unified/user_chooser_detailed_view_controller.h"
 #include "ash/wm/lock_state_controller.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "components/global_media_controls/public/constants.h"
 #include "media/base/media_switches.h"
@@ -94,13 +92,9 @@ UnifiedSystemTrayController::UnifiedSystemTrayController(
   pagination_controller_ = std::make_unique<PaginationController>(
       model_->pagination_model(), PaginationController::SCROLL_AXIS_HORIZONTAL,
       base::BindRepeating(&RecordPageSwitcherSourceByEventType));
-
-  display::Screen::Get()->AddObserver(this);
 }
 
-UnifiedSystemTrayController::~UnifiedSystemTrayController() {
-  display::Screen::Get()->RemoveObserver(this);
-}
+UnifiedSystemTrayController::~UnifiedSystemTrayController() = default;
 
 void UnifiedSystemTrayController::AddObserver(Observer* observer) {
   if (observer) {
@@ -142,7 +136,6 @@ UnifiedSystemTrayController::CreateQuickSettingsView(int max_height) {
                       base::Unretained(this))));
   unified_brightness_view_ =
       qs_view->AddSliderView(brightness_slider_controller_->CreateView());
-  UpdateBrightnessSlider();
 
   qs_view->SetMaxHeight(max_height);
 
@@ -439,11 +432,6 @@ void UnifiedSystemTrayController::InitFeatureTiles() {
               feature_pod_controllers_, tiles);
 
   quick_settings_view_->AddTiles(std::move(tiles));
-
-  quick_settings_metrics_util::RecordQsFeaturePodCount(
-      quick_settings_view_->feature_tiles_container()
-          ->GetVisibleFeatureTileCount(),
-      display::Screen::Get()->InTabletMode());
 }
 
 void UnifiedSystemTrayController::ShowDetailedView(
@@ -504,42 +492,6 @@ void UnifiedSystemTrayController::PrepareBubbleDestroy() {
   quick_settings_view_ = nullptr;
   unified_volume_view_ = nullptr;
   unified_brightness_view_ = nullptr;
-}
-
-void UnifiedSystemTrayController::UpdateBrightnessSlider() const {
-  if (!unified_brightness_view_) {
-    return;
-  }
-  auto* slider =
-      views::AsViewClass<UnifiedBrightnessView>(unified_brightness_view_)
-          ->slider();
-  for (const display::Display& display :
-       display::Screen::Get()->GetAllDisplays()) {
-    if (display.IsInternal()) {
-      slider->SetEnabled(true);
-      return;
-    }
-  }
-  slider->SetEnabled(false);
-}
-
-bool UnifiedSystemTrayController::GetBrightnessSliderEnabledForTesting() const {
-  if (!unified_brightness_view_) {
-    return false;
-  }
-  return views::AsViewClass<UnifiedBrightnessView>(unified_brightness_view_)
-      ->slider()
-      ->GetEnabled();
-}
-
-void UnifiedSystemTrayController::OnDisplayAdded(
-    const display::Display& new_display) {
-  UpdateBrightnessSlider();
-}
-
-void UnifiedSystemTrayController::OnDisplaysRemoved(
-    const display::Displays& removed_displays) {
-  UpdateBrightnessSlider();
 }
 
 }  // namespace ash

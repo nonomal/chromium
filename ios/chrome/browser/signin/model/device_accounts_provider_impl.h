@@ -38,8 +38,8 @@ class DeviceAccountsProviderImpl
                       const std::string& client_id,
                       const std::set<std::string>& scopes,
                       AccessTokenCallback callback) override;
-  std::vector<AccountInfo> GetAccountsForProfile() const override;
-  std::vector<AccountInfo> GetAccountsOnDevice() const override;
+  std::vector<DeviceAccountInfo> GetAccountsForProfile() const override;
+  std::vector<DeviceAccountInfo> GetAccountsOnDevice() const override;
 
   // ChromeAccountManagerService::Observer
   void OnIdentitiesOnDeviceChanged() override;
@@ -47,7 +47,12 @@ class DeviceAccountsProviderImpl
 
  private:
   raw_ptr<ChromeAccountManagerService> account_manager_service_ = nullptr;
-  base::ObserverList<DeviceAccountsProvider::Observer, true> observer_list_;
+  // TODO(crbug.com/484371187): Investigate if reentrancy can be removed.
+  base::ObserverList<
+      DeviceAccountsProvider::Observer,
+      true,
+      base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>
+      observer_list_;
   base::ScopedObservation<ChromeAccountManagerService,
                           DeviceAccountsProviderImpl>
       chrome_account_manager_observation_{this};

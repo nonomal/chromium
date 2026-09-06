@@ -24,7 +24,7 @@ namespace content {
 class DevToolsAgentHost;
 }
 
-class Browser;
+class BrowserWindowInterface;
 class DevToolsTargetsUIHandler;
 class InspectUI;
 class PortForwardingStatusSerializer;
@@ -62,7 +62,7 @@ class InspectUI : public content::WebUIController,
                                         const std::string& browser_id,
                                         const GURL& frontend_url);
 
-  void PopulateNativeUITargets(const base::Value::List& targets);
+  void PopulateNativeUITargets(const base::ListValue& targets);
   void ShowNativeUILaunchButton(bool enabled);
   void SetHostVersion(const std::string& version);
   void SetRemoteDebuggingEnabled(bool enabled);
@@ -70,7 +70,7 @@ class InspectUI : public content::WebUIController,
   void StartListeningNotifications();
   void StopListeningNotifications();
 
-  static void InspectDevices(Browser* browser);
+  static void InspectDevices(BrowserWindowInterface* browser);
 
  private:
   // content::WebContentsObserver:
@@ -104,6 +104,7 @@ class InspectUI : public content::WebUIController,
 
   // A scoped container for preference change registries.
   PrefChangeRegistrar pref_change_registrar_;
+  PrefChangeRegistrar local_state_pref_change_registrar_;
 
   std::map<std::string, std::unique_ptr<DevToolsTargetsUIHandler>>
       target_handlers_;

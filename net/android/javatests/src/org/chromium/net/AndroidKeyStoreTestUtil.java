@@ -4,10 +4,10 @@
 
 package org.chromium.net;
 
-import android.util.Log;
-
 import org.jni_zero.CalledByNative;
 import org.jni_zero.JNINamespace;
+
+import org.chromium.base.Log;
 
 import java.security.KeyFactory;
 import java.security.NoSuchAlgorithmException;
@@ -23,25 +23,13 @@ public class AndroidKeyStoreTestUtil {
     private static final String TAG = "AndroidKeyStoreTestUtil";
 
     /**
-     * Called from native code to create a PrivateKey object from its
-     * encoded PKCS#8 representation.
-     * @param type The key type, according to PrivateKeyType.
+     * Called from native code to create a PrivateKey object from its encoded PKCS#8 representation.
+     *
+     * @param algorithm The Java KeyFactory algorithm to use when importing the key.
      * @return new PrivateKey handle, or null in case of error.
      */
     @CalledByNative
-    public static PrivateKey createPrivateKeyFromPKCS8(int type, byte[] encodedKey) {
-        String algorithm = null;
-        switch (type) {
-            case PrivateKeyType.RSA:
-                algorithm = "RSA";
-                break;
-            case PrivateKeyType.ECDSA:
-                algorithm = "EC";
-                break;
-            default:
-                return null;
-        }
-
+    public static PrivateKey createPrivateKeyFromPKCS8(String algorithm, byte[] encodedKey) {
         try {
             @SuppressWarnings("InsecureCryptoUsage") // This util class is for test only.
             KeyFactory factory = KeyFactory.getInstance(algorithm);

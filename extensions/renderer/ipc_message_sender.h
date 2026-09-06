@@ -6,6 +6,7 @@
 #define EXTENSIONS_RENDERER_IPC_MESSAGE_SENDER_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "base/values.h"
@@ -76,13 +77,23 @@ class IPCMessageSender {
   // Sends a message to add/remove a filtered listener.
   virtual void SendAddFilteredEventListenerIPC(ScriptContext* context,
                                                const std::string& event_name,
-                                               const base::Value::Dict& filter,
+                                               const base::DictValue& filter,
                                                bool is_lazy) = 0;
   virtual void SendRemoveFilteredEventListenerIPC(
       ScriptContext* context,
       const std::string& event_name,
-      const base::Value::Dict& filter,
+      const base::DictValue& filter,
       bool remove_lazy_listener) = 0;
+
+  // Tells the browser that this renderer's dispatch target finished handling
+  // one blocking webRequest event. Carries no responses; the JS reports those
+  // separately through `webRequestInternal.eventHandled`. `extension_id` is
+  // null for non-extension webview embedders.
+  virtual void SendWebRequestEventHandlingDoneIPC(
+      const std::optional<ExtensionId>& extension_id,
+      const std::string& event_name,
+      uint64_t request_id,
+      int web_view_instance_id) = 0;
 
   // Sends a message to bind a pipe for the Automation API.
   virtual void SendBindAutomationIPC(
@@ -104,7 +115,7 @@ class IPCMessageSender {
                                   const ExtensionId& extension_id,
                                   ActivityLogCallType call_type,
                                   const std::string& call_name,
-                                  base::Value::List args,
+                                  base::ListValue args,
                                   const std::string& extra) = 0;
 
   // Creates an IPCMessageSender for use on the main thread.

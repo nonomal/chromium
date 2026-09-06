@@ -16,10 +16,9 @@ namespace synced_sessions {
 struct DistantSession;
 }
 
-@protocol ApplicationCommands;
-@protocol SettingsCommands;
 @protocol RecentTabsMenuProvider;
 @protocol RecentTabsPresentationDelegate;
+@protocol SceneCommands;
 @protocol TableViewFaviconDataSource;
 
 @interface RecentTabsTableViewController
@@ -29,8 +28,7 @@ struct DistantSession;
 // Browser.
 @property(nonatomic, assign) Browser* browser;
 // The command handlers used by this ViewController.
-@property(nonatomic, weak) id<ApplicationCommands> applicationHandler;
-@property(nonatomic, weak) id<SettingsCommands> settingsHandler;
+@property(nonatomic, weak) id<SceneCommands> sceneHandler;
 
 // Opaque instructions on how to open urls.
 @property(nonatomic) UrlLoadStrategy loadStrategy;

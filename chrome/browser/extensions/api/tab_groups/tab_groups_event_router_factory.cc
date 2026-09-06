@@ -8,6 +8,9 @@
 #include "chrome/browser/extensions/api/tab_groups/tab_groups_event_router.h"
 #include "content/public/browser/browser_context.h"
 #include "extensions/browser/event_router_factory.h"
+#include "extensions/buildflags/buildflags.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -44,6 +47,12 @@ TabGroupsEventRouterFactory::BuildServiceInstanceForBrowserContext(
 }
 
 bool TabGroupsEventRouterFactory::ServiceIsCreatedWithBrowserContext() const {
+  return true;
+}
+
+bool TabGroupsEventRouterFactory::ServiceIsNULLWhileTesting() const {
+  // The event router adds tab strip observers on construction, which some
+  // tests cannot tolerate.
   return true;
 }
 

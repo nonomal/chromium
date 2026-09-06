@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_ENTERPRISE_CONNECTORS_DEVICE_TRUST_SIGNALS_ASH_ASH_SIGNALS_FILTERER_H_
 
 #include "base/values.h"
-#include "chrome/browser/enterprise/connectors/device_trust/signals/signals_filterer.h"
+#include "components/enterprise/device_trust/core/signals/signals_filterer.h"
 
 namespace enterprise_connectors {
 
@@ -18,11 +18,11 @@ class AshSignalsFilterer : public SignalsFilterer {
 
   // Removes or modifies a subset of `signals` depending on the current device
   // context.
-  void Filter(base::Value::Dict& signals) override;
+  void Filter(base::DictValue& signals) override;
 
  private:
   // Removes all signals which contain stable device identifiers from `signals`.
-  void RemoveStableDeviceIdentifiers(base::Value::Dict& signals);
+  void RemoveStableDeviceIdentifiers(base::DictValue& signals);
 
   bool ShouldRemoveStableDeviceIdentifiers();
 };

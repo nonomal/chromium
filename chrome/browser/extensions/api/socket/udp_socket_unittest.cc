@@ -18,7 +18,6 @@
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
-#include "chrome/test/base/browser_with_test_window_test.h"
 #include "content/public/browser/storage_partition.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -83,7 +82,7 @@ TEST_F(UDPSocketUnitTest, TestUDPSocketRecvFrom) {
   std::unique_ptr<UDPSocket> socket = CreateSocket();
 
   // Confirm that we can call two RecvFroms in quick succession without
-  // triggering crbug.com/146606.
+  // triggering crbug.com/40276233.
   socket->Connect(CreateAddressList("127.0.0.1", 40000),
                   base::BindOnce(&OnConnected));
   socket->RecvFrom(4096, base::BindOnce(&OnCompleted));

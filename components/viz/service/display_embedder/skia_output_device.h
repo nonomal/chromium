@@ -38,6 +38,7 @@ class MemoryTracker;
 class MemoryTypeTracker;
 class SharedContextState;
 class GraphiteSharedContext;
+class VulkanContextProvider;
 }  // namespace gpu
 
 namespace skgpu::graphite {
@@ -45,8 +46,6 @@ class Recording;
 }  // namespace skgpu::graphite
 
 namespace viz {
-
-class VulkanContextProvider;
 
 class VIZ_SERVICE_EXPORT SkiaOutputDevice {
  public:
@@ -67,9 +66,10 @@ class VIZ_SERVICE_EXPORT SkiaOutputDevice {
     SkCanvas* GetCanvas();
 
     // Ganesh
-    GrSemaphoresSubmitted Flush(VulkanContextProvider* vulkan_context_provider,
-                                std::vector<GrBackendSemaphore> end_semaphores,
-                                base::OnceClosure on_finished);
+    GrSemaphoresSubmitted Flush(
+        gpu::VulkanContextProvider* vulkan_context_provider,
+        std::vector<GrBackendSemaphore> end_semaphores,
+        base::OnceClosure on_finished);
     bool Wait(int num_semaphores,
               const GrBackendSemaphore wait_semaphores[],
               bool delete_semaphores_after_wait);
@@ -150,7 +150,7 @@ class VIZ_SERVICE_EXPORT SkiaOutputDevice {
                        BufferPresentedCallback feedback,
                        OutputSurfaceFrame frame) = 0;
 
-  virtual void SetVSyncDisplayID(int64_t display_id) {}
+  virtual void SetVSyncDisplayID(int64_t display_id, bool force_update) {}
 
   // Schedule overlays which will be on screen when SwapBuffers() or
   // PostSubBuffer() is called.
@@ -179,6 +179,8 @@ class VIZ_SERVICE_EXPORT SkiaOutputDevice {
 
   void SetDependencyTimings(base::TimeTicks task_ready);
 
+  void SetOverlayStartTimings(base::TimeTicks gpu_start_overlay);
+
   // Copy and return the contents of the surface owned by this device. If this
   // output device is surfaceless, then reads back from the OS compositor tree,
   // including non-protected overlays.
@@ -192,11 +194,12 @@ class VIZ_SERVICE_EXPORT SkiaOutputDevice {
              BufferPresentedCallback feedback,
              base::TimeTicks viz_scheduled_draw,
              base::TimeTicks gpu_started_draw,
-             base::TimeTicks task_ready);
+             base::TimeTicks task_ready,
+             base::TimeTicks gpu_started_overlay);
     SwapInfo(SwapInfo&& other);
     ~SwapInfo();
     uint64_t SwapId();
-    const gpu::SwapBuffersCompleteParams& Complete(
+    gpu::SwapBuffersCompleteParams Complete(
         gfx::SwapCompletionResult result,
         const std::optional<gfx::Rect>& damage_area,
         std::vector<gpu::Mailbox> released_overlays,
@@ -205,7 +208,7 @@ class VIZ_SERVICE_EXPORT SkiaOutputDevice {
 
    private:
     BufferPresentedCallback feedback_;
-    gpu::SwapBuffersCompleteParams params_;
+    gfx::SwapResponse swap_response_;
   };
 
   // Begin paint the back buffer.
@@ -219,7 +222,7 @@ class VIZ_SERVICE_EXPORT SkiaOutputDevice {
   virtual SkCanvas* GetCanvas(SkSurface* sk_surface);
   virtual GrSemaphoresSubmitted Flush(
       SkSurface* sk_surface,
-      VulkanContextProvider* vulkan_context_provider,
+      gpu::VulkanContextProvider* vulkan_context_provider,
       std::vector<GrBackendSemaphore> end_semaphores,
       base::OnceClosure on_finished);
   virtual bool Wait(SkSurface* sk_surface,
@@ -257,6 +260,7 @@ class VIZ_SERVICE_EXPORT SkiaOutputDevice {
   base::TimeTicks viz_scheduled_draw_;
   base::TimeTicks gpu_started_draw_;
   base::TimeTicks gpu_task_ready_;
+  base::TimeTicks gpu_started_overlay_;
 
   // RGBX format is emulated with RGBA.
   bool is_emulated_rgbx_ = false;

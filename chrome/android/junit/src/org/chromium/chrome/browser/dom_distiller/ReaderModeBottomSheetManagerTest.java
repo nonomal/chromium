@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.dom_distiller;
 import static org.junit.Assert.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -25,24 +26,29 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
+import org.robolectric.shadows.ShadowLooper;
 
-import org.chromium.base.Callback;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ActivityTabProvider;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsVisibilityManager;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.theme.ThemeColorProvider;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetContent;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.dom_distiller.core.DistilledPagePrefs;
+import org.chromium.components.dom_distiller.core.DomDistillerFeatures;
 import org.chromium.components.dom_distiller.core.DomDistillerService;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtilsJni;
 import org.chromium.content_public.browser.NavigationHandle;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.url.GURL;
+
+import java.util.concurrent.TimeUnit;
 
 /** Unit tests for {@link ReaderModeBottomSheetManager}. */
 @RunWith(BaseRobolectricTestRunner.class)
@@ -63,8 +69,7 @@ public class ReaderModeBottomSheetManagerTest {
     @Mock private DomDistillerService mDomDistillerService;
     @Mock private ThemeColorProvider mThemeColorProvider;
 
-    @Captor private ArgumentCaptor<Callback<Tab>> mActivityTabObserverCaptor;
-    @Captor private ArgumentCaptor<EmptyTabObserver> mEmptyTabObserverCaptor;
+    @Captor private ArgumentCaptor<TabObserver> mTabObserverCaptor;
 
     @Captor
     private ArgumentCaptor<BrowserControlsStateProvider.Observer> mBrowserControlsObserverCaptor;
@@ -76,6 +81,7 @@ public class ReaderModeBottomSheetManagerTest {
 
     @Before
     public void setUp() {
+        ReaderModeBottomSheetManager.setBottomSheetPeekDelayForTesting(0);
         mActivity = Robolectric.buildActivity(Activity.class).create().get();
         mActivity.setTheme(R.style.Theme_BrowserUI_DayNight);
         mActivityTabProvider.setForTesting(mTab);
@@ -98,6 +104,7 @@ public class ReaderModeBottomSheetManagerTest {
 
     @After
     public void tearDown() {
+        ReaderModeBottomSheetManager.setBottomSheetPeekDelayForTesting(2000);
         if (mManager != null) {
             mManager.destroy();
             mManager = null;
@@ -112,7 +119,57 @@ public class ReaderModeBottomSheetManagerTest {
                         mActivityTabProvider,
                         mBrowserControlsVisibilityManager,
                         mThemeColorProvider);
-        verify(mTab).addObserver(mEmptyTabObserverCaptor.capture());
+        verify(mTab).addObserver(mTabObserverCaptor.capture());
+    }
+
+    @Test
+    @EnableFeatures(DomDistillerFeatures.READER_MODE_DELAY_BOTTOM_SHEET_PEEK)
+    public void testDelayBottomSheetPeekOnInitialLoad() {
+        ReaderModeBottomSheetManager.setBottomSheetPeekDelayForTesting(2000);
+        createManagerAndGetTabObserver();
+
+        // Should not show initially.
+        verify(mBottomSheetController, never()).requestShowContent(any(), anyBoolean());
+
+        // Fast forward by 1000ms, should still not show.
+        ShadowLooper.idleMainLooper(1000, TimeUnit.MILLISECONDS);
+        verify(mBottomSheetController, never()).requestShowContent(any(), anyBoolean());
+
+        // Fast forward by another 1000ms, should show.
+        ShadowLooper.idleMainLooper(1000, TimeUnit.MILLISECONDS);
+        verify(mBottomSheetController).requestShowContent(any(), anyBoolean());
+    }
+
+    @Test
+    @EnableFeatures(DomDistillerFeatures.READER_MODE_DELAY_BOTTOM_SHEET_PEEK)
+    public void testCancelDelayedPeekOnHide() {
+        ReaderModeBottomSheetManager.setBottomSheetPeekDelayForTesting(2000);
+        createManagerAndGetTabObserver();
+
+        // Trigger hide while the peek is pending.
+        mManager.destroy(); // destroy() calls hide() which cancels the task.
+        mManager = null;
+
+        // Fast forward past the delay, should not show.
+        ShadowLooper.idleMainLooper(2000, TimeUnit.MILLISECONDS);
+        verify(mBottomSheetController, never()).requestShowContent(any(), anyBoolean());
+    }
+
+    @Test
+    @EnableFeatures(DomDistillerFeatures.READER_MODE_DELAY_BOTTOM_SHEET_PEEK)
+    public void testCancelDelayedPeekOnNewNavigation() {
+        ReaderModeBottomSheetManager.setBottomSheetPeekDelayForTesting(2000);
+        createManagerAndGetTabObserver();
+
+        // Start a new navigation to a non-distilled page.
+        updateUrl("https://www.google.com");
+        mTabObserverCaptor
+                .getValue()
+                .onDidFinishNavigationInPrimaryMainFrame(mTab, mNavigationHandle);
+
+        // Fast forward past the delay, should not show.
+        ShadowLooper.idleMainLooper(2000, TimeUnit.MILLISECONDS);
+        verify(mBottomSheetController, never()).requestShowContent(any(), anyBoolean());
     }
 
     @Test
@@ -137,7 +194,7 @@ public class ReaderModeBottomSheetManagerTest {
         verify(mBottomSheetController, never()).requestShowContent(any(), anyBoolean());
 
         updateUrl(DISTILLED_URL);
-        mEmptyTabObserverCaptor
+        mTabObserverCaptor
                 .getValue()
                 .onDidFinishNavigationInPrimaryMainFrame(mTab, mNavigationHandle);
         verify(mBottomSheetController).requestShowContent(any(), anyBoolean());
@@ -149,7 +206,7 @@ public class ReaderModeBottomSheetManagerTest {
         verify(mBottomSheetController).requestShowContent(any(), anyBoolean());
 
         updateUrl("https://www.google.com");
-        mEmptyTabObserverCaptor
+        mTabObserverCaptor
                 .getValue()
                 .onDidFinishNavigationInPrimaryMainFrame(mTab, mNavigationHandle);
         verify(mBottomSheetController).hideContent(any(), anyBoolean());
@@ -162,7 +219,7 @@ public class ReaderModeBottomSheetManagerTest {
         verify(mBottomSheetController).requestShowContent(any(), anyBoolean());
 
         // When the tab is closing, the sheet should be hidden.
-        mEmptyTabObserverCaptor.getValue().onClosingStateChanged(mTab, true);
+        mTabObserverCaptor.getValue().onClosingStateChanged(mTab, true);
         verify(mBottomSheetController).hideContent(any(), anyBoolean());
     }
 
@@ -248,6 +305,59 @@ public class ReaderModeBottomSheetManagerTest {
         verify(mTab).removeObserver(any());
         verify(mBrowserControlsVisibilityManager).removeObserver(any());
         mManager = null;
+    }
+
+    @Test
+    public void testShowOnScroll_CurrentContentIsCobrowse_DoesNotShow() {
+        // Setup: Currently showing content is COBROWSE.
+        BottomSheetContent mockCobrowseContent = mock(BottomSheetContent.class);
+        when(mockCobrowseContent.getPriority())
+                .thenReturn(BottomSheetContent.ContentPriority.COBROWSE);
+        when(mBottomSheetController.getCurrentSheetContent()).thenReturn(mockCobrowseContent);
+
+        updateUrl(DISTILLED_URL);
+        createManagerAndGetTabObserver();
+
+        // The first show is on initial load (isShowOnScroll = false), which should still be
+        // attempted.
+        verify(mBottomSheetController, times(1)).requestShowContent(any(), anyBoolean());
+
+        // Now trigger scroll up (isShowOnScroll = true).
+        verify(mBrowserControlsVisibilityManager)
+                .addObserver(mBrowserControlsObserverCaptor.capture());
+        when(mBrowserControlsVisibilityManager.getBrowserControlHiddenRatio()).thenReturn(0f);
+        mBrowserControlsObserverCaptor
+                .getValue()
+                .onControlsOffsetChanged(0, 0, false, 0, 0, false, false, false);
+
+        // Since it's on scroll up and current content is COBROWSE, show() should return early.
+        // So requestShowContent should still have been called only once (the initial load one).
+        verify(mBottomSheetController, times(1)).requestShowContent(any(), anyBoolean());
+    }
+
+    @Test
+    public void testShowOnScroll_CurrentContentIsNotCobrowse_Shows() {
+        // Setup: Currently showing content is NOT COBROWSE (e.g. low priority).
+        BottomSheetContent mockOtherContent = mock(BottomSheetContent.class);
+        when(mockOtherContent.getPriority()).thenReturn(BottomSheetContent.ContentPriority.LOW);
+        when(mBottomSheetController.getCurrentSheetContent()).thenReturn(mockOtherContent);
+
+        updateUrl(DISTILLED_URL);
+        createManagerAndGetTabObserver();
+
+        // Initial load show (times = 1)
+        verify(mBottomSheetController, times(1)).requestShowContent(any(), anyBoolean());
+
+        // Trigger scroll up (isShowOnScroll = true).
+        verify(mBrowserControlsVisibilityManager)
+                .addObserver(mBrowserControlsObserverCaptor.capture());
+        when(mBrowserControlsVisibilityManager.getBrowserControlHiddenRatio()).thenReturn(0f);
+        mBrowserControlsObserverCaptor
+                .getValue()
+                .onControlsOffsetChanged(0, 0, false, 0, 0, false, false, false);
+
+        // Since it's not COBROWSE, requestShowContent should be called again (times = 2).
+        verify(mBottomSheetController, times(2)).requestShowContent(any(), anyBoolean());
     }
 
     private void updateUrl(String url) {

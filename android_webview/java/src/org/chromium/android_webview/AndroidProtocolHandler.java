@@ -9,7 +9,6 @@ import static org.chromium.components.embedder_support.application.ClassLoaderCo
 import android.content.Context;
 import android.content.res.AssetManager;
 import android.net.Uri;
-import android.util.Log;
 import android.util.TypedValue;
 
 import org.jni_zero.CalledByNative;
@@ -19,6 +18,7 @@ import org.jni_zero.NativeMethods;
 
 import org.chromium.android_webview.common.Lifetime;
 import org.chromium.base.ContextUtils;
+import org.chromium.base.Log;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.url.GURL;
@@ -48,7 +48,7 @@ public class AndroidProtocolHandler {
      * @return An InputStream to the Android resource.
      */
     @CalledByNative
-    public static @Nullable InputStream open(@Nullable GURL url) {
+    public static @Nullable InputStream open(@JniType("GURL") @Nullable GURL url) {
         Uri uri = verifyUrl(url);
         if (uri == null) {
             return null;
@@ -236,7 +236,7 @@ public class AndroidProtocolHandler {
      */
     @CalledByNative
     public static @JniType("std::string") @Nullable String getMimeType(
-            InputStream stream, @Nullable GURL url) {
+            InputStream stream, @JniType("GURL") @Nullable GURL url) {
         Uri uri = verifyUrl(url);
         if (uri == null) {
             return null;

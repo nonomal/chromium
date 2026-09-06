@@ -4,7 +4,6 @@
 
 #include "ios/chrome/browser/omnibox/eg_tests/fake_suggestions_database.h"
 
-#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
@@ -27,12 +26,12 @@ std::map<std::u16string, std::string> DeserializeJSON(const std::string& str) {
   DCHECK(root.has_value()) << root.error().ToString();
 
   // The root should be a list containing the suggestions.
-  const base::Value::List& list = root->GetList();
+  const base::ListValue& list = root->GetList();
   auto fake_suggestions = std::map<std::u16string, std::string>();
   for (size_t i = 0; i < list.size(); ++i) {
     // A suggest response should be in the list format with the search terms in
     // front.
-    const base::Value::List& response = list[i].GetList();
+    const base::ListValue& response = list[i].GetList();
     const std::string& search_terms = response.front().GetString();
     std::string serialized_response = "";
     JSONStringValueSerializer(&serialized_response).Serialize(response);
@@ -61,7 +60,7 @@ void FakeSuggestionsDatabase::LoadSuggestionsFromFile(
 
 bool FakeSuggestionsDatabase::HasFakeSuggestions(const GURL& url) const {
   std::u16string search_terms = ExtractSearchTerms(url);
-  return base::Contains(data_, search_terms);
+  return data_.contains(search_terms);
 }
 
 std::string FakeSuggestionsDatabase::GetFakeSuggestions(const GURL& url) const {
@@ -93,9 +92,47 @@ std::u16string FakeSuggestionsDatabase::ExtractSearchTerms(
   std::u16string search_terms;
   url::Parsed::ComponentType search_term_component;
   url::Component search_terms_position;
-  suggestion_url_ref.ExtractSearchTermsFromURL(
+  bool success = suggestion_url_ref.ExtractSearchTermsFromURL(
       url, &search_terms, template_url_service_->search_terms_data(),
       &search_term_component, &search_terms_position);
+
+  // TODO(crbug.com/509448052): If the FakeSuggestionsDatabase receives a
+  // request on the shortened suggest path (e.g., /s), it could clash with the
+  // statically parsed `path_prefix_` (which defaults to /search).
+  // This strict mismatch falsely breaks term extraction during tests. Because
+  // both URLs are the same, we intercept the mismatch here. Ideally, this
+  // mock framework shouldn't rely on the rigid TemplateURLRef for extraction,
+  // but swapping the path is a safe workaround.
+  //
+  // Note: This is strictly a test issue specific to the
+  // FakeSuggestionsDatabase. This mismatch does not occur in non-test
+  // environments because Chrome never extracts search terms from its own
+  // background suggest requests. Term extraction is strictly used on normal
+  // search result URLs.
+  if (!success) {
+    std::string_view path = url.path();
+    std::string new_path;
+    const std::string path_prefix = "/complete/";
+    const std::string suggest_path =
+        path_prefix + TemplateURLService::kSuggestPath;
+    const std::string short_suggest_path =
+        path_prefix + TemplateURLService::kShortSuggestPath;
+    if (path == suggest_path) {
+      new_path = short_suggest_path;
+    } else if (path == short_suggest_path) {
+      new_path = suggest_path;
+    }
+    // Only perform the fallback extraction if we actually generated a new path
+    if (!new_path.empty()) {
+      GURL::Replacements replacements;
+      replacements.SetPathStr(new_path);
+      suggestion_url_ref.ExtractSearchTermsFromURL(
+          url.ReplaceComponents(replacements), &search_terms,
+          template_url_service_->search_terms_data(), &search_term_component,
+          &search_terms_position);
+    }
+  }
+
   return search_terms;
 }
 

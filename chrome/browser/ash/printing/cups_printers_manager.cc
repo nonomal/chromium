@@ -4,18 +4,22 @@
 
 #include "chrome/browser/ash/printing/cups_printers_manager.h"
 
+#include <algorithm>
 #include <map>
 #include <optional>
 #include <utility>
 
 #include "ash/constants/ash_features.h"
+#include "ash/constants/ash_pref_names.h"
 #include "ash/public/cpp/network_config_service.h"
+#include "base/check_deref.h"
 #include "base/containers/fixed_flat_map.h"
 #include "base/containers/flat_set.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ref.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/observer_list.h"
 #include "base/scoped_observation.h"
@@ -47,7 +51,6 @@
 #include "chrome/browser/ash/scanning/zeroconf_scanner_detector.h"
 #include "chrome/browser/printing/print_preview_sticky_settings.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/pref_names.h"
 #include "chromeos/ash/components/dbus/dlcservice/dlcservice_client.h"
 #include "chromeos/ash/components/dbus/printscanmgr/printscanmgr_client.h"
 #include "chromeos/ash/components/settings/cros_settings.h"
@@ -142,6 +145,7 @@ class CupsPrintersManagerImpl
   enum DetectorIds { kUsbDetector, kZeroconfDetector, kPrintServerDetector };
 
   CupsPrintersManagerImpl(
+      const ApplicationLocaleStorage* application_locale_storage,
       SyncedPrintersManager* synced_printers_manager,
       std::unique_ptr<PrinterDetector> usb_detector,
       std::unique_ptr<PrinterDetector> zeroconf_detector,
@@ -153,7 +157,8 @@ class CupsPrintersManagerImpl
       std::unique_ptr<EnterprisePrintersProvider> enterprise_printers_provider,
       PrinterEventTracker* event_tracker,
       PrefService* pref_service)
-      : synced_printers_manager_(synced_printers_manager),
+      : application_locale_storage_(CHECK_DEREF(application_locale_storage)),
+        synced_printers_manager_(synced_printers_manager),
         usb_detector_(std::move(usb_detector)),
         zeroconf_detector_(std::move(zeroconf_detector)),
         ppd_provider_(std::move(ppd_provider)),
@@ -213,7 +218,7 @@ class CupsPrintersManagerImpl
 
     print_servers_manager_->AddObserver(this);
 
-    user_printers_allowed_.Init(prefs::kUserPrintersAllowed, pref_service);
+    user_printers_allowed_.Init(ash::prefs::kUserPrintersAllowed, pref_service);
   }
 
   ~CupsPrintersManagerImpl() override = default;
@@ -426,7 +431,8 @@ class CupsPrintersManagerImpl
     // start/restart the setup process.
     if (printers_being_setup_[id].fingerprint != fingerprint) {
       printers_being_setup_[id].configurer =
-          PrinterConfigurer::Create(ppd_provider_, dlc_service_client_);
+          PrinterConfigurer::Create(&application_locale_storage_.get(),
+                                    ppd_provider_, dlc_service_client_);
       printers_being_setup_[id].fingerprint = fingerprint;
       printers_being_setup_[id].configurer->SetUpPrinterInCups(
           printer, base::BindOnce(
@@ -449,9 +455,10 @@ class CupsPrintersManagerImpl
 
     // If the printer is being installed now, stop the process.
     std::vector<PrinterSetupCallback> callbacks;
-    if (printers_being_setup_.contains(printer_id)) {
-      callbacks = std::move(printers_being_setup_[printer_id].callbacks);
-      printers_being_setup_.erase(printer_id);
+    if (auto it = printers_being_setup_.find(printer_id);
+        it != printers_being_setup_.end()) {
+      callbacks = std::move(it->second.callbacks);
+      printers_being_setup_.erase(it);
     }
     for (auto& callback : callbacks) {
       std::move(callback).Run(PrinterSetupResult::kPrinterRemoved);
@@ -534,7 +541,7 @@ class CupsPrintersManagerImpl
       // Query every printer that is either saved or recently used.
       if (printers_.IsPrinterInClass(chromeos::PrinterClass::kSaved,
                                      printer.id()) ||
-          base::Contains(recently_used_printers, printer.id())) {
+          std::ranges::contains(recently_used_printers, printer.id())) {
         FetchPrinterStatus(printer.id(),
                            /*PrinterStatusCallback=*/base::DoNothing());
         ++printers_queried;
@@ -860,7 +867,7 @@ class CupsPrintersManagerImpl
   }
 
   // TODO(baileyberro): Remove the need for this function by pushing additional
-  // logic into PrintersMap. https://crbug.com/956172
+  // logic into PrintersMap. https://crbug.com/216048433
   void ResetNearbyPrintersLists() {
     printers_.Clear(PrinterClass::kAutomatic);
     printers_.Clear(PrinterClass::kDiscovered);
@@ -923,7 +930,8 @@ class CupsPrintersManagerImpl
   void MaybeRecordInstallation(
       const Printer& printer,
       bool is_automatic_installation,
-      const std::optional<chromeos::IppPrinterInfo>& ipp_printer_info) {
+      const std::optional<chromeos::IppPrinterInfo>& ipp_printer_info,
+      const std::string& ppd_filename) {
     DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_);
     if (synced_printers_manager_->GetPrinter(printer.id())) {
       // It's just an update, not a new installation, so don't record an event.
@@ -953,11 +961,12 @@ class CupsPrintersManagerImpl
                      << " for installation event logging";
         return;
       }
-      event_tracker_->RecordUsbPrinterInstalled(
-          ppd_info->ppd_reference, ppd_info->ppd_search_data, mode);
+      event_tracker_->RecordUsbPrinterInstalled(ppd_info->ppd_reference,
+                                                ppd_info->ppd_search_data, mode,
+                                                ppd_filename);
     } else {
-      event_tracker_->RecordIppPrinterInstalled(printer, mode,
-                                                ipp_printer_info);
+      event_tracker_->RecordIppPrinterInstalled(printer, mode, ipp_printer_info,
+                                                ppd_filename);
     }
   }
 
@@ -1062,12 +1071,12 @@ class CupsPrintersManagerImpl
                                const Printer& printer) {
     printers_.Insert(printer_class, printer);
 
+    bool inserted = detected_printers_seen_.insert(printer.id()).second;
     // If we've seen this printer before, don't trigger a new detection event.
-    if (detected_printers_seen_.contains(printer.id())) {
+    if (!inserted) {
       return;
     }
 
-    detected_printers_seen_.insert(printer.id());
     NotifyLocalPrinterObservers();
   }
 
@@ -1181,6 +1190,8 @@ class CupsPrintersManagerImpl
 
     if (result == PrinterSetupResult::kSuccess) {
       installed_printer_fingerprints_[printer_id] = it->second.fingerprint;
+      std::string ppd_filename = it->second.configurer->GetLastPpdBasename();
+
       // TODO: b/295243026 - Solve this issue during metrics clean-up.
       // We check this condition before calling MaybeRecordInstallation() to
       // make it backward compatible with the state before crrev.com/c/4763464.
@@ -1192,7 +1203,7 @@ class CupsPrintersManagerImpl
         std::optional<chromeos::Printer> printer = printers_.Get(printer_id);
         if (printer) {
           MaybeRecordInstallation(*printer, is_automatic_installation,
-                                  ipp_printer_info);
+                                  ipp_printer_info, ppd_filename);
         }
       }
     }
@@ -1220,6 +1231,8 @@ class CupsPrintersManagerImpl
   }
 
   SEQUENCE_CHECKER(sequence_);
+
+  const raw_ref<const ApplicationLocaleStorage> application_locale_storage_;
 
   // Source lists for detected printers.
   std::vector<PrinterDetector::DetectedPrinter> usb_detections_;
@@ -1318,14 +1331,17 @@ class CupsPrintersManagerImpl
 
 // static
 std::unique_ptr<CupsPrintersManager> CupsPrintersManager::Create(
+    PrefService& local_state,
+    const ApplicationLocaleStorage* application_locale_storage,
     Profile* profile) {
   return std::make_unique<CupsPrintersManagerImpl>(
+      application_locale_storage,
       SyncedPrintersManagerFactory::GetInstance()->GetForBrowserContext(
           profile),
       UsbPrinterDetector::Create(), ZeroconfPrinterDetector::Create(),
       CreatePpdProvider(profile), DlcserviceClient::Get(),
       UsbPrinterNotificationController::Create(profile),
-      PrintServersManager::Create(profile),
+      PrintServersManager::Create(local_state, profile),
       EnterprisePrintersProvider::Create(CrosSettings::Get(), profile),
       PrinterEventTrackerFactory::GetInstance()->GetForBrowserContext(profile),
       profile->GetPrefs());
@@ -1333,6 +1349,7 @@ std::unique_ptr<CupsPrintersManager> CupsPrintersManager::Create(
 
 // static
 std::unique_ptr<CupsPrintersManager> CupsPrintersManager::CreateForTesting(
+    const ApplicationLocaleStorage* application_locale_storage,
     SyncedPrintersManager* synced_printers_manager,
     std::unique_ptr<PrinterDetector> usb_detector,
     std::unique_ptr<PrinterDetector> zeroconf_detector,
@@ -1345,8 +1362,9 @@ std::unique_ptr<CupsPrintersManager> CupsPrintersManager::CreateForTesting(
     PrinterEventTracker* event_tracker,
     PrefService* pref_service) {
   return std::make_unique<CupsPrintersManagerImpl>(
-      synced_printers_manager, std::move(usb_detector),
-      std::move(zeroconf_detector), std::move(ppd_provider), dlc_service_client,
+      application_locale_storage, synced_printers_manager,
+      std::move(usb_detector), std::move(zeroconf_detector),
+      std::move(ppd_provider), dlc_service_client,
       std::move(usb_notification_controller), std::move(print_servers_manager),
       std::move(enterprise_printers_provider), event_tracker, pref_service);
 }
@@ -1355,10 +1373,10 @@ std::unique_ptr<CupsPrintersManager> CupsPrintersManager::CreateForTesting(
 void CupsPrintersManager::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(
-      prefs::kUserPrintersAllowed, true,
+      ash::prefs::kUserPrintersAllowed, true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
-  registry->RegisterBooleanPref(prefs::kPrintingSendUsernameAndFilenameEnabled,
-                                false);
+  registry->RegisterBooleanPref(
+      ash::prefs::kPrintingSendUsernameAndFilenameEnabled, false);
   PrintServersProvider::RegisterProfilePrefs(registry);
 }
 

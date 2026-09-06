@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "build/build_config.h"
-#include "chrome/browser/apps/app_service/app_launch_params.h"
+#include "components/services/app_service/public/cpp/app_launch_params.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "components/services/app_service/public/cpp/app_types.h"
 #include "components/services/app_service/public/cpp/intent.h"
@@ -23,7 +23,7 @@
 #include "chromeos/ash/experiences/arc/mojom/app.mojom-forward.h"
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
-class Browser;
+class BrowserWindowInterface;
 class Profile;
 
 namespace base {
@@ -45,7 +45,7 @@ std::vector<base::FilePath> GetLaunchFilesFromCommandLine(
 
 // When a command line launch has an unknown app id, we open a browser with only
 // the new tab page.
-Browser* CreateBrowserWithNewTabPage(Profile* profile);
+BrowserWindowInterface* CreateBrowserWithNewTabPage(Profile* profile);
 
 // Helper to create AppLaunchParams using event flags that allows user to
 // override the user-configured container using modifier keys. |display_id| is

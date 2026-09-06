@@ -13,9 +13,12 @@
 
 extern NSString* const kAimInputItemTopBackgroundColor;
 extern NSString* const kAimComposeboxButtonBackgroundColor;
+extern NSString* const kAppBarColor;
+extern NSString* const kAppBarIncognitoColor;
 extern NSString* const kBackgroundColor;
 extern NSString* const kCloseButtonColor;
 extern NSString* const kDisabledTintColor;
+extern NSString* const kDestinationHighlightColor;
 // Background color used in the rounded squares behind favicons.
 extern NSString* const kFaviconBackgroundColor;
 // Primary grouped background color.
@@ -31,6 +34,22 @@ extern NSString* const kMDCInkColor;
 extern NSString* const kMDCSecondaryInkColor;
 // Color used to tint placeholder images and icons.
 extern NSString* const kPlaceholderImageTintColor;
+// New Tab Page background color.
+extern NSString* const kNewTabPageBackgroundColor;
+// Surface container low background color.
+extern NSString* const kSurfaceContainerLowColor;
+// Color used for quick action buttons on the NTP.
+extern NSString* const kNTPQuickActionChipColor;
+// Background color for NTP Redesign.
+extern NSString* const kNTPRedesignBackgroundColor;
+// Customization menu button icon color for NTP Redesign.
+extern NSString* const kNTPRedesignCustomizationMenuButtonIconColor;
+// Fakebox background color for NTP Redesign.
+extern NSString* const kNTPRedesignFakeboxBackgroundColor;
+// Tile background color for NTP Redesign.
+extern NSString* const kNTPRedesignTileBackgroundColor;
+// Background color for NTP module and feed cards in NTP Redesign.
+extern NSString* const kNTPCardBackgroundColor;
 // Primary background color.
 extern NSString* const kPrimaryBackgroundColor;
 extern NSString* const kInvertedPrimaryBackgroundColor;
@@ -122,6 +141,7 @@ extern NSString* const kBlue900Color;
 // Static blue palette (same color for light and dark modes).
 extern NSString* const kStaticBlueColor;
 extern NSString* const kStaticBlue400Color;
+extern NSString* const kStaticBlue600Color;
 
 // Standard green color.
 extern NSString* const kGreenColor;
@@ -188,6 +208,7 @@ extern NSString* const kStaticGrey50Color;
 extern NSString* const kStaticGrey300Color;
 extern NSString* const kStaticGrey400Color;
 extern NSString* const kStaticGrey600Color;
+extern NSString* const kStaticGrey700Color;
 extern NSString* const kStaticGrey900Color;
 
 // **********************

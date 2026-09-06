@@ -12,7 +12,8 @@
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -41,7 +42,7 @@ namespace OnMessage = api::test::OnMessage;
 
 namespace {
 
-#if !BUILDFLAG(IS_WIN)  // flaky http://crbug.com/530722
+#if !BUILDFLAG(IS_WIN)  // flaky http://crbug.com/40435404
 
 // Tests running extension APIs on WebUI.
 class ExtensionWebUITest : public ExtensionApiTest {
@@ -62,7 +63,6 @@ class ExtensionWebUITest : public ExtensionApiTest {
       if (!base::PathExists(path))
         return testing::AssertionFailure() << "Couldn't find " << path.value();
       base::ReadFileToString(path, &script);
-      script = "(function(){'use strict';" + script + "}());";
     }
 
     // Run the test.
@@ -330,7 +330,7 @@ IN_PROC_BROWSER_TEST_P(ExtensionWebUIEmbeddedOptionsTest,
                               "document.getElementById('link').click();"));
   content::WebContents* new_contents = new_contents_observer.GetWebContents();
   EXPECT_NE(TabStripModel::kNoTab,
-            browser()->tab_strip_model()->GetIndexOfWebContents(new_contents));
+            browser()->GetTabStripModel()->GetIndexOfWebContents(new_contents));
 }
 
 IN_PROC_BROWSER_TEST_P(ExtensionWebUIEmbeddedOptionsTest,
@@ -352,7 +352,7 @@ IN_PROC_BROWSER_TEST_P(ExtensionWebUIEmbeddedOptionsTest,
   ASSERT_TRUE(onclose_listener.WaitUntilSatisfied());
 }
 
-// Regression test for crbug.com/414526.
+// Regression test for crbug.com/40384641.
 //
 // Same setup as CanEmbedExtensionOptions but disable the extension before
 // embedding.
@@ -426,7 +426,7 @@ class ExtensionWebUIListenersTest : public ExtensionWebUITest {
   }
 };
 
-// Tests crbug.com/1253745 where adding and removing listeners in a WebUI frame
+// Tests crbug.com/40199285 where adding and removing listeners in a WebUI frame
 // causes all listeners to be removed.
 IN_PROC_BROWSER_TEST_F(ExtensionWebUIListenersTest, MultipleURLListeners) {
   // Use the same URL both for the parent and child frames for convenience.

@@ -28,12 +28,12 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
 import org.chromium.base.Token;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableNullableObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.collaboration.messaging.MessagingBackendServiceFactory;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
-import org.chromium.chrome.browser.tabmodel.TabGroupModelFilter;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.components.collaboration.messaging.MessageAttribution;
 import org.chromium.components.collaboration.messaging.MessagingBackendService;
@@ -52,21 +52,18 @@ public class TabGroupLabellerUnitTest {
     @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
 
     private static final Token GROUP_ID1 = new Token(1L, 11L);
-    private static final int ROOT_ID1 = 0;
-    private static final int TAB_ID0 = 0;
     private static final int TAB_ID1 = 1;
 
     @Mock private Profile mProfile;
     @Mock private TabListNotificationHandler mTabListNotificationHandler;
     @Mock private MessagingBackendService mMessagingBackendService;
-    @Mock private TabGroupModelFilter mTabGroupModelFilter;
     @Mock private TabModel mTabModel;
 
     @Captor private ArgumentCaptor<PersistentMessageObserver> mPersistentMessageObserverCaptor;
     @Captor private ArgumentCaptor<Map<Integer, TabCardLabelData>> mLabelDataCaptor;
 
-    private final ObservableSupplierImpl<TabGroupModelFilter> mTabGroupModelFilterSupplier =
-            new ObservableSupplierImpl<>();
+    private final SettableNullableObservableSupplier<TabModel> mTabModelSupplier =
+            ObservableSuppliers.createNullable();
 
     private Context mContext;
     private TabGroupLabeller mTabGroupLabeller;
@@ -75,12 +72,10 @@ public class TabGroupLabellerUnitTest {
     public void setUp() {
         MessagingBackendServiceFactory.setForTesting(mMessagingBackendService);
         mContext = ApplicationProvider.getApplicationContext();
-        mTabGroupModelFilterSupplier.set(mTabGroupModelFilter);
-        when(mTabGroupModelFilter.getTabModel()).thenReturn(mTabModel);
-        when(mTabGroupModelFilter.getGroupLastShownTabId(GROUP_ID1)).thenReturn(TAB_ID1);
+        mTabModelSupplier.set(mTabModel);
+        when(mTabModel.getGroupLastShownTabId(GROUP_ID1)).thenReturn(TAB_ID1);
         mTabGroupLabeller =
-                new TabGroupLabeller(
-                        mProfile, mTabListNotificationHandler, mTabGroupModelFilterSupplier);
+                new TabGroupLabeller(mProfile, mTabListNotificationHandler, mTabModelSupplier);
     }
 
     private PersistentMessage makeStandardMessage() {
@@ -128,7 +123,7 @@ public class TabGroupLabellerUnitTest {
 
     @Test
     public void testShowAll_WrongTabModel() {
-        when(mTabGroupModelFilter.getGroupLastShownTabId(any())).thenReturn(Tab.INVALID_TAB_ID);
+        when(mTabModel.getGroupLastShownTabId(any())).thenReturn(Tab.INVALID_TAB_ID);
         List<PersistentMessage> messageList = List.of(makeStandardMessage());
         when(mMessagingBackendService.getMessages(anyInt())).thenReturn(messageList);
 
@@ -170,7 +165,7 @@ public class TabGroupLabellerUnitTest {
 
     @Test
     public void testShowAll_NullFilter() {
-        mTabGroupModelFilterSupplier.set(null);
+        mTabModelSupplier.set(null);
         List<PersistentMessage> messageList = List.of(makeStandardMessage());
         when(mMessagingBackendService.getMessages(anyInt())).thenReturn(messageList);
 

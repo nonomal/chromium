@@ -7,14 +7,16 @@
 
 #include <jni.h>
 
+#include <cstdint>
+#include <string>
+#include <vector>
+
 #include "base/android/scoped_java_ref.h"
 #include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/profiles/profile.h"
-#include "components/sync_sessions/open_tabs_ui_delegate.h"
-#include "content/public/browser/web_contents.h"
 
-using base::android::ScopedJavaLocalRef;
+class TabAndroid;
 
 namespace content {
 class WebContents;
@@ -31,43 +33,38 @@ class ForeignSessionHelper {
 
   ~ForeignSessionHelper();
 
-  void Destroy(JNIEnv* env);
-  jboolean IsTabSyncEnabled(JNIEnv* env);
-  void TriggerSessionSync(JNIEnv* env);
+  void Destroy();
+  bool IsTabSyncEnabled();
+  void TriggerSessionSync();
   void SetOnForeignSessionCallback(
       JNIEnv* env,
       const base::android::JavaRef<jobject>& callback);
-  jboolean GetForeignSessions(JNIEnv* env,
-                              const base::android::JavaRef<jobject>& result);
-  jboolean GetMobileAndTabletForeignSessions(
+  bool GetForeignSessions(JNIEnv* env,
+                          const base::android::JavaRef<jobject>& result);
+  bool GetMobileAndTabletForeignSessions(
       JNIEnv* env,
       const base::android::JavaRef<jobject>& result);
-  jboolean OpenForeignSessionTab(
-      JNIEnv* env,
-      const base::android::JavaRef<jobject>& j_tab,
-      const base::android::JavaRef<jstring>& session_tag,
-      jint tab_id,
-      jint disposition);
-  void DeleteForeignSession(JNIEnv* env,
-                            const base::android::JavaRef<jstring>& session_tag);
-  void SetInvalidationsForSessionsEnabled(JNIEnv* env, jboolean enabled);
-  jint OpenForeignSessionTabsAsBackgroundTabs(
-      JNIEnv* env,
-      const base::android::JavaRef<jobject>& j_tab,
-      const base::android::JavaRef<jintArray>& j_session_tab_ids,
-      const base::android::JavaRef<jstring>& session_tag);
+  bool OpenForeignSessionTab(TabAndroid* tab_android,
+                             const std::string& session_tag,
+                             int32_t tab_id,
+                             int32_t disposition);
+  void DeleteForeignSession(const std::string& session_tag);
+  void SetInvalidationsForSessionsEnabled(bool enabled);
+  int32_t OpenForeignSessionTabsAsBackgroundTabs(
+      TabAndroid* tab_android,
+      const std::vector<int32_t>& session_tab_ids,
+      const std::string& session_tag);
 
  private:
   // Fires |callback_| if it is not null.
   void FireForeignSessionCallback();
   // Returns the WebContents of the new foreground tab or nullptr if the
   // operation failed.
-  content::WebContents* RestoreTabWithRenderer(
-      const base::android::JavaRef<jstring>& session_tag,
-      const base::android::JavaRef<jobject>& j_tab,
-      int session_tab_id);
+  content::WebContents* RestoreTabWithRenderer(const std::string& session_tag,
+                                               TabAndroid* tab_android,
+                                               int session_tab_id);
   // Returns whether a background tab with no renderer was restored.
-  bool RestoreTabNoRenderer(const base::android::JavaRef<jstring>& session_tag,
+  bool RestoreTabNoRenderer(const std::string& session_tag,
                             int session_tab_id,
                             content::WebContents* web_contents);
 

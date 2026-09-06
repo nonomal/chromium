@@ -40,12 +40,12 @@ test("vk_tests") {
     ":android",
     "//base",
     "//base/test:test_support",
-    "//components/viz/common:vulkan_context_provider",
+    "//gpu/command_buffer/service:gles2",
     "//testing/gtest",
     "//ui/gfx",
   ]
   sources = [
     "run_all_unittests.cc",
-    "vulkan_android_unittests.cc",
+    "vulkan_android_unittest.cc",
   ]
 }

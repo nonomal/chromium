@@ -6,13 +6,13 @@
 
 #include <string_view>
 
-#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_view_util.h"
 #include "build/build_config.h"
 #include "third_party/boringssl/src/pki/input.h"
 #if defined(PLATFORM_USES_CHROMIUM_EV_METADATA)
+#include "crypto/openssl_util.h"
 #include "third_party/boringssl/src/include/openssl/bytestring.h"
 #include "third_party/boringssl/src/include/openssl/mem.h"
 #endif
@@ -53,16 +53,12 @@ EVRootCAMetadata* EVRootCAMetadata::GetInstance() {
 namespace {
 
 std::string OIDStringToDER(std::string_view policy) {
-  uint8_t* der;
-  size_t len;
   bssl::ScopedCBB cbb;
   if (!CBB_init(cbb.get(), 32) ||
-      !CBB_add_asn1_oid_from_text(cbb.get(), policy.data(), policy.size()) ||
-      !CBB_finish(cbb.get(), &der, &len)) {
+      !CBB_add_asn1_oid_from_text(cbb.get(), policy.data(), policy.size())) {
     return std::string();
   }
-  bssl::UniquePtr<uint8_t> delete_der(der);
-  return std::string(reinterpret_cast<const char*>(der), len);
+  return std::string(base::as_string_view(crypto::CbbAsSpan(cbb.get())));
 }
 
 }  // namespace

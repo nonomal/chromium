@@ -34,6 +34,7 @@
 #include <concepts>
 
 #include "base/check_op.h"
+#include "base/memory/raw_ref.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/svg/properties/svg_property_info.h"
@@ -71,7 +72,7 @@ class SVGAnimatedPropertyBase : public GarbageCollectedMixin {
 
   SVGElement* ContextElement() const { return context_element_.Get(); }
 
-  const QualifiedName& AttributeName() const { return attribute_name_; }
+  const QualifiedName& AttributeName() const { return *attribute_name_; }
 
   CSSPropertyID CssPropertyId() const {
     return static_cast<CSSPropertyID>(css_property_id_);
@@ -104,10 +105,11 @@ class SVGAnimatedPropertyBase : public GarbageCollectedMixin {
   static constexpr int kInitialValueStorageBits = 3;
   unsigned InitialValueStorage() const { return initial_value_storage_; }
 
-  template <typename Property, typename Validator>
+  template <typename Property, typename Validator, typename... Args>
   SVGParsingError UpdateBaseValueFromAttribute(Property& base_value,
                                                const String& value,
-                                               Validator&& validator);
+                                               Validator&& validator,
+                                               Args&&... args);
 
  private:
   enum ContentAttributeState : unsigned {
@@ -143,7 +145,8 @@ class SVGAnimatedPropertyBase : public GarbageCollectedMixin {
   unsigned content_attribute_state_ : 2;
 
   Member<SVGElement> context_element_;
-  const QualifiedName& attribute_name_;
+  const raw_ref<const QualifiedName, UnprotectedInRelease | DanglingUntriaged>
+      attribute_name_;
 };
 
 template <typename T>
@@ -152,11 +155,12 @@ struct ThreadingTrait<T> {
   static constexpr ThreadAffinity kAffinity = kMainThreadOnly;
 };
 
-template <typename Property, class Validator>
+template <typename Property, class Validator, typename... Args>
 SVGParsingError SVGAnimatedPropertyBase::UpdateBaseValueFromAttribute(
     Property& base_value,
     const String& value,
-    Validator&& validator) {
+    Validator&& validator,
+    Args&&... args) {
   static_assert(Property::kInitialValueBits <= kInitialValueStorageBits,
                 "enough bits for the initial value");
 
@@ -166,7 +170,8 @@ SVGParsingError SVGAnimatedPropertyBase::UpdateBaseValueFromAttribute(
   if constexpr (Property::kInitialValueBits > 0) {
     SVGParsingError parse_status = SVGParseStatus::kNoError;
     if (!is_attr_removal) {
-      parse_status = base_value.SetValueAsString(value);
+      parse_status =
+          base_value.SetValueAsString(value, std::forward<Args>(args)...);
       if (parse_status == SVGParseStatus::kNoError) [[likely]] {
         parse_status = validator(base_value);
       }
@@ -176,7 +181,7 @@ SVGParsingError SVGAnimatedPropertyBase::UpdateBaseValueFromAttribute(
     }
     return parse_status;
   } else {
-    return base_value.SetValueAsString(value);
+    return base_value.SetValueAsString(value, std::forward<Args>(args)...);
   }
 }
 

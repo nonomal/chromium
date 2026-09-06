@@ -124,8 +124,10 @@ class URLPatternSet {
   // Returns true if any pattern in this set encompasses `pattern`.
   bool ContainsPattern(const URLPattern& pattern) const;
 
-  // Test if the extent contains a URL.
+  // Test if the extent contains a URL. If `case_sensitive` is false, path
+  // matching is done case-insensitively using Unicode case folding.
   bool MatchesURL(const GURL& url) const;
+  bool MatchesURL(const GURL& url, bool case_sensitive) const;
 
   // Test if the extent matches all URLs (for example, <all_urls>).
   bool MatchesAllURLs() const;
@@ -140,8 +142,8 @@ class URLPatternSet {
   bool OverlapsWith(const URLPatternSet& other) const;
 
   // Converts to and from Value for serialization to preferences.
-  base::Value::List ToValue() const;
-  bool Populate(const base::Value::List& value,
+  base::ListValue ToValue() const;
+  bool Populate(const base::ListValue& value,
                 int valid_schemes,
                 bool allow_file_access,
                 std::string* error);

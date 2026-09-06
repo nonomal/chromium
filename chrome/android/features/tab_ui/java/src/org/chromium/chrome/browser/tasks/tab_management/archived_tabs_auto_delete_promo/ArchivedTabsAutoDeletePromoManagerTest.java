@@ -22,9 +22,9 @@ import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
-import org.robolectric.annotation.Config;
 
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabArchiveSettings;
@@ -36,7 +36,6 @@ import org.chromium.url.JUnitTestGURLs;
 
 /** Unit tests for {@link ArchivedTabsAutoDeletePromoManager}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
 public class ArchivedTabsAutoDeletePromoManagerTest {
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
     @Mock private BottomSheetController mMockBottomSheetController;
@@ -45,12 +44,12 @@ public class ArchivedTabsAutoDeletePromoManagerTest {
     @Mock private Tab mMockNtpTab;
     @Mock private Tab mMockOtherTab;
     @Captor private ArgumentCaptor<TabModelObserver> mTabModelObserverCaptor;
-    private ObservableSupplierImpl<Integer> mArchivedTabCountSupplier;
+    private SettableNonNullObservableSupplier<Integer> mArchivedTabCountSupplier;
     private ArchivedTabsAutoDeletePromoManager mManager;
 
     @Before
     public void setUp() {
-        mArchivedTabCountSupplier = new ObservableSupplierImpl<>();
+        mArchivedTabCountSupplier = ObservableSuppliers.createNonNull(0);
 
         when(mMockNtpTab.isIncognitoBranded()).thenReturn(false);
         when(mMockNtpTab.getUrl()).thenReturn(JUnitTestGURLs.NTP_URL);

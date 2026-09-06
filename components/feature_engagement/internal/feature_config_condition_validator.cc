@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/notreached.h"
 #include "components/feature_engagement/internal/availability_model.h"
@@ -124,7 +123,7 @@ void FeatureConfigConditionValidator::NotifyIsShowing(
       DCHECK(config.session_rate_impact.affected_features.has_value());
       for (const std::string& feature_name :
            config.session_rate_impact.affected_features.value()) {
-        DCHECK(base::Contains(all_feature_names, feature_name));
+        DCHECK(std::ranges::contains(all_feature_names, feature_name));
         ++times_shown_for_feature_[feature_name];
       }
       break;
@@ -202,6 +201,12 @@ bool FeatureConfigConditionValidator::IsBlocked(
     const base::Feature& feature,
     const FeatureConfig& config,
     const Configuration* configuration) const {
+  // A feature is always blocked from triggering if it is already showing,
+  // regardless of its BlockedBy or Blocking configuration.
+  if (currently_showing_features_.contains(feature.name)) {
+    return true;
+  }
+
   switch (config.blocked_by.type) {
     case BlockedBy::Type::NONE:
       return false;
@@ -223,7 +228,7 @@ bool FeatureConfigConditionValidator::IsBlocked(
     case BlockedBy::Type::EXPLICIT:
       for (const std::string& feature_name :
            *config.blocked_by.affected_features) {
-        if (base::Contains(currently_showing_features_, feature_name)) {
+        if (currently_showing_features_.contains(feature_name)) {
           return true;
         }
       }

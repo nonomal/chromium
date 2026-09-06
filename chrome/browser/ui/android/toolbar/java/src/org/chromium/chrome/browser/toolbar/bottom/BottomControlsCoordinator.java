@@ -5,25 +5,31 @@
 package org.chromium.chrome.browser.toolbar.bottom;
 
 import android.annotation.SuppressLint;
+import android.content.res.Resources;
 import android.view.View;
 import android.view.ViewGroup;
 
+import androidx.annotation.DimenRes;
+
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.base.supplier.NonNullObservableSupplier;
 import org.chromium.base.supplier.NullableObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.base.supplier.OneshotSupplierImpl;
-import org.chromium.base.supplier.SettableObservableSupplier;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.supplier.SupplierUtils;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.cc.input.BrowserControlsState;
 import org.chromium.chrome.browser.browser_controls.BottomControlsStacker;
+import org.chromium.chrome.browser.browser_controls.BottomControlsStacker.LayerType;
 import org.chromium.chrome.browser.browser_controls.BrowserStateBrowserControlsVisibilityDelegate;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.layouts.LayoutManager;
 import org.chromium.chrome.browser.layouts.LayoutStateProvider;
+import org.chromium.chrome.browser.overlay_panel.PanelState;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObscuringHandler;
 import org.chromium.chrome.browser.toolbar.R;
 import org.chromium.chrome.browser.toolbar.bottom.BottomControlsViewBinder.ViewHolder;
@@ -37,7 +43,6 @@ import org.chromium.ui.resources.ResourceManager;
 import org.chromium.ui.resources.dynamics.ViewResourceAdapter;
 import org.chromium.ui.widget.Toast;
 
-import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -66,7 +71,7 @@ public class BottomControlsCoordinator implements BackPressHandler {
 
     // TODO(agrieve): Rather than use two ObservableSuppliers here, create a
     // ObservableSupplier.mirror(otherSupplier) or similar.
-    private final SettableObservableSupplier<BottomControlsContentDelegate>
+    private final SettableMonotonicObservableSupplier<BottomControlsContentDelegate>
             mContentDelegateWrapper = ObservableSuppliers.createMonotonic();
     private final NonNullObservableSupplier<Boolean> mHandleBackPressChangedSupplier =
             mContentDelegateWrapper.createTransitiveNonNull(
@@ -74,6 +79,7 @@ public class BottomControlsCoordinator implements BackPressHandler {
 
     private final ScrollingBottomViewResourceFrameLayout mRootFrameLayout;
     private final ScrollingBottomViewSceneLayer mSceneLayer;
+    private final ResourceManager mResourceManager;
 
     private boolean mIsDestroyed;
 
@@ -87,6 +93,7 @@ public class BottomControlsCoordinator implements BackPressHandler {
      * @param fullscreenManager A {@link FullscreenManager} to listen for fullscreen changes.
      * @param edgeToEdgeControllerSupplier A supplier to control drawing to the edge of the screen.
      * @param root The parent {@link ViewGroup} for the bottom controls.
+     * @param layerType The layer type of the bottom controls.
      * @param contentDelegateSupplier Supplier of delegate for bottom controls UI operations.
      * @param tabObscuringHandler Delegate object handling obscuring views.
      * @param overlayPanelVisibilitySupplier Notifies overlay panel visibility event.
@@ -102,37 +109,42 @@ public class BottomControlsCoordinator implements BackPressHandler {
             BottomControlsStacker controlsStacker,
             BrowserStateBrowserControlsVisibilityDelegate browserControlsVisibilityDelegate,
             FullscreenManager fullscreenManager,
-            ObservableSupplier<EdgeToEdgeController> edgeToEdgeControllerSupplier,
+            MonotonicObservableSupplier<EdgeToEdgeController> edgeToEdgeControllerSupplier,
+            NullableObservableSupplier<Tab> tabSupplier,
             ScrollingBottomViewResourceFrameLayout root,
+            @LayerType int layerType,
+            @DimenRes int heightResId,
             OneshotSupplier<BottomControlsContentDelegate> contentDelegateSupplier,
             TabObscuringHandler tabObscuringHandler,
-            ObservableSupplier<Boolean> overlayPanelVisibilitySupplier,
+            NonNullObservableSupplier<@PanelState Integer> overlayPanelStateSupplier,
             NullableObservableSupplier<@BrowserControlsState Integer> constraintsSupplier,
             Supplier<Boolean> readAloudRestoringSupplier) {
         mRootFrameLayout = root;
+        mResourceManager = resourceManager;
         root.setConstraintsSupplier(constraintsSupplier);
         PropertyModel model = new PropertyModel(BottomControlsProperties.ALL_KEYS);
 
         mSceneLayer = new ScrollingBottomViewSceneLayer(root, root.getTopShadowHeight());
         PropertyModelChangeProcessor.create(
                 model, new ViewHolder(root, mSceneLayer), BottomControlsViewBinder::bind);
-        if (ChromeFeatureList.sBcivBottomControls.isEnabled()) {
-            Set<PropertyKey> exclusions = new HashSet();
-            exclusions.add(BottomControlsProperties.ANDROID_VIEW_VISIBLE);
-            layoutManager.createCompositorMCPWithExclusions(
-                    model, mSceneLayer, BottomControlsViewBinder::bindCompositorMCP, exclusions);
-        } else {
-            layoutManager.createCompositorMCP(
-                    model, mSceneLayer, BottomControlsViewBinder::bindCompositorMCP);
-        }
-        int bottomControlsHeightId = R.dimen.bottom_controls_height;
+        Set<PropertyKey> exclusions =
+                ChromeFeatureList.sBottomControlsJankImprovement.isEnabled()
+                        ? Set.of(
+                                BottomControlsProperties.ANDROID_VIEW_VISIBLE,
+                                BottomControlsProperties.Y_OFFSET,
+                                BottomControlsProperties.OFFSET_TAG,
+                                BottomControlsProperties.ANDROID_VIEW_TRANSLATE_Y,
+                                BottomControlsProperties.SHOW_SHADOW)
+                        : Set.of(BottomControlsProperties.ANDROID_VIEW_VISIBLE);
+        layoutManager.createCompositorMCPWithExclusions(
+                model, mSceneLayer, BottomControlsViewBinder::bindCompositorMCP, exclusions);
 
         View container = root.findViewById(R.id.bottom_container_slot);
         ViewGroup.LayoutParams params = container.getLayoutParams();
 
-        int bottomControlsHeightRes =
-                root.getResources().getDimensionPixelOffset(bottomControlsHeightId);
-        params.height = bottomControlsHeightRes;
+        Resources res = root.getResources();
+        int bottomControlsHeight = res.getDimensionPixelOffset(heightResId);
+        params.height = bottomControlsHeight;
 
         mMediator =
                 new BottomControlsMediator(
@@ -141,19 +153,21 @@ public class BottomControlsCoordinator implements BackPressHandler {
                         controlsStacker,
                         browserControlsVisibilityDelegate,
                         fullscreenManager,
+                        layerType,
+                        contentDelegateSupplier,
                         tabObscuringHandler,
-                        bottomControlsHeightRes,
+                        bottomControlsHeight,
                         root.getTopShadowHeight(),
-                        overlayPanelVisibilitySupplier,
+                        overlayPanelStateSupplier,
                         edgeToEdgeControllerSupplier,
+                        tabSupplier,
                         readAloudRestoringSupplier);
-        resourceManager
+        mResourceManager
                 .getDynamicResourceLoader()
                 .registerResource(root.getId(), root.getResourceAdapter());
 
         mContentDelegateSupplier = contentDelegateSupplier;
-        Toast.setGlobalExtraYOffset(
-                root.getResources().getDimensionPixelSize(bottomControlsHeightId));
+        Toast.setGlobalExtraYOffset(res.getDimensionPixelSize(heightResId));
 
         // Set the visibility of BottomControls to false by default. Components within
         // BottomControls should update the visibility explicitly if needed.
@@ -197,16 +211,6 @@ public class BottomControlsCoordinator implements BackPressHandler {
         mMediator.setBottomControlsVisible(isVisible);
     }
 
-    /**
-     * Handles system back press action if needed.
-     *
-     * @return Whether or not the back press event is consumed here.
-     */
-    public boolean onBackPressed() {
-        BottomControlsContentDelegate contentDelegate = mContentDelegateSupplier.get();
-        return contentDelegate != null ? contentDelegate.onBackPressed() : false;
-    }
-
     @Override
     public @BackPressResult int handleBackPress() {
         BottomControlsContentDelegate contentDelegate = mContentDelegateSupplier.get();
@@ -228,6 +232,9 @@ public class BottomControlsCoordinator implements BackPressHandler {
     /** Clean up any state when the bottom controls component is destroyed. */
     public void destroy() {
         mIsDestroyed = true;
+        // The previously-provided supplier will have been destroyed, so prevent further use of it.
+        mRootFrameLayout.setConstraintsSupplier(null);
+        mResourceManager.getDynamicResourceLoader().unregisterResource(mRootFrameLayout.getId());
 
         BottomControlsContentDelegate contentDelegate = mContentDelegateSupplier.get();
         if (contentDelegate != null) contentDelegate.destroy();

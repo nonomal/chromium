@@ -66,11 +66,11 @@ DataUnits GetByteDisplayUnits(base::ByteSize bytes) {
   // This must match the DataUnits enum.
   static constexpr auto kUnitThresholds = std::to_array<base::ByteSize>({
       base::ByteSize(0),  // DataUnits::kByte,
-      base::KiBU(3),      // DataUnits::kKibibyte,
-      base::MiBU(2),      // DataUnits::kMebibyte,
-      base::GiBU(1),      // DataUnits::kGibibyte,
-      base::TiBU(1),      // DataUnits::kTebibyte,
-      base::PiBU(1)       // DataUnits::kPebibyte,
+      base::KiB(3),       // DataUnits::kKibibyte,
+      base::MiB(2),       // DataUnits::kMebibyte,
+      base::GiB(1),       // DataUnits::kGibibyte,
+      base::TiB(1),       // DataUnits::kTebibyte,
+      base::PiB(1)        // DataUnits::kPebibyte,
   });
   static constexpr auto kUnitThresholdsSpan = base::span(kUnitThresholds);
 
@@ -107,33 +107,5 @@ std::u16string FormatSpeed(base::ByteSize bytes) {
   return FormatSpeedWithUnits(bytes, GetByteDisplayUnits(bytes),
                               /*show_units=*/true);
 }
-
-// BEGIN DEPRECATED SHIMS
-
-std::u16string FormatBytes(base::ByteCount bytes) {
-  return FormatBytes(base::ByteSize::FromDeprecatedByteCount(bytes));
-}
-std::u16string FormatSpeed(base::ByteCount bytes) {
-  return FormatSpeed(base::ByteSize::FromDeprecatedByteCount(bytes));
-}
-DataUnits GetByteDisplayUnits(base::ByteCount bytes) {
-  return GetByteDisplayUnits(base::ByteSize::FromDeprecatedByteCount(bytes));
-}
-
-std::u16string FormatBytesWithUnits(base::ByteCount bytes,
-                                    DataUnits units,
-                                    bool show_units) {
-  return FormatBytesWithUnits(base::ByteSize::FromDeprecatedByteCount(bytes),
-                              units, show_units);
-}
-
-std::u16string FormatSpeedWithUnits(base::ByteCount bytes,
-                                    DataUnits units,
-                                    bool show_units) {
-  return FormatSpeedWithUnits(base::ByteSize::FromDeprecatedByteCount(bytes),
-                              units, show_units);
-}
-
-// END DEPRECATED SHIMS
 
 }  // namespace ui

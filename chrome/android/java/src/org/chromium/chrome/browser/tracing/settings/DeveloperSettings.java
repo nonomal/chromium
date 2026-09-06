@@ -8,8 +8,11 @@ import android.content.Context;
 import android.os.Bundle;
 
 import org.chromium.base.ResettersForTesting;
-import org.chromium.base.supplier.ObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.TriState;
+import org.chromium.base.TriStateUtils;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
+import org.chromium.base.supplier.NonNullObservableSupplier;
+import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.version_info.Channel;
 import org.chromium.base.version_info.VersionConstants;
 import org.chromium.base.version_info.VersionInfo;
@@ -32,15 +35,15 @@ public class DeveloperSettings extends ChromeBaseSettingsFragment
 
     // Non-translated strings:
     private static final String MSG_DEVELOPER_OPTIONS_TITLE = "Developer options";
-    private final ObservableSupplier<String> mPageTitle =
-            new ObservableSupplierImpl<>(MSG_DEVELOPER_OPTIONS_TITLE);
+    private final NonNullObservableSupplier<String> mPageTitle =
+            ObservableSuppliers.createNonNull(MSG_DEVELOPER_OPTIONS_TITLE);
 
-    private static @Nullable Boolean sIsEnabledForTests;
+    private static @TriState int sIsEnabledForTests;
 
     public static boolean shouldShowDeveloperSettings() {
         // Always enabled on canary, dev and local builds, otherwise can be enabled by tapping the
         // Chrome version in Settings>About multiple times.
-        if (sIsEnabledForTests != null) return sIsEnabledForTests;
+        if (sIsEnabledForTests != TriState.NOT_SET) return sIsEnabledForTests == TriState.TRUE;
 
         if (VersionConstants.CHANNEL <= Channel.DEV) return true;
         return ChromeSharedPreferences.getInstance()
@@ -52,9 +55,9 @@ public class DeveloperSettings extends ChromeBaseSettingsFragment
                 .writeBoolean(ChromePreferenceKeys.SETTINGS_DEVELOPER_ENABLED, true);
     }
 
-    public static void setIsEnabledForTests(Boolean isEnabled) {
-        sIsEnabledForTests = isEnabled;
-        ResettersForTesting.register(() -> sIsEnabledForTests = null);
+    public static void setIsEnabledForTests(boolean isEnabled) {
+        sIsEnabledForTests = TriStateUtils.from(isEnabled);
+        ResettersForTesting.register(() -> sIsEnabledForTests = TriState.NOT_SET);
     }
 
     @Override
@@ -71,7 +74,7 @@ public class DeveloperSettings extends ChromeBaseSettingsFragment
     }
 
     @Override
-    public ObservableSupplier<String> getPageTitle() {
+    public MonotonicObservableSupplier<String> getPageTitle() {
         return mPageTitle;
     }
 

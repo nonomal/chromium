@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/containers/span.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
@@ -33,16 +32,6 @@ constexpr char kPkcs12CertImportFailed[] =
 constexpr int kMaxAttemptUniqueNicknameCreation = 100;
 constexpr const char kDefaultNickname[] = "Unknown org";
 
-// Custom CERTCertificateList object allows to avoid calls to PORT_FreeArena()
-// after every usage of CERTCertificateList.
-struct CERTCertificateListDeleter {
-  void operator()(CERTCertificateList* cert_list) {
-    CERT_DestroyCertificateList(cert_list);
-  }
-};
-using Pkcs12ScopedCERTCertificateList =
-    std::unique_ptr<CERTCertificateList, CERTCertificateListDeleter>;
-
 std::string AddUniqueIndex(std::string old_name, int unique_number) {
   if (unique_number == 0) {
     return old_name;
@@ -59,7 +48,7 @@ Pkcs12ReaderStatusCode MakeNicknameUnique(
   std::string temp_nickname;
   while (unique_counter < kMaxAttemptUniqueNicknameCreation) {
     temp_nickname = AddUniqueIndex(nickname, unique_counter);
-    if (!base::Contains(existing_nicknames, temp_nickname)) {
+    if (!existing_nicknames.contains(temp_nickname)) {
       unique_nickname = temp_nickname;
       return Pkcs12ReaderStatusCode::kSuccess;
     }

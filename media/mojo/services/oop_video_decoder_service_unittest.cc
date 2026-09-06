@@ -98,7 +98,6 @@ scoped_refptr<VideoFrame> CreateTestNV12VideoFrame() {
     return nullptr;
   }
 
-  video_frame->metadata().allow_overlay = true;
   video_frame->metadata().end_of_stream = false;
   video_frame->metadata().read_lock_fences_enabled = true;
   video_frame->metadata().power_efficient = true;
@@ -120,9 +119,10 @@ class MockVideoFrameHandleReleaser : public mojom::VideoFrameHandleReleaser {
   ~MockVideoFrameHandleReleaser() override = default;
 
   // mojom::VideoFrameHandleReleaser implementation.
-  MOCK_METHOD2(ReleaseVideoFrame,
-               void(const base::UnguessableToken& release_token,
-                    const std::optional<gpu::SyncToken>& release_sync_token));
+  MOCK_METHOD2(
+      ReleaseVideoFrame,
+      void(const base::UnguessableToken& release_token,
+           std::optional<gpu::SharedImageExportResult> release_export_result));
 
  private:
   mojo::Receiver<mojom::VideoFrameHandleReleaser>
@@ -742,14 +742,12 @@ TEST_F(OOPVideoDecoderServiceTest, VideoFramesCanBeReleased) {
 
   const base::UnguessableToken release_token_to_send =
       base::UnguessableToken::Create();
-  const std::optional<gpu::SyncToken> expected_release_sync_token =
-      std::nullopt;
 
   EXPECT_CALL(
       *auxiliary_endpoints->mock_video_frame_handle_releaser,
-      ReleaseVideoFrame(release_token_to_send, expected_release_sync_token));
+      ReleaseVideoFrame(release_token_to_send, testing::Eq(std::nullopt)));
   auxiliary_endpoints->video_frame_handle_releaser_remote->ReleaseVideoFrame(
-      release_token_to_send, /*release_sync_token=*/{});
+      release_token_to_send, /*release_export_result=*/{});
   auxiliary_endpoints->video_frame_handle_releaser_remote.FlushForTesting();
 }
 
@@ -788,7 +786,6 @@ TEST_F(OOPVideoDecoderServiceTest,
   EXPECT_FALSE(video_frame_received->metadata().end_of_stream);
   EXPECT_TRUE(video_frame_received->metadata().read_lock_fences_enabled);
   EXPECT_TRUE(video_frame_received->metadata().power_efficient);
-  EXPECT_TRUE(video_frame_received->metadata().allow_overlay);
 }
 
 // Tests that a mojom::VideoDecoderClient::OnWaiting() call originating from the

@@ -9,7 +9,6 @@
 #include <string_view>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -38,11 +37,6 @@ using WebAccessibleResourcesMv2ManifestKeys =
     api::web_accessible_resources_mv2::ManifestKeys;
 
 namespace {
-
-const WebAccessibleResourcesInfo* GetResourcesInfo(const Extension* extension) {
-  return static_cast<WebAccessibleResourcesInfo*>(extension->GetManifestData(
-      WebAccessibleResourcesManifestKeys::kWebAccessibleResources));
-}
 
 URLPattern GetPattern(std::string relative_path, const Extension& extension) {
   URLPattern pattern(URLPattern::SCHEME_EXTENSION);
@@ -188,7 +182,7 @@ bool IsResourceWebAccessibleImpl(
     const GURL& target_url,
     const std::optional<url::Origin>& initiator_origin,
     const GURL& upstream_url) {
-  const WebAccessibleResourcesInfo* info = GetResourcesInfo(&extension);
+  const auto* info = extension.GetManifestData<WebAccessibleResourcesInfo>();
   if (!info) {
     return false;
   }
@@ -198,7 +192,8 @@ bool IsResourceWebAccessibleImpl(
 
   // Look for the first match in the array of web accessible resources.
   for (const auto& entry : info->web_accessible_resources) {
-    if (extension.ResourceMatches(entry.resources, relative_path)) {
+    if (extension.ResourceMatches(entry.resources, relative_path,
+                                  /*case_sensitive=*/true)) {
       bool result = true;
 
       // Prior to MV3, web-accessible resources were accessible by any site.
@@ -242,7 +237,7 @@ bool IsResourceWebAccessibleImpl(
       if (initiator_url.SchemeIs(extensions::kExtensionScheme) &&
           (entry.allow_all_extensions ||
            extension.id() == initiator_url.GetHost() ||
-           base::Contains(entry.extension_ids, initiator_url.GetHost()))) {
+           entry.extension_ids.contains(initiator_url.GetHost()))) {
         return result;
       }
     }
@@ -253,6 +248,10 @@ bool IsResourceWebAccessibleImpl(
 }
 
 }  // namespace
+
+// static
+const char* WebAccessibleResourcesInfo::kManifestDataKey =
+    WebAccessibleResourcesManifestKeys::kWebAccessibleResources;
 
 WebAccessibleResourcesInfo::WebAccessibleResourcesInfo() = default;
 
@@ -288,19 +287,20 @@ bool WebAccessibleResourcesInfo::IsResourceWebAccessibleRedirect(
 // static
 bool WebAccessibleResourcesInfo::HasWebAccessibleResources(
     const Extension* extension) {
-  const WebAccessibleResourcesInfo* info = GetResourcesInfo(extension);
+  const auto* info = extension->GetManifestData<WebAccessibleResourcesInfo>();
   return info && (info->web_accessible_resources.size() > 0);
 }
 
 // static
 bool WebAccessibleResourcesInfo::ShouldUseDynamicUrl(const Extension* extension,
                                                      const std::string& path) {
-  const WebAccessibleResourcesInfo* info = GetResourcesInfo(extension);
+  const auto* info = extension->GetManifestData<WebAccessibleResourcesInfo>();
   if (!info) {
     return false;
   }
   for (const auto& entry : info->web_accessible_resources) {
-    if (extension->ResourceMatches(entry.resources, path) &&
+    if (extension->ResourceMatches(entry.resources, path,
+                                   /*case_sensitive=*/true) &&
         entry.use_dynamic_url) {
       return true;
     }
@@ -338,9 +338,7 @@ bool WebAccessibleResourcesHandler::Parse(Extension* extension,
   if (!info) {
     return false;
   }
-  extension->SetManifestData(
-      WebAccessibleResourcesManifestKeys::kWebAccessibleResources,
-      std::move(info));
+  extension->SetManifestData(std::move(info));
   return true;
 }
 base::span<const char* const> WebAccessibleResourcesHandler::Keys() const {

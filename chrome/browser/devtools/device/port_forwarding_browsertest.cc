@@ -10,11 +10,11 @@
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/single_thread_task_runner.h"
+#include "build/build_config.h"
 #include "chrome/browser/devtools/device/devtools_android_bridge.h"
 #include "chrome/browser/devtools/device/tcp_device_provider.h"
 #include "chrome/browser/devtools/remote_debugging_server.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -81,8 +81,8 @@ class PortForwardingTest: public InProcessBrowserTest {
   };
 };
 
-IN_PROC_BROWSER_TEST_F(PortForwardingTest, LoadPageWithStyleAnsScript) {
-  Profile* profile = browser()->profile();
+IN_PROC_BROWSER_TEST_F(PortForwardingTest, LoadPageWithStyleAndScript) {
+  Profile* profile = browser()->GetProfile();
   AndroidDeviceManager::DeviceProviders device_providers;
 
   device_providers.push_back(
@@ -101,7 +101,7 @@ IN_PROC_BROWSER_TEST_F(PortForwardingTest, LoadPageWithStyleAnsScript) {
   PrefService* prefs = profile->GetPrefs();
   prefs->SetBoolean(prefs::kDevToolsPortForwardingEnabled, true);
 
-  base::Value::Dict config;
+  base::DictValue config;
   config.Set(forwarding_port,
              original_url.GetHost() + ":" + original_url.GetPort());
   prefs->SetDict(prefs::kDevToolsPortForwardingConfig, std::move(config));
@@ -141,7 +141,7 @@ class PortForwardingDisconnectTest : public PortForwardingTest {
 };
 
 IN_PROC_BROWSER_TEST_F(PortForwardingDisconnectTest, DisconnectOnRelease) {
-  Profile* profile = browser()->profile();
+  Profile* profile = browser()->GetProfile();
 
   AndroidDeviceManager::DeviceProviders device_providers;
 
@@ -163,7 +163,7 @@ IN_PROC_BROWSER_TEST_F(PortForwardingDisconnectTest, DisconnectOnRelease) {
   PrefService* prefs = profile->GetPrefs();
   prefs->SetBoolean(prefs::kDevToolsPortForwardingEnabled, true);
 
-  base::Value::Dict config;
+  base::DictValue config;
   config.Set(forwarding_port,
              original_url.GetHost() + ":" + original_url.GetPort());
   prefs->SetDict(prefs::kDevToolsPortForwardingConfig, std::move(config));

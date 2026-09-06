@@ -6,8 +6,7 @@
 
 #include <optional>
 
-#include "base/compiler_specific.h"
-#include "base/containers/contains.h"
+#include "base/containers/span.h"
 #include "components/segmentation_platform/internal/metadata/metadata_writer.h"
 #include "components/segmentation_platform/internal/proto/model_prediction.pb.h"
 #include "components/segmentation_platform/public/proto/types.pb.h"
@@ -29,7 +28,7 @@ void TestSegmentInfoDatabase::GetSegmentInfoForSegments(
   auto result = std::make_unique<SegmentInfoDatabase::SegmentInfoList>();
   for (const auto& pair : segment_infos_) {
     if (pair.second.model_source() != ModelSource::DEFAULT_MODEL_SOURCE &&
-        base::Contains(segment_ids, pair.first)) {
+        segment_ids.contains(pair.first)) {
       result->emplace_back(pair.first, &pair.second);
     }
   }
@@ -41,7 +40,7 @@ TestSegmentInfoDatabase::GetSegmentInfoForBothModels(
     const base::flat_set<SegmentId>& segment_ids) {
   auto result = std::make_unique<SegmentInfoDatabase::SegmentInfoList>();
   for (const auto& pair : segment_infos_) {
-    if (base::Contains(segment_ids, pair.first)) {
+    if (segment_ids.contains(pair.first)) {
       result->emplace_back(pair.first, &pair.second);
     }
   }
@@ -223,19 +222,17 @@ void TestSegmentInfoDatabase::AddPredictionResult(SegmentId segment_id,
 
 void TestSegmentInfoDatabase::AddDiscreteMapping(
     SegmentId segment_id,
-    const float mappings[][2],
-    int num_pairs,
+    base::span<const float[2]> mappings,
     const std::string& discrete_mapping_key,
     ModelSource model_source) {
   proto::SegmentInfo* info = FindOrCreateSegment(segment_id, model_source);
   auto* discrete_mappings_map =
       info->mutable_model_metadata()->mutable_discrete_mappings();
   auto& discrete_mappings = (*discrete_mappings_map)[discrete_mapping_key];
-  for (int i = 0; i < num_pairs; i++) {
-    auto* pair = UNSAFE_TODO(mappings[i]);
+  for (const auto& pair : mappings) {
     auto* entry = discrete_mappings.add_entries();
     entry->set_min_result(pair[0]);
-    entry->set_rank(UNSAFE_TODO(pair[1]));
+    entry->set_rank(pair[1]);
   }
 }
 

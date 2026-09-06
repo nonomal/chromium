@@ -9,8 +9,8 @@
 #include <string_view>
 #include <unordered_set>
 
-#include "base/containers/contains.h"
 #include "base/containers/fixed_flat_set.h"
+#include "base/feature_list.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "media/media_buildflags.h"
@@ -42,7 +42,7 @@ constexpr auto kSupportedImageTypes = base::MakeFixedFlatSet<std::string_view>({
     "image/x-icon",              // ico
     "image/x-xbitmap",           // xbm
     "image/x-png",
-#if BUILDFLAG(ENABLE_AV1_DECODER)
+#if BUILDFLAG(ENABLE_DAV1D_DECODER)
     "image/avif",
 #endif
 });
@@ -120,7 +120,13 @@ constexpr auto kSupportedNonImageTypes =
 }  // namespace
 
 bool IsSupportedImageMimeType(std::string_view mime_type) {
-  return kSupportedImageTypes.contains(base::ToLowerASCII(mime_type));
+  std::string mime_lower = base::ToLowerASCII(mime_type);
+#if BUILDFLAG(ENABLE_JXL_DECODER)
+  if (mime_lower == "image/jxl") {
+    return base::FeatureList::IsEnabled(features::kJXLImageFormat);
+  }
+#endif
+  return kSupportedImageTypes.contains(mime_lower);
 }
 
 bool IsSupportedNonImageMimeType(std::string_view mime_type) {
@@ -154,20 +160,25 @@ bool IsJSONMimeType(std::string_view mime_type) {
       net::MatchesMimeType("text/json", mime_type)) {
     return true;
   }
-  const net::MimeTypeValidationLevel level =
-      base::FeatureList::IsEnabled(
-          blink::features::kStrictJsonMimeTypeTokenValidation)
-          ? net::MimeTypeValidationLevel::kWildcardSlashAndTokens
-          : net::MimeTypeValidationLevel::kWildcardSlashOnly;
-  return net::MatchesMimeType("*+json", mime_type, level);
+  return net::MatchesMimeType(
+      "*+json", mime_type,
+      net::MimeTypeValidationLevel::kWildcardSlashAndTokens);
 }
 
-// TODO(crbug.com/362282752): Allow other `*/*+xml` MIME types.
 // https://mimesniff.spec.whatwg.org/#xml-mime-type
+// Full `*+xml` matching is behind SpecCompliantXmlMimeTypes; without the
+// flag, only `application/*+xml` is recognized (legacy behavior).
 bool IsXMLMimeType(std::string_view mime_type) {
-  return net::MatchesMimeType("text/xml", mime_type) ||
-         net::MatchesMimeType("application/xml", mime_type) ||
-         net::MatchesMimeType("application/*+xml", mime_type);
+  if (net::MatchesMimeType("text/xml", mime_type) ||
+      net::MatchesMimeType("application/xml", mime_type)) {
+    return true;
+  }
+  if (base::FeatureList::IsEnabled(features::kSpecCompliantXmlMimeTypes)) {
+    return net::MatchesMimeType(
+        "*+xml", mime_type,
+        net::MimeTypeValidationLevel::kWildcardSlashAndTokens);
+  }
+  return net::MatchesMimeType("application/*+xml", mime_type);
 }
 
 // From step 3 of

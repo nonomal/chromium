@@ -6,8 +6,8 @@
 
 #include "chrome/browser/ui/webui/ash/settings/services/hats/os_settings_hats_manager.h"
 #include "chrome/browser/ui/webui/ash/settings/services/hats/os_settings_hats_manager_factory.h"
-#include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_web_ui.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -68,13 +68,13 @@ class SettingsHatsHandlerTest : public testing::Test {
 };
 
 TEST_F(SettingsHatsHandlerTest, TestHandleSettingsUsedSearch) {
-  base::Value::List args;
+  base::ListValue args;
   EXPECT_CALL(*manager_handler_, SetSettingsUsedSearch(true)).Times(1);
   web_ui_.HandleReceivedMessage("settingsUsedSearch", args);
 }
 
 TEST_F(SettingsHatsHandlerTest, TestHandleSendSettingsHats) {
-  base::Value::List args;
+  base::ListValue args;
   EXPECT_CALL(*manager_handler_, MaybeSendSettingsHats()).Times(1);
   web_ui_.HandleReceivedMessage("sendSettingsHats", args);
 }

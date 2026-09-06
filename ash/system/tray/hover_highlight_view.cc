@@ -6,7 +6,6 @@
 
 #include <string>
 
-#include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/style/ash_color_id.h"
 #include "ash/style/style_util.h"
@@ -17,7 +16,6 @@
 #include "ash/system/tray/tri_view.h"
 #include "ash/system/tray/unfocusable_label.h"
 #include "ash/system/tray/view_click_listener.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
@@ -31,6 +29,7 @@
 #include "ui/views/animation/ink_drop_highlight.h"
 #include "ui/views/animation/ink_drop_state.h"
 #include "ui/views/border.h"
+#include "ui/views/controls/focus_ring.h"
 #include "ui/views/controls/highlight_path_generator.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
@@ -322,7 +321,7 @@ void HoverHighlightView::OnEnabledChanged() {
 
 void HoverHighlightView::SetAndUpdateAccessibleDefaultAction() {
   SetDefaultActionVerb((right_view_ && right_view_->GetVisible() &&
-                        base::Contains(right_view_->GetClassName(), "Button"))
+                        right_view_->GetClassName().contains("Button"))
                            ? ax::mojom::DefaultActionVerb::kClick
                            : ax::mojom::DefaultActionVerb::kPress);
   UpdateAccessibleDefaultActionVerb();

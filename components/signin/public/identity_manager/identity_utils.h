@@ -6,8 +6,11 @@
 #define COMPONENTS_SIGNIN_PUBLIC_IDENTITY_MANAGER_IDENTITY_UTILS_H_
 
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "base/containers/flat_set.h"
+#include "components/signin/public/identity_manager/account_info.h"
 
 class GaiaId;
 class PrefService;
@@ -17,30 +20,17 @@ namespace signin {
 class AccountsInCookieJarInfo;
 class IdentityManager;
 
+// Returns true if the username matches the pattern.
+// The pattern is a RE2 pattern. If the pattern is empty, all usernames are
+// allowed. If the pattern is invalid, no usernames are allowed.
+bool IsUsernameAllowedByPattern(std::string_view username,
+                                std::string_view pattern);
+
 // Returns true if the username is allowed based on a pattern registered
 // |prefs::kGoogleServicesUsernamePattern| with the preferences service
 // referenced by |prefs|.
 bool IsUsernameAllowedByPatternFromPrefs(const PrefService* prefs,
-                                         const std::string& username);
-
-// Returns true:
-// - if BUILDFLAG(ENABLE_DICE_SUPPORT) is enabled.
-// - The user is signed in to the browser implicitly by signing in on the
-//   web.
-// It will return false if the feature is enabled and the user is either signed
-// out or signed in explicitly.
-
-bool IsImplicitBrowserSigninOrExplicitDisabled(
-    const IdentityManager* identity_manager,
-    const PrefService* prefs);
-
-// Returns true if the Google account cookies are automatically rebuilt after
-// being cleared from settings, when the user is signed in.
-// Note: this can return true even if the user is not signed in. This function
-// reflects whether the cookie setting has this new behavior (as opposed to the
-// old behavior where cookies were never rebuilt).
-bool AreGoogleCookiesRebuiltAfterClearingWhenSignedIn(IdentityManager& manager,
-                                                      PrefService& prefs);
+                                         std::string_view username);
 
 // Returns all accounts for which Chrome should keep account-keyed preferences.
 // These are the accounts in the cookie (signed in or signed out) plus the
@@ -53,6 +43,19 @@ bool AreGoogleCookiesRebuiltAfterClearingWhenSignedIn(IdentityManager& manager,
 base::flat_set<GaiaId> GetAllGaiaIdsForKeyedPreferences(
     const IdentityManager* identity_manager,
     const AccountsInCookieJarInfo& accounts_in_cookie_jar_info);
+
+// Returns the candidate accounts in priority order for display in sign-in
+// promos or UI.
+// - If signed in to Chrome, the primary account is always returned first.
+// - On iOS: device accounts in system keychain order.
+// - On Android: accounts with refresh tokens in device order.
+// - On Desktop: accounts with refresh tokens in Gaia cookie jar order.
+//
+// If `local_state` is provided, accounts disallowed by enterprise pattern
+// policies (`prefs::kGoogleServicesUsernamePattern`) are filtered out.
+std::vector<AccountInfo> GetOrderedAccountsForDisplay(
+    const IdentityManager* identity_manager,
+    const PrefService* local_state = nullptr);
 
 }  // namespace signin
 

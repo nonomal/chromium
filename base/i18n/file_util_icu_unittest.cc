@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40284755): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "base/i18n/file_util_icu.h"
 
 #include <stddef.h>
@@ -176,11 +171,10 @@ static const struct normalize_name_encoding_test_cases {
     {"foo_dir_na\xcc\x88me/", "foo_dir_n\xc3\xa4me"}};
 
 TEST_F(FileUtilICUTest, NormalizeFileNameEncoding) {
-  for (size_t i = 0; i < std::size(kNormalizeFileNameEncodingTestCases); i++) {
-    FilePath path(kNormalizeFileNameEncodingTestCases[i].original_path);
+  for (const auto& test_case : kNormalizeFileNameEncodingTestCases) {
+    FilePath path(test_case.original_path);
     NormalizeFileNameEncoding(&path);
-    EXPECT_EQ(FilePath(kNormalizeFileNameEncodingTestCases[i].normalized_path),
-              path);
+    EXPECT_EQ(FilePath(test_case.normalized_path), path);
   }
 }
 

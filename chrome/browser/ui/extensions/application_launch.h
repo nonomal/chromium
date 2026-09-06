@@ -6,11 +6,10 @@
 #define CHROME_BROWSER_UI_EXTENSIONS_APPLICATION_LAUNCH_H_
 
 #include "base/functional/callback.h"
-#include "chrome/browser/apps/app_service/app_launch_params.h"
+#include "components/services/app_service/public/cpp/app_launch_params.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "url/gurl.h"
 
-class Browser;
 class BrowserWindowInterface;
 class Profile;
 
@@ -40,13 +39,14 @@ content::WebContents* OpenApplication(Profile* profile,
 
 // Create the application in a way specified by |params| in a new window but
 // delaying activating and showing it.
-Browser* CreateApplicationWindow(Profile* profile,
-                                 const apps::AppLaunchParams& params,
-                                 const GURL& url);
+BrowserWindowInterface* CreateApplicationWindow(
+    Profile* profile,
+    const apps::AppLaunchParams& params,
+    const GURL& url);
 
 // Navigate application window to application url, but do not show it yet.
 content::WebContents* NavigateApplicationWindow(
-    Browser* browser,
+    BrowserWindowInterface* browser,
     const apps::AppLaunchParams& params,
     const GURL& url,
     WindowOpenDisposition disposition);

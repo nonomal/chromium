@@ -8,16 +8,20 @@
 
 #include <string>
 
+#include "base/containers/to_vector.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/country_type.h"
+#include "components/autofill/core/browser/data_model/addresses/address_test_api.h"
 #include "components/autofill/core/browser/data_model/addresses/autofill_i18n_api.h"
+#include "components/autofill/core/browser/data_model/addresses/autofill_i18n_hierarchies.h"
 #include "components/autofill/core/browser/data_model/addresses/autofill_profile.h"
-#include "components/autofill/core/browser/data_model/addresses/autofill_profile_comparator.h"
+#include "components/autofill/core/browser/data_model/addresses/autofill_structured_address_component_test_api.h"
 #include "components/autofill/core/browser/field_types.h"
-#include "components/autofill/core/browser/geo/alternative_state_name_map_test_utils.h"
-#include "components/autofill/core/browser/test_utils/autofill_test_utils.h"
+#include "components/autofill/core/browser/geo/alternative_state_name_map_test_util.h"
+#include "components/autofill/core/browser/geo/country_data.h"
+#include "components/autofill/core/browser/test_utils/autofill_test_util.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -189,8 +193,8 @@ TEST_F(AddressTest, IsCountry) {
     SCOPED_TRACE(valid_match);
     FieldTypeSet matching_types;
     address.GetMatchingTypes(ASCIIToUTF16(valid_match), "US", &matching_types);
-    ASSERT_EQ(1U, matching_types.size());
-    EXPECT_EQ(ADDRESS_HOME_COUNTRY, *matching_types.begin());
+    ASSERT_EQ(matching_types.size(), 1U);
+    EXPECT_EQ(*matching_types.begin(), ADDRESS_HOME_COUNTRY);
   }
 
   const char* const kInvalidMatches[] = {"United", "Garbage"};
@@ -198,7 +202,7 @@ TEST_F(AddressTest, IsCountry) {
     FieldTypeSet matching_types;
     address.GetMatchingTypes(ASCIIToUTF16(invalid_match), "US",
                              &matching_types);
-    EXPECT_EQ(0U, matching_types.size());
+    EXPECT_EQ(matching_types.size(), 0U);
   }
 
   // Make sure that garbage values don't match when the country code is empty.
@@ -206,7 +210,7 @@ TEST_F(AddressTest, IsCountry) {
   EXPECT_EQ(address.GetRawInfo(ADDRESS_HOME_COUNTRY), u"");
   FieldTypeSet matching_types;
   address.GetMatchingTypes(u"Garbage", "US", &matching_types);
-  EXPECT_EQ(0U, matching_types.size());
+  EXPECT_EQ(matching_types.size(), 0U);
 }
 
 // Verifies that Address::GetInfo() correctly combines address lines.
@@ -434,24 +438,20 @@ TEST_F(AddressTest, SetStreetAddressRejectsAddressesWithTrailingBlankLines) {
 // Verifies that the merging-related methods for structured addresses are
 // implemented correctly. This is not a test of the merging logic itself.
 TEST_F(AddressTest, TestMergeStructuredAddresses) {
-  autofill::AutofillProfileComparator profile_comparator("en-US");
-
   // The two zip codes have a is-substring relation and are mergeable.
   AutofillProfile profile1("1", AutofillProfile::RecordType::kAccount,
                            AddressCountryCode(kLegacyHierarchyCountryCode));
   AutofillProfile profile2("2", AutofillProfile::RecordType::kAccount,
                            AddressCountryCode(kLegacyHierarchyCountryCode));
-  // Two empty profiles are mergeable by default.
-  EXPECT_TRUE(profile_comparator.AreMergeable(profile1, profile2));
   // We use SetProfileInfo instead of SetRawInfo as it calls
   // FinalizeAfterImport() making it more similar to how the tree is handled in
   // prod - which is recommended as we're using tree's interfaces for merging.
-  test::SetProfileInfo(&profile1, "", "", "", "", "", "", "", "", "", "",
-                       /*zipcode=*/"12345", "", "");
-  test::SetProfileInfo(&profile2, "", "", "", "", "", "", "", "", "", "",
-                       /*zipcode=*/"1234", "", "");
-
-  EXPECT_TRUE(profile_comparator.AreMergeable(profile1, profile2));
+  test::SetProfileInfo(
+      &profile1,
+      test::SetProfileInfoOptionsBuilder().with_zipcode("12345").Build());
+  test::SetProfileInfo(
+      &profile2,
+      test::SetProfileInfoOptionsBuilder().with_zipcode("1234").Build());
 
   base::Time old_time;
   ASSERT_TRUE(
@@ -464,12 +464,16 @@ TEST_F(AddressTest, TestMergeStructuredAddresses) {
   profile2.usage_history().set_use_date(old_time);
   // The merging should maintain the value because profile2 is not more
   // recently used.
-  profile1.MergeDataFrom(profile2, "en-US");
+  EXPECT_EQ(
+      profile1.MergeDataFrom(profile2, "en-US"),
+      AutofillProfile::ProfileMergeResult::kMergeSucceededWithoutModification);
   EXPECT_EQ(profile1.GetRawInfo(ADDRESS_HOME_ZIP), u"12345");
   // Once it is more recently used, the value from profile2 should be copied
   // into profile1.
   profile2.usage_history().set_use_date(new_time);
-  profile1.MergeDataFrom(profile2, "en-US");
+  EXPECT_EQ(
+      profile1.MergeDataFrom(profile2, "en-US"),
+      AutofillProfile::ProfileMergeResult::kMergeSucceededWithModification);
   EXPECT_EQ(profile1.GetRawInfo(ADDRESS_HOME_ZIP), u"1234");
 
   // With a second incompatible ZIP code the addresses are not mergeable
@@ -477,9 +481,11 @@ TEST_F(AddressTest, TestMergeStructuredAddresses) {
   AutofillProfile profile3("3", AutofillProfile::RecordType::kAccount,
                            AddressCountryCode(kLegacyHierarchyCountryCode));
 
-  test::SetProfileInfo(&profile3, "", "", "", "", "", "", "", "", "", "",
-                       "67890", "", "");
-  EXPECT_FALSE(profile_comparator.AreMergeable(profile1, profile3));
+  test::SetProfileInfo(
+      &profile3,
+      test::SetProfileInfoOptionsBuilder().with_zipcode("67890").Build());
+  EXPECT_EQ(profile1.MergeDataFrom(profile3, "en-US"),
+            AutofillProfile::ProfileMergeResult::kMergeFailed);
 }
 
 // Tests that if only one of the structured addresses in a merge operation has
@@ -768,6 +774,80 @@ TEST_F(AddressTest, TestSynthesizedNodesGeneration) {
             u"12/110, Flat no. 504, Raja Apartments, Kondapur\n"
             u"Opp to Ayyappa Swamy temple");
 }
+
+// Growth invariant is a property of a structured address model. It states that
+// in the address hierarchy, compound tokens need to contain
+// all information contained in their children (with the exception of stop
+// words that are not privacy/data governance sensitive).
+// This is to ensure that users can always access and modify all their data
+// from the settings view, even if not all the nodes are exposed in the UI.
+class AddressGrowthInvariantTest
+    : public AddressTest,
+      public testing::WithParamInterface<AddressCountryCode> {
+ protected:
+  void SetAddressComponentNonEmptyValue(AddressComponent& node) {
+    for (AddressComponent* subcomponent : node.Subcomponents()) {
+      SetAddressComponentNonEmptyValue(*subcomponent);
+    }
+    // Overwriting the country node would change the Address's model.
+    if (node.IsAtomic() && node.GetStorageType() != ADDRESS_HOME_COUNTRY) {
+      node.SetValue(
+          base::ASCIIToUTF16(FieldTypeToString(node.GetStorageType())),
+          VerificationStatus::kObserved);
+    }
+  }
+
+  void CheckGrowthInvariantRecursive(AddressComponent& node) {
+    for (AddressComponent* subcomponent : node.Subcomponents()) {
+      CheckGrowthInvariantRecursive(*subcomponent);
+    }
+    FieldType type = node.GetStorageType();
+    // TODO(crbug.com/455755051): Country name is not a part of the formatting
+    // rules, but it's a part of the address model for many countries. It breaks
+    // the growth invariant.
+    if (type == ADDRESS_HOME_COUNTRY) {
+      return;
+    }
+    // TODO(crbug.com/357838446): Sorting code is not a part of the formatting
+    // rules, but it's a part of the address model for "XX". It breaks the
+    // growth invariant. Add it to the formatting rules or deprecate the
+    // sorting code field type.
+    if (type == ADDRESS_HOME_SORTING_CODE) {
+      return;
+    }
+    EXPECT_TRUE(test_api(node).IsValueCompatibleWithAncestors(node.GetValue()))
+        << "Node type: " << FieldTypeToStringView(node.GetStorageType())
+        << " with value '" << node.GetValue()
+        << "' is not compatible with ancestors. ";
+  }
+};
+
+std::vector<AddressCountryCode> GetCountryCodesForGrowthInvariantTest() {
+  return base::ToVector(
+      i18n_model_definition::kAutofillModelRules,
+      [](const auto& country_code_and_rule) {
+        return AddressCountryCode(std::string(country_code_and_rule.first));
+      });
+}
+
+TEST_P(AddressGrowthInvariantTest, GrowthInvariant) {
+  // TODO(crbug.com/393294031): Growth invariant doesn't hold for India model.
+  // This should be fixed if we're going to launch India at some point.
+  if (GetParam() == AddressCountryCode("IN")) {
+    GTEST_SKIP() << "Growth invariant doesn't hold for India model.";
+  }
+  Address address(GetParam());
+  AddressComponent* root = test_api(address).Root();
+  SetAddressComponentNonEmptyValue(*root);
+  address.FinalizeAfterImport();
+  CheckGrowthInvariantRecursive(*root);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    AddressGrowthInvariantTest,
+    testing::ValuesIn(GetCountryCodesForGrowthInvariantTest()),
+    testing::PrintToStringParamName());
 
 }  // namespace
 }  // namespace autofill

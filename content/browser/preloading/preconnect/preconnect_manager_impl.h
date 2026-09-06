@@ -12,9 +12,11 @@
 #include <vector>
 
 #include "base/containers/id_map.h"
+#include "base/feature.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "base/types/optional_ref.h"
 #include "content/browser/preloading/proxy_lookup_client_impl.h"
 #include "content/browser/preloading/resolve_host_client_impl.h"
 #include "content/public/browser/preconnect_manager.h"
@@ -29,6 +31,8 @@ class NetworkContext;
 }  // namespace network::mojom
 
 namespace content {
+
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kPreconnectManagerDirectFastPath);
 
 class BrowserContext;
 
@@ -63,7 +67,8 @@ struct CONTENT_EXPORT PreresolveJob {
       std::optional<net::ConnectionKeepAliveConfig> keepalive_config,
       mojo::PendingRemote<network::mojom::ConnectionChangeObserverClient>
           connection_change_observer_client,
-      PreresolveInfo* info);
+      PreresolveInfo* info,
+      base::UnguessableToken network_restrictions_id);
 
   PreresolveJob(const PreresolveJob&) = delete;
   PreresolveJob& operator=(const PreresolveJob&) = delete;
@@ -96,8 +101,8 @@ struct CONTENT_EXPORT PreresolveJob {
   // May be equal to nullptr in case of detached job.
   raw_ptr<PreresolveInfo, DanglingUntriaged> info;
   std::unique_ptr<ResolveHostClientImpl> resolve_host_client;
-  std::unique_ptr<ProxyLookupClientImpl> proxy_lookup_client;
   base::TimeTicks creation_time;
+  base::UnguessableToken network_restrictions_id;
 };
 
 class CONTENT_EXPORT PreconnectManagerImpl : public PreconnectManager {
@@ -120,18 +125,21 @@ class CONTENT_EXPORT PreconnectManagerImpl : public PreconnectManager {
       const GURL& url,
       const net::NetworkAnonymizationKey& network_anonymization_key,
       net::NetworkTrafficAnnotationTag traffic_annotation,
-      const content::StoragePartitionConfig* storage_partition_config) override;
+      const content::StoragePartitionConfig* storage_partition_config,
+      const base::UnguessableToken& network_restrictions_id) override;
   void StartPreresolveHosts(
       const std::vector<GURL>& urls,
       const net::NetworkAnonymizationKey& network_anonymization_key,
       net::NetworkTrafficAnnotationTag traffic_annotation,
-      const content::StoragePartitionConfig* storage_partition_config) override;
+      const content::StoragePartitionConfig* storage_partition_config,
+      const base::UnguessableToken& network_restrictions_id) override;
   void StartPreconnectUrl(
       const GURL& url,
       bool allow_credentials,
       net::NetworkAnonymizationKey network_anonymization_key,
       net::NetworkTrafficAnnotationTag traffic_annotation,
       const content::StoragePartitionConfig* storage_partition_config,
+      const base::UnguessableToken& network_restrictions_id,
       std::optional<net::ConnectionKeepAliveConfig> keepalive_config,
       mojo::PendingRemote<network::mojom::ConnectionChangeObserverClient>
           connection_change_observer_client) override;
@@ -156,6 +164,7 @@ class CONTENT_EXPORT PreconnectManagerImpl : public PreconnectManager {
       const net::NetworkAnonymizationKey& network_anonymization_key,
       const net::NetworkTrafficAnnotationTag& traffic_annotation,
       const content::StoragePartitionConfig* storage_partition_config,
+      const base::UnguessableToken& network_restrictions_id,
       std::optional<net::ConnectionKeepAliveConfig> keepalive_config,
       mojo::PendingRemote<network::mojom::ConnectionChangeObserverClient>
           connection_change_observer_client) const;
@@ -163,8 +172,9 @@ class CONTENT_EXPORT PreconnectManagerImpl : public PreconnectManager {
       const GURL& url,
       const net::NetworkAnonymizationKey& network_anonymization_key,
       const content::StoragePartitionConfig* storage_partition_config,
+      const base::UnguessableToken& network_restrictions_id,
       ResolveHostCallback callback) const;
-  std::unique_ptr<ProxyLookupClientImpl> LookupProxyForUrl(
+  void LookupProxyForUrl(
       const GURL& url,
       const net::NetworkAnonymizationKey& network_anonymization_key,
       const content::StoragePartitionConfig* storage_partition_config,

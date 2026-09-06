@@ -13,9 +13,11 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/task/task_runner.h"
+#include "base/timer/timer.h"
 #include "components/lens/contextual_input.h"
 #include "components/lens/lens_bitmap_processing.h"
 #include "components/optimization_guide/content/browser/page_content_proto_provider.h"
+#include "components/optimization_guide/content/browser/page_context_eligibility_api.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -62,7 +64,7 @@ class TabContextualizationController : public content::WebContentsObserver {
   // Triggers initial page context eligibility check on the current page.
   // Equivalent to calling `optimization_guide::IsPageContextEligible()` with
   // empty frame_metadata.
-  bool GetInitialPageContextEligibility();
+  virtual bool GetInitialPageContextEligibility();
 
   // Returns whether the page is context eligible based on the latest cached
   // state. If the page context eligibility API has not been loaded, this will
@@ -70,7 +72,9 @@ class TabContextualizationController : public content::WebContentsObserver {
   // implement.
   bool GetCurrentPageContextEligibility();
 
-  // Gets contextual page content for the tab.
+  // Gets contextual page content for the tab. Restores/reloads the tab if it
+  // has been frozen or discarded, and defers context extraction until the tab
+  // finishes loading.
   virtual void GetPageContext(GetPageContextCallback callback);
 
   // Updates current page eligibility once received.
@@ -86,6 +90,16 @@ class TabContextualizationController : public content::WebContentsObserver {
       std::optional<lens::ImageEncodingOptions> image_options,
       CaptureScreenshotCallback callback);
 
+ protected:
+  // Returns whether the page is context eligible. Virtual for testing.
+  virtual bool IsPageContextEligible(
+      const GURL& url,
+      const std::vector<optimization_guide::FrameMetadata>& frame_metadata);
+
+  // Performs actual page context retrieval after WebContents load completes.
+  // Virtual for testing.
+  virtual void FetchPageContextInternal(GetPageContextCallback callback);
+
  private:
   // Creates the eligibility API if it has not been created.
   void CreatePageContextEligibilityAPI();
@@ -96,11 +110,15 @@ class TabContextualizationController : public content::WebContentsObserver {
 
   // content::WebContentsObserver:
   void PrimaryPageChanged(content::Page& page) override;
+  void DidFinishLoad(content::RenderFrameHost* render_frame_host,
+                     const GURL& validated_url) override;
 
   // TabInterface::WillDiscardContentsCallback:
   void WillDiscardContents(tabs::TabInterface* tab,
                            content::WebContents* old_contents,
                            content::WebContents* new_contents);
+
+  void FlushPendingPageContextCallbacks();
 
   // Gets the annotated page content from the page context eligibility API.
   void GetAnnotatedPageContent(GetAnnotatedPageContentCallback callback);
@@ -167,6 +185,15 @@ class TabContextualizationController : public content::WebContentsObserver {
   scoped_refptr<base::TaskRunner> screenshot_task_runner_;
 
   bool is_page_context_eligible_ = false;
+
+  // Client supplied callbacks received for tabs that are currently loading.
+  // Page content extraction is deferred until the loading completes after which
+  // these callbacks will be used.
+  std::vector<GetPageContextCallback> pending_page_context_callbacks_;
+
+  // Timer to flush pending page context callbacks if page load completion is
+  // not received within the timeout period.
+  base::OneShotTimer pending_page_context_timer_;
 
   base::WeakPtrFactory<TabContextualizationController> weak_ptr_factory_{this};
 };

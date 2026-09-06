@@ -16,14 +16,6 @@
 // expanded differently in some places. The macro has the following signature:
 // ACCOUNT_CAPABILITY(cpp_label, java_label, name).
 
-// To define a new account capability that is flag-guarded, add a
-// ACCOUNT_CAPABILITY_F(cpp_label, java_label, name, feature_flag) macro
-// instead of ACCOUNT_CAPABILITY. This allows the capability to be submitted
-// before it is fully rolled out server-side.
-// - This is currently not supported for capabilities exposed on Android
-// - The #include for the feature flag must be added to account_capabilities.cc
-//   and not to this file
-
 // Here we rely on build_config.h to not introduce any symbols that can be
 // textually inserted in the code. If that changes in the future, this header
 // should be removed from this file and included transitively instead.
@@ -33,21 +25,46 @@
 // found at go/capability-alias (eg. go/capability-alias/ge2dinbnmnqxa).
 
 // clang-format off
-// keep-sorted start newline_separated=yes sticky_prefixes=#if group_prefixes=#endif
+// keep-sorted start newline_separated=yes sticky_prefixes=#if,BUILDFLAG group_prefixes=#endif
 // clang-format on
+#if BUILDFLAG(IS_IOS)
+ACCOUNT_CAPABILITY(
+    kCanContextuallyShowHistorySyncOptInsWithoutMinorModeRestrictionsCapabilityName,
+    CAN_CONTEXTUALLY_SHOW_HISTORY_SYNC_OPT_INS_WITHOUT_MINOR_MODE_RESTRICTIONS_CAPABILITY_NAME,
+    "accountcapabilities/giztknjnmnqxa")
+#endif
+
+#if BUILDFLAG(IS_IOS)
+ACCOUNT_CAPABILITY(kCanContextuallyUseGeminiInChromeCapabilityName,
+                   CAN_CONTEXTUALLY_USE_GEMINI_IN_CHROME_NAME,
+                   "accountcapabilities/giztmobnmnqxa")
+#endif
+
+#if BUILDFLAG(IS_IOS)
+ACCOUNT_CAPABILITY(kCanContextuallyUseModelExecutionFeaturesName,
+                   CAN_CONTEXTUALLY_USE_MODEL_EXECUTION_FEATURES_NAME,
+                   "accountcapabilities/giztinznmnqxa")
+#endif
+
 ACCOUNT_CAPABILITY(kCanFetchFamilyMemberInfoCapabilityName,
                    CAN_FETCH_FAMILY_MEMBER_INFO_CAPABILITY_NAME,
                    "accountcapabilities/ge2dinbnmnqxa")
 
+#if !BUILDFLAG(IS_IOS)
 ACCOUNT_CAPABILITY(kCanHaveEmailAddressDisplayedCapabilityName,
                    CAN_HAVE_EMAIL_ADDRESS_DISPLAYED_CAPABILITY_NAME,
                    "accountcapabilities/haytqlldmfya")
+#endif
 
 #if !BUILDFLAG(IS_ANDROID)
 ACCOUNT_CAPABILITY(kCanMakeChromeSearchEngineChoiceScreenChoice,
                    CAN_MAKE_CHROME_SEARCH_ENGINE_CHOICE_SCREEN_CHOICE,
                    "accountcapabilities/ge4tenznmnqxa")
 #endif
+
+ACCOUNT_CAPABILITY(kCanOverrideAccountInfoCapabilityName,
+                   CAN_OVERRIDE_ACCOUNT_INFO_CAPABILITY_NAME,
+                   "accountcapabilities/gmydknbnmnqxa")
 
 #if !BUILDFLAG(IS_IOS)
 ACCOUNT_CAPABILITY(kCanRunChromePrivacySandboxTrialsCapabilityName,
@@ -60,35 +77,58 @@ ACCOUNT_CAPABILITY(
     CAN_SHOW_HISTORY_SYNC_OPT_INS_WITHOUT_MINOR_MODE_RESTRICTIONS_CAPABILITY_NAME,
     "accountcapabilities/gi2tklldmfya")
 
+#if BUILDFLAG(IS_IOS)
+ACCOUNT_CAPABILITY(kCanSignInToChromeCapabilityName,
+                   CAN_SIGN_IN_TO_CHROME_CAPABILITY_NAME,
+                   "accountcapabilities/giztambnmnqxa")
+#endif
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+    BUILDFLAG(IS_IOS)
+ACCOUNT_CAPABILITY(kCanSubmitFeedbackInChromeCapabilityName,
+                   CAN_SUBMIT_FEEDBACK_IN_CHROME_CAPABILITY_NAME,
+                   "accountcapabilities/gizdqmrnmnqxa")
+#endif
+
 #if BUILDFLAG(IS_CHROMEOS)
 ACCOUNT_CAPABILITY(kCanToggleAutoUpdatesName,
                    CAN_TOGGLE_AUTO_UPDATES_NAME,
                    "accountcapabilities/gu4dmlldmfya")
 #endif
 
+#if BUILDFLAG(IS_CHROMEOS)
 ACCOUNT_CAPABILITY(kCanUseChromeOSGenerativeAi,
                    CAN_USE_CHROMEOS_GENERATIVE_AI,
                    "accountcapabilities/ge3dgmjnmnqxa")
+#endif
 
-ACCOUNT_CAPABILITY(kCanUseCopyEditorFeatureName,
-                   CAN_USE_COPYEDITOR_FEATURE_NAME,
-                   "accountcapabilities/ge2tkmznmnqxa")
-
+#if !BUILDFLAG(IS_IOS)
 ACCOUNT_CAPABILITY(kCanUseDevToolsGenerativeAiFeaturesCapabilityName,
                    CAN_USE_DEVTOOLS_GENERATIVE_AI_FEATURES_CAPABILITY_NAME,
                    "accountcapabilities/geztenjnmnqxa")
+#endif
 
+#if !BUILDFLAG(IS_IOS)
 ACCOUNT_CAPABILITY(kCanUseEduFeaturesCapabilityName,
                    CAN_USE_EDU_FEATURES_CAPABILITY_NAME,
                    "accountcapabilities/gezdsmbnmnqxa")
+#endif
 
+ACCOUNT_CAPABILITY(kCanUseGeminiInChromeCapabilityName,
+                   CAN_USE_GEMINI_IN_CHROME_CAPABILITY_NAME,
+                   "accountcapabilities/giytmnrnmnqxa")
+
+#if BUILDFLAG(IS_CHROMEOS)
 ACCOUNT_CAPABILITY(kCanUseGenerativeAiInRecorderApp,
                    CAN_USE_GENERATIVE_AI_IN_RECORDER_APP,
                    "accountcapabilities/ge2tkobnmnqxa")
+#endif
 
+#if BUILDFLAG(IS_CHROMEOS)
 ACCOUNT_CAPABILITY(kCanUseGenerativeAiPhotoEditing,
                    CAN_USE_GENERATIVE_AI_PHOTO_EDITING,
                    "accountcapabilities/ge3dgobnmnqxa")
+#endif
 
 ACCOUNT_CAPABILITY(kCanUseMantaServiceName,
                    CAN_USE_MANTA_SERVICE_NAME,
@@ -110,9 +150,10 @@ ACCOUNT_CAPABILITY(kIsOptedInToParentalSupervisionCapabilityName,
                    IS_OPTED_IN_TO_PARENTAL_SUPERVISION_CAPABILITY_NAME,
                    "accountcapabilities/guzdslldmfya")
 
-ACCOUNT_CAPABILITY(kIsSubjectToAccountLevelEnterprisePoliciesCapabilityName,
-                   IS_SUBJECT_TO_ACCOUNT_LEVEL_ENTERPRISE_POLICIES_CAPABILITY_NAME,
-                   "accountcapabilities/ge4tgnznmnqxa")
+ACCOUNT_CAPABILITY(
+    kIsSubjectToAccountLevelEnterprisePoliciesCapabilityName,
+    IS_SUBJECT_TO_ACCOUNT_LEVEL_ENTERPRISE_POLICIES_CAPABILITY_NAME,
+    "accountcapabilities/ge4tgnznmnqxa")
 
 ACCOUNT_CAPABILITY(
     kIsSubjectToChromePrivacySandboxRestrictedMeasurementNotice,
@@ -127,11 +168,30 @@ ACCOUNT_CAPABILITY(kIsSubjectToParentalControlsCapabilityName,
                    IS_SUBJECT_TO_PARENTAL_CONTROLS_CAPABILITY_NAME,
                    "accountcapabilities/guydolldmfya")
 
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-ACCOUNT_CAPABILITY_F(kCanUseGeminiInChromeCapabilityName,
-                     CAN_USE_GEMINI_IN_CHROME_CAPABILITY_NAME,
-                     "accountcapabilities/giytmnrnmnqxa",
-                     switches::kGlicEligibilitySeparateAccountCapability)
+ACCOUNT_CAPABILITY(kIsSubjectToUniversalOptOutCapabilityName,
+                   IS_SUBJECT_TO_UNIVERSAL_OPT_OUT_CAPABILITY_NAME,
+                   "accountcapabilities/gmydemrnmnqxa")
+
+#if BUILDFLAG(IS_IOS)
+ACCOUNT_CAPABILITY(kMustFetchAppleAgeRangeInChromeCapabilityName,
+                   MUST_FETCH_APPLE_AGE_RANGE_IN_CHROME_CAPABILITY_NAME,
+                   "accountcapabilities/gi3dkmbnmnqxa")
 #endif
+
+#if BUILDFLAG(IS_IOS)
+ACCOUNT_CAPABILITY(kMustSkipAppleAgeRangeInChromeCapabilityName,
+                   MUST_SKIP_APPLE_AGE_RANGE_IN_CHROME_CAPABILITY_NAME,
+                   "accountcapabilities/gi2tqnbnmnqxa")
+#endif
+
+ACCOUNT_CAPABILITY(
+    kSupportsWalletPrivatePassesInAutofillCapabilityName,
+    SUPPORTS_WALLET_PRIVATE_PASSES_IN_AUTOFILL_NAME,
+#if BUILDFLAG(IS_IOS)
+    "accountcapabilities/gmzdsnrnmnqxa"
+#else
+    "accountcapabilities/gi3dknrnmnqxa"
+#endif
+)
 
 // keep-sorted end

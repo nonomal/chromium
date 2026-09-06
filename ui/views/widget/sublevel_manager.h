@@ -47,12 +47,18 @@ class VIEWS_EXPORT SublevelManager : public WidgetObserver {
   void OnWidgetChildRemoved(Widget* owner, Widget* child) override;
 
  private:
+  friend class SublevelManagerTest;
+
   // Repositions `child_` among its siblings of the same z-order level
   // to ensure that its sublevel is respected.
   void OrderChildWidget(Widget* child);
 
   // Check if a child widget is being tracked.
   bool IsTrackingChildWidget(Widget* child);
+
+  // Returns true if `child` is already in a position that satisfies the
+  // sublevel ordering constraints relative to its siblings.
+  bool IsChildWidgetOrderValid(Widget* child);
 
   // Returns the position in `children_` before which `child` should be inserted
   // to maintain the sublevel ordering. This methods assumes that `child` is not

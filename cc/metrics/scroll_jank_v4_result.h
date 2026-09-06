@@ -35,7 +35,7 @@ enum class JankReason {
   kMissedVsyncDuringFling,
   kMaxValue = kMissedVsyncDuringFling,
 };
-// LINT.ThenChange(//base/tracing/protos/chrome_track_event.proto:JankReason,//tools/metrics/histograms/metadata/event/histograms.xml:ScrollJankReasonV4)
+// LINT.ThenChange(//tools/metrics/histograms/metadata/event/histograms.xml:ScrollJankReasonV4)
 
 template <typename T>
 using JankReasonArray =
@@ -51,6 +51,20 @@ using JankReasonArray =
 struct ScrollJankV4Result {
   static constexpr int kMaxVsyncsSincePreviousFrame = 1000000;
   static constexpr int kMaxMissedVsyncs = kMaxVsyncsSincePreviousFrame - 1;
+
+  // The type of the VSync interval that the metric used to evaluate a frame.
+  // LINT.IfChange(VsyncIntervalType)
+  enum class VsyncIntervalType {
+    // VSync interval that the OS provided to Chrome for the current frame (or
+    // most recently before the current frame). See
+    // `viz::BeginFrameArgs::interval`.
+    kCurrentOsProvided,
+    // VSync interval which Chrome derived from possible deadlines for the
+    // previous frame. See `viz::BeginFrameArgs::deadline_derived_interval`.
+    kPreviousDeadlineDerived,
+    kMaxValue = kPreviousDeadlineDerived,
+  };
+  // LINT.ThenChange(//base/tracing/protos/chrome_track_event.proto:ScrollJankV4VsyncIntervalType)
 
   // Number of VSyncs that that Chrome missed before presenting the scroll
   // update for each reason. If at least one value is greater than zero, this
@@ -95,6 +109,13 @@ struct ScrollJankV4Result {
   // `ScrollJankDroppedFrameTracker::ReportLatestPresentationDataV4()` for
   // more information. Empty if this frame is non-damaging or synthetic.
   std::optional<base::TimeDelta> current_delivery_cutoff = std::nullopt;
+
+  // The VSync interval that was used to evaluate this frame for scroll jank.
+  base::TimeDelta vsync_interval = base::TimeDelta();
+
+  // The type of the VSync interval that was used to evaluate this frame for
+  // scroll jank.
+  VsyncIntervalType vsync_interval_type = VsyncIntervalType::kCurrentOsProvided;
 
   // The input generation timestamp of the first scroll update in the frame.
   //

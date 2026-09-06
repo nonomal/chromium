@@ -9,7 +9,7 @@
 #import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/authentication/test/signin_earl_grey.h"
 #import "ios/chrome/browser/authentication/test/signin_earl_grey_ui_test_util.h"
-#import "ios/chrome/browser/shared/public/features/features.h"
+#import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/signin/model/fake_system_identity.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/tab_groups/tab_group_app_interface.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/tab_groups/tab_groups_constants.h"
@@ -27,6 +27,7 @@
 
 using chrome_test_util::DeleteSharedConfirmationButton;
 using chrome_test_util::DeleteSharedGroupButton;
+using chrome_test_util::GREYAssertErrorNil;
 using chrome_test_util::LeaveSharedGroupButton;
 using chrome_test_util::LeaveSharedGroupConfirmationButton;
 using chrome_test_util::TabGridGroupCellAtIndex;
@@ -74,7 +75,6 @@ void AddSharedGroup(BOOL owner,
   AppLaunchConfiguration config;
   config.features_enabled.push_back(
       data_sharing::features::kDataSharingFeature);
-  config.features_disabled.push_back(kIOSAutoOpenRemoteTabGroupsSettings);
   // Add the flag to use FakeTabGroupSyncService.
   config.additional_args.push_back(
       "--" + std::string(test_switches::kEnableFakeTabGroupSyncService));
@@ -86,14 +86,16 @@ void AddSharedGroup(BOOL owner,
   RegisterQueryTitleHandler(self.testServer);
   GREYAssertTrue(self.testServer->Start(), @"Test server failed to start");
 
+  [ChromeEarlGrey setBoolValue:YES
+                   forUserPref:prefs::kAutomaticallyOpenTabGroupsEnabled];
+
   // `fakeIdentity2` joins shared groups as member.
   FakeSystemIdentity* identity = [FakeSystemIdentity fakeIdentity1];
   [SigninEarlGreyUI signinWithFakeIdentity:identity enableHistorySync:YES];
 
   // Make sure that the MessagingBackendService is fully initialized.
   NSError* error = [ChromeEarlGrey waitForMessagingBackendServiceInitialized];
-  GREYAssertNil(error, @"Failed to initialize MessagingBackendService: %@",
-                error);
+  GREYAssertErrorNil(error, @"Failed to initialize MessagingBackendService");
 }
 
 - (void)tearDownHelper {
@@ -150,6 +152,12 @@ void AddSharedGroup(BOOL owner,
 
 // Tests that leaving a shared tab group from the tab groups panel works.
 - (void)testSharedTabGroupsPanelLeaveSharedGroup {
+  // TODO(crbug.com/482348307): Test fails on iPad simulator.
+#if TARGET_IPHONE_SIMULATOR
+  if ([ChromeEarlGrey isIPadIdiom]) {
+    EARL_GREY_TEST_DISABLED(@"Fails on iPad simulator.");
+  }
+#endif
   AddSharedGroup(/*owner=*/NO, self.testServer);
 
   [[EarlGrey selectElementWithMatcher:TabGridTabGroupsPanelButton()]

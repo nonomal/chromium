@@ -10,6 +10,7 @@
 #include "base/containers/flat_map.h"
 #include "base/functional/bind.h"
 #include "base/run_loop.h"
+#include "components/viz/common/resources/shared_image_format.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/ozone/platform/wayland/gpu/wayland_buffer_manager_gpu.h"
@@ -47,9 +48,9 @@ class WaylandOverlayManagerTest : public WaylandTest {
   ~WaylandOverlayManagerTest() override = default;
 
   void SetUp() override {
-    const base::flat_map<gfx::BufferFormat, std::vector<uint64_t>>
+    const base::flat_map<viz::SharedImageFormat, std::vector<uint64_t>>
         kSupportedFormatsWithModifiers{
-            {gfx::BufferFormat::YUV_420_BIPLANAR, {DRM_FORMAT_MOD_LINEAR}}};
+            {viz::MultiPlaneFormat::kNV12, {DRM_FORMAT_MOD_LINEAR}}};
 
     WaylandTest::SetUp();
 
@@ -103,11 +104,8 @@ TEST_P(WaylandOverlayManagerTest, FormatSupportTest) {
 namespace {
 
 void NonIntegerDisplayRectTestHelper(WaylandBufferManagerGpu* manager_gpu,
-                                     bool is_context_delegated,
                                      bool expect_candidates_handled) {
   WaylandOverlayManager manager(manager_gpu);
-  if (is_context_delegated)
-    manager.SetContextDelegated();
 
   // Candidates for output surface and single-on-top quad.
   std::vector<OverlaySurfaceCandidate> candidates = {
@@ -135,13 +133,8 @@ void NonIntegerDisplayRectTestHelper(WaylandBufferManagerGpu* manager_gpu,
 }  // namespace
 
 TEST_P(WaylandOverlayManagerTest, DoesNotSupportNonIntegerDisplayRect) {
-  constexpr std::array<std::array<bool, 2>, 2> test_data = {
-      {{false, false}, {true, false}}};
-  for (const auto& data : test_data) {
-    NonIntegerDisplayRectTestHelper(buffer_manager_gpu_.get(),
-                                    data[0] /* is_delegated_context */,
-                                    data[1] /* expect_candidates_handled */);
-  }
+  NonIntegerDisplayRectTestHelper(buffer_manager_gpu_.get(),
+                                  /*expect_candidates_handled=*/false);
 }
 
 GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(WaylandOverlayManagerTest);

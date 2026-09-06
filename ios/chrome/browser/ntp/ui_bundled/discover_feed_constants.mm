@@ -5,6 +5,6 @@
 #import "ios/chrome/browser/ntp/ui_bundled/discover_feed_constants.h"
 
 const char kDefaultDiscoverReferrer[] = "https://www.google.com";
-const char kDiscoverReferrerParameter[] = "DiscoverReferrerParameter";
 
 const CGFloat kDiscoverFeedContentMaxWidth = 430;
+const CGFloat kDiscoverFeedContentMaxWidthUICleanup = 512;

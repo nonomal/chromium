@@ -18,13 +18,13 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/containers/adapters.h"
-#include "base/containers/contains.h"
 #include "base/containers/span.h"
 
 #if defined(ANDROID)
@@ -481,6 +481,23 @@ BPF_TEST_C(SandboxBPF, SyntheticPolicy, SyntheticPolicy) {
     if (IsSyscallForTestHarness(syscall_number)) {
       continue;
     }
+#if defined(__NR_uretprobe)
+    if (syscall_number == __NR_uretprobe) {
+      // The kernel executes uretprobe(2) without consulting seccomp filters
+      // (it is a kernel implementation detail of x86-64 uprobes that default
+      // container policies were breaking), and it raises SIGILL when called
+      // from outside a real uprobe return trampoline, so it cannot be
+      // filtered or invoked here.
+      continue;
+    }
+#endif
+#if defined(__NR_uprobe)
+    if (syscall_number == __NR_uprobe) {
+      // uprobe(2) bypasses seccomp the same way and fails with its own errno
+      // rather than the filter's when called from outside a probe trampoline.
+      continue;
+    }
+#endif
     errno = 0;
     BPF_ASSERT(syscall(syscall_number) == -1);
     BPF_ASSERT(errno == SysnoToRandomErrno(syscall_number));
@@ -1070,7 +1087,8 @@ class EqualityStressTest {
     // arg_value.tests[]. In most cases, the current value of "mismatched"
     // would fit this requirement. But on the off-chance that it happens
     // to collide, we double-check.
-    while (base::Contains(arg_value.tests, mismatched, &Tests::k_value)) {
+    while (
+        std::ranges::contains(arg_value.tests, mismatched, &Tests::k_value)) {
       ++mismatched;
     }
     // Now verify that we see the expected return value from system calls,

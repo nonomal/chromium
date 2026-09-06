@@ -81,6 +81,17 @@ gfx::GpuMemoryBufferHandle VideoCaptureBufferPoolImpl::GetGpuMemoryBufferHandle(
   return tracker->GetGpuMemoryBufferHandle();
 }
 
+media::mojom::VideoBufferHandlePtr
+VideoCaptureBufferPoolImpl::GetVideoBufferHandle(int buffer_id) {
+  base::AutoLock lock(lock_);
+  VideoCaptureBufferTracker* tracker = GetTracker(buffer_id);
+  if (!tracker) {
+    NOTREACHED() << "Invalid buffer_id.";
+  }
+
+  return tracker->GetVideoBufferHandle();
+}
+
 VideoCaptureBufferType VideoCaptureBufferPoolImpl::GetBufferType(
     int buffer_id) {
   base::AutoLock lock(lock_);
@@ -137,7 +148,8 @@ VideoCaptureBufferPoolImpl::ReserveIdForExternalBuffer(
       continue;
     }
 
-    if (tracker->IsSameGpuMemoryBuffer(buffer.handle)) {
+    if (it->first > last_invalidated_id_ &&
+        tracker->IsSameGpuMemoryBuffer(buffer.handle)) {
       tracker->SetHeldByProducer(true);
       tracker->UpdateExternalData(std::move(buffer));
       *buffer_id = it->first;
@@ -165,18 +177,32 @@ VideoCaptureBufferPoolImpl::ReserveIdForExternalBuffer(
   }
 
   // Create the new tracker.
-  auto tracker =
-      buffer_tracker_factory_->CreateTrackerForExternalGpuMemoryBuffer(
-          std::move(buffer.handle));
+  std::unique_ptr<VideoCaptureBufferTracker> tracker;
+  if (buffer.client_shared_image) {
+    tracker = buffer_tracker_factory_->CreateTrackerForExternalBuffer(
+        std::move(buffer));
+  } else {
+    // We need to keep |buffer| alive for UpdateExternalData(), so we move only
+    // the necessary parts for tracker creation.
+    CapturedExternalVideoBuffer factory_buffer = CapturedExternalVideoBuffer(
+        std::move(buffer.handle), buffer.format, buffer.color_space);
+    tracker = buffer_tracker_factory_->CreateTrackerForExternalBuffer(
+        std::move(factory_buffer));
+
 #if BUILDFLAG(IS_WIN)
-  // Windows needs to create buffer from external handle, but mac doesn't.
-  if (!tracker ||
-      !tracker->Init(dimensions, buffer.format.pixel_format, nullptr)) {
+    // Windows needs to create buffer from external handle, but mac doesn't.
+    if (tracker &&
+        tracker->Init(dimensions, buffer.format.pixel_format, nullptr)) {
+      tracker->UpdateExternalData(std::move(buffer));
+    }
+#endif
+  }
+
+  if (!tracker) {
     DLOG(ERROR) << "Error initializing VideoCaptureBufferTracker";
     return VideoCaptureDevice::Client::ReserveResult::kAllocationFailed;
   }
-  tracker->UpdateExternalData(std::move(buffer));
-#endif
+
   tracker->SetHeldByProducer(true);
   const int new_buffer_id = next_buffer_id_++;
   trackers_[new_buffer_id] = std::move(tracker);
@@ -218,6 +244,11 @@ double VideoCaptureBufferPoolImpl::GetBufferPoolUtilization() const {
   return static_cast<double>(num_buffers_held) / count_;
 }
 
+void VideoCaptureBufferPoolImpl::InvalidateBuffers() {
+  base::AutoLock lock(lock_);
+  last_invalidated_id_ = next_buffer_id_ - 1;
+}
+
 VideoCaptureDevice::Client::ReserveResult
 VideoCaptureBufferPoolImpl::ReserveForProducerInternal(
     const gfx::Size& dimensions,
@@ -237,7 +268,8 @@ VideoCaptureBufferPoolImpl::ReserveForProducerInternal(
   for (auto it = trackers_.begin(); it != trackers_.end(); ++it) {
     VideoCaptureBufferTracker* const tracker = it->second.get();
     if (!tracker->IsHeldByProducerOrConsumer()) {
-      if (tracker->IsReusableForFormat(dimensions, pixel_format, strides)) {
+      if (it->first > last_invalidated_id_ &&
+          tracker->IsReusableForFormat(dimensions, pixel_format, strides)) {
         // Reuse this buffer
         tracker->SetHeldByProducer(true);
         tracker->set_frame_feedback_id(frame_feedback_id);

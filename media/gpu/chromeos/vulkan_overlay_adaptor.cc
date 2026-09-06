@@ -2,16 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "media/gpu/chromeos/vulkan_overlay_adaptor.h"
 
 #include "base/bits.h"
+#include "base/compiler_specific.h"
+#include "base/containers/to_vector.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/task/thread_pool.h"
 #include "gpu/vulkan/init/vulkan_factory.h"
 #include "gpu/vulkan/vulkan_function_pointers.h"
@@ -116,14 +114,17 @@ class VulkanOverlayAdaptor::VulkanDescriptorPool {
       VkDescriptorSetLayout descriptor_set_layout,
       VkDevice logical_device);
 
-  const std::vector<VkDescriptorSet>& Get();
+  std::vector<VkDescriptorSet> Get();
 
  private:
-  VulkanDescriptorPool(std::vector<VkDescriptorSet> descriptor_sets,
-                       VkDescriptorPool descriptor_pool,
-                       VkDevice logical_device);
+  VulkanDescriptorPool(
+      std::vector<base::RawPtrIfPtrT<VkDescriptorSet, DanglingUntriaged>>
+          descriptor_sets,
+      VkDescriptorPool descriptor_pool,
+      VkDevice logical_device);
 
-  const std::vector<VkDescriptorSet> descriptor_sets_;
+  const std::vector<base::RawPtrIfPtrT<VkDescriptorSet, DanglingUntriaged>>
+      descriptor_sets_;
 
   const VkDescriptorPool descriptor_pool_;
   const VkDevice logical_device_;
@@ -190,8 +191,10 @@ class VulkanOverlayAdaptor::VulkanTextureImage {
       VkDevice logical_device);
 
   VkImage GetImage();
-  const std::vector<VkImageView>& GetImageViews();
-  const std::vector<VkFramebuffer>& GetFramebuffers();
+  const std::vector<base::RawPtrIfPtrT<VkImageView, DanglingUntriaged>>&
+  GetImageViews() const;
+  const std::vector<base::RawPtrIfPtrT<VkFramebuffer, DanglingUntriaged>>&
+  GetFramebuffers() const;
   void TransitionImageLayout(
       gpu::VulkanCommandBuffer* command_buf,
       VkImageLayout new_layout,
@@ -199,15 +202,20 @@ class VulkanOverlayAdaptor::VulkanTextureImage {
       uint32_t dst_queue_family_index = VK_QUEUE_FAMILY_IGNORED);
 
  private:
-  VulkanTextureImage(gpu::VulkanImage& image,
-                     const std::vector<VkImageView>& image_views,
-                     const std::vector<VkFramebuffer>& framebuffers,
-                     VkImageLayout initial_layout,
-                     VkDevice logical_device);
+  VulkanTextureImage(
+      gpu::VulkanImage& image,
+      std::vector<base::RawPtrIfPtrT<VkImageView, DanglingUntriaged>>
+          image_views,
+      std::vector<base::RawPtrIfPtrT<VkFramebuffer, DanglingUntriaged>>
+          framebuffers,
+      VkImageLayout initial_layout,
+      VkDevice logical_device);
 
   const raw_ref<gpu::VulkanImage> image_;
-  const std::vector<VkImageView> image_views_;
-  const std::vector<VkFramebuffer> framebuffers_;
+  const std::vector<base::RawPtrIfPtrT<VkImageView, DanglingUntriaged>>
+      image_views_;
+  const std::vector<base::RawPtrIfPtrT<VkFramebuffer, DanglingUntriaged>>
+      framebuffers_;
 
   VkImageLayout current_layout_;
   const VkDevice logical_device_;
@@ -522,10 +530,11 @@ VulkanOverlayAdaptor::VulkanPipeline::Create(
 }
 
 VulkanOverlayAdaptor::VulkanDescriptorPool::VulkanDescriptorPool(
-    std::vector<VkDescriptorSet> descriptor_sets,
+    std::vector<base::RawPtrIfPtrT<VkDescriptorSet, DanglingUntriaged>>
+        descriptor_sets,
     VkDescriptorPool descriptor_pool,
     VkDevice logical_device)
-    : descriptor_sets_(descriptor_sets),
+    : descriptor_sets_(std::move(descriptor_sets)),
       descriptor_pool_(descriptor_pool),
       logical_device_(logical_device) {}
 
@@ -533,9 +542,8 @@ VulkanOverlayAdaptor::VulkanDescriptorPool::~VulkanDescriptorPool() {
   vkDestroyDescriptorPool(logical_device_, descriptor_pool_, nullptr);
 }
 
-const std::vector<VkDescriptorSet>&
-VulkanOverlayAdaptor::VulkanDescriptorPool::Get() {
-  return descriptor_sets_;
+std::vector<VkDescriptorSet> VulkanOverlayAdaptor::VulkanDescriptorPool::Get() {
+  return base::ToVector<VkDescriptorSet>(descriptor_sets_);
 }
 
 std::unique_ptr<VulkanOverlayAdaptor::VulkanDescriptorPool>
@@ -573,26 +581,31 @@ VulkanOverlayAdaptor::VulkanDescriptorPool::Create(
   alloc_info.descriptorSetCount = num_descriptor_sets;
   alloc_info.pSetLayouts = layouts.data();
 
-  std::vector<VkDescriptorSet> descriptor_sets(num_descriptor_sets);
-  if (vkAllocateDescriptorSets(logical_device, &alloc_info,
-                               descriptor_sets.data()) != VK_SUCCESS) {
+  std::vector<VkDescriptorSet> temp_sets(num_descriptor_sets);
+  if (vkAllocateDescriptorSets(logical_device, &alloc_info, temp_sets.data()) !=
+      VK_SUCCESS) {
     LOG(ERROR) << "Could not create descriptor sets!";
     return nullptr;
   }
 
+  auto descriptor_sets =
+      base::ToVector<base::RawPtrIfPtrT<VkDescriptorSet, DanglingUntriaged>>(
+          temp_sets);
+
   return base::WrapUnique(new VulkanDescriptorPool(
-      descriptor_sets, descriptor_pool, logical_device));
+      std::move(descriptor_sets), descriptor_pool, logical_device));
 }
 
 VulkanOverlayAdaptor::VulkanTextureImage::VulkanTextureImage(
     gpu::VulkanImage& image,
-    const std::vector<VkImageView>& image_views,
-    const std::vector<VkFramebuffer>& framebuffers,
+    std::vector<base::RawPtrIfPtrT<VkImageView, DanglingUntriaged>> image_views,
+    std::vector<base::RawPtrIfPtrT<VkFramebuffer, DanglingUntriaged>>
+        framebuffers,
     VkImageLayout initial_layout,
     VkDevice logical_device)
     : image_(image),
-      image_views_(image_views),
-      framebuffers_(framebuffers),
+      image_views_(std::move(image_views)),
+      framebuffers_(std::move(framebuffers)),
       current_layout_(initial_layout),
       logical_device_(logical_device) {}
 
@@ -610,13 +623,13 @@ VkImage VulkanOverlayAdaptor::VulkanTextureImage::GetImage() {
   return image_->image();
 }
 
-const std::vector<VkImageView>&
-VulkanOverlayAdaptor::VulkanTextureImage::GetImageViews() {
+const std::vector<base::RawPtrIfPtrT<VkImageView, DanglingUntriaged>>&
+VulkanOverlayAdaptor::VulkanTextureImage::GetImageViews() const {
   return image_views_;
 }
 
-const std::vector<VkFramebuffer>&
-VulkanOverlayAdaptor::VulkanTextureImage::GetFramebuffers() {
+const std::vector<base::RawPtrIfPtrT<VkFramebuffer, DanglingUntriaged>>&
+VulkanOverlayAdaptor::VulkanTextureImage::GetFramebuffers() const {
   return framebuffers_;
 }
 
@@ -648,7 +661,7 @@ VulkanOverlayAdaptor::VulkanTextureImage::Create(
   CHECK_EQ(formats.size(), sizes.size());
   CHECK_EQ(sizes.size(), aspects.size());
 
-  std::vector<VkImageView> image_views;
+  std::vector<base::RawPtrIfPtrT<VkImageView, DanglingUntriaged>> image_views;
   for (size_t i = 0; i < formats.size(); i++) {
     VkImageViewCreateInfo view_info{};
     view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -665,20 +678,25 @@ VulkanOverlayAdaptor::VulkanTextureImage::Create(
     if (vkCreateImageView(logical_device, &view_info, nullptr, &image_view) !=
         VK_SUCCESS) {
       LOG(ERROR) << "Could not create image view!";
+      for (VkImageView created_image_view : image_views) {
+        vkDestroyImageView(logical_device, created_image_view, nullptr);
+      }
       return nullptr;
     }
 
-    image_views.emplace_back(std::move(image_view));
+    image_views.push_back(std::move(image_view));
   }
 
-  std::vector<VkFramebuffer> framebuffers;
+  std::vector<base::RawPtrIfPtrT<VkFramebuffer, DanglingUntriaged>>
+      framebuffers;
   if (is_framebuffer) {
     for (size_t i = 0; i < sizes.size(); i++) {
       VkFramebufferCreateInfo framebuffer_info{};
       framebuffer_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
       framebuffer_info.renderPass = render_pass;
       framebuffer_info.attachmentCount = 1;
-      framebuffer_info.pAttachments = image_views.data() + i;
+      VkImageView view_handle = image_views[i];
+      framebuffer_info.pAttachments = &view_handle;
       framebuffer_info.width = sizes[i].width();
       framebuffer_info.height = sizes[i].height();
       framebuffer_info.layers = 1;
@@ -687,9 +705,16 @@ VulkanOverlayAdaptor::VulkanTextureImage::Create(
       if (vkCreateFramebuffer(logical_device, &framebuffer_info, nullptr,
                               &framebuffer) != VK_SUCCESS) {
         LOG(ERROR) << "Could not create framebuffer!";
+        for (VkFramebuffer created_framebuffer : framebuffers) {
+          vkDestroyFramebuffer(logical_device, created_framebuffer, nullptr);
+        }
+        for (VkImageView created_image_view : image_views) {
+          vkDestroyImageView(logical_device, created_image_view, nullptr);
+        }
+        return nullptr;
       }
 
-      framebuffers.emplace_back(std::move(framebuffer));
+      framebuffers.push_back(std::move(framebuffer));
     }
   }
 
@@ -1183,7 +1208,7 @@ void VulkanOverlayAdaptor::Process(gpu::VulkanImage& in_image,
   descriptor_write[1].dstArrayElement = 0;
   descriptor_write[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
   descriptor_write[1].descriptorCount = 1;
-  descriptor_write[1].pImageInfo = image_info.data() + 1;
+  descriptor_write[1].pImageInfo = UNSAFE_TODO(image_info.data() + 1);
   descriptor_write[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   descriptor_write[2].dstSet = transform_descriptor_pool_->Get()[0];
   descriptor_write[2].dstBinding = 0;
@@ -1191,7 +1216,7 @@ void VulkanOverlayAdaptor::Process(gpu::VulkanImage& in_image,
   descriptor_write[2].descriptorType =
       VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   descriptor_write[2].descriptorCount = 1;
-  descriptor_write[2].pImageInfo = image_info.data() + 2;
+  descriptor_write[2].pImageInfo = UNSAFE_TODO(image_info.data() + 2);
 
   vkUpdateDescriptorSets(vulkan_device_queue_->GetVulkanDevice(),
                          descriptor_write.size(), descriptor_write.data(), 0,
@@ -1208,8 +1233,10 @@ void VulkanOverlayAdaptor::Process(gpu::VulkanImage& in_image,
     viewport.height = static_cast<float>(input_coded_size.height());
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
-    CHECK(viewport.width <= 10000.0f && viewport.width >= 0.0f);
-    CHECK(viewport.height <= 10000.0f && viewport.height >= 0.0f);
+    CHECK(0.0f <= viewport.width &&
+          viewport.width <= static_cast<float>(pivot_image_->size().width()));
+    CHECK(0.0f <= viewport.height &&
+          viewport.height <= static_cast<float>(pivot_image_->size().height()));
     vkCmdSetViewport(record.handle(), 0, 1, &viewport);
 
     VkRect2D scissor{};

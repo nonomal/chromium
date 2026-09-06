@@ -28,57 +28,47 @@ class MostVisitedSitesBridge {
   MostVisitedSitesBridge(const MostVisitedSitesBridge&) = delete;
   MostVisitedSitesBridge& operator=(const MostVisitedSitesBridge&) = delete;
 
-  void Destroy(JNIEnv* env);
+  void Destroy();
 
-  void OnHomepageStateChanged(JNIEnv* env);
+  void OnHomepageStateChanged();
 
   void SetObserver(JNIEnv* env,
                    const base::android::JavaRef<jobject>& j_observer,
-                   jint num_sites);
+                   int32_t num_sites);
 
   void SetHomepageClient(JNIEnv* env,
                          const base::android::JavaRef<jobject>& j_client);
 
-  jboolean AddCustomLinkTo(JNIEnv* env,
-                           const std::u16string& name,
-                           const GURL& url,
-                           jint pos);
+  bool AddCustomLinkTo(const std::u16string& name,
+                       const GURL& url,
+                       int32_t pos);
 
-  jboolean AddCustomLink(JNIEnv* env,
-                         const std::u16string& name,
-                         const GURL& url);
+  bool AddCustomLink(const std::u16string& name, const GURL& url);
 
-  jboolean AssignCustomLink(JNIEnv* env,
-                            const GURL& key_url,
-                            const std::u16string& j_name,
+  bool AssignCustomLink(const GURL& key_url,
+                        const std::u16string& j_name,
+                        const GURL& url);
+
+  bool DeleteCustomLink(const GURL& key_url);
+
+  bool HasCustomLink(const GURL& key_url);
+
+  bool ReorderCustomLink(const GURL& key_url, int32_t new_pos);
+
+  void AddOrRemoveBlockedUrl(const GURL& url, bool add_url);
+  void RecordPageImpression(int32_t jtiles_count);
+  void RecordTileImpression(int32_t jindex,
+                            int32_t jvisual_type,
+                            int32_t jicon_type,
+                            int32_t jtitle_source,
+                            int32_t jsource,
                             const GURL& url);
+  void RecordOpenedMostVisitedItem(int32_t index,
+                                   int32_t tile_type,
+                                   int32_t title_source,
+                                   int32_t source);
 
-  jboolean DeleteCustomLink(JNIEnv* env, const GURL& key_url);
-
-  jboolean HasCustomLink(JNIEnv* env, const GURL& key_url);
-
-  jboolean ReorderCustomLink(JNIEnv* env, const GURL& key_url, jint new_pos);
-
-  void AddOrRemoveBlockedUrl(JNIEnv* env,
-                             const base::android::JavaRef<jobject>& j_url,
-                             jboolean add_url);
-  void RecordPageImpression(JNIEnv* env,
-                            jint jtiles_count);
-  void RecordTileImpression(JNIEnv* env,
-                            jint jindex,
-                            jint jvisual_type,
-                            jint jicon_type,
-                            jint jtitle_source,
-                            jint jsource,
-                            const base::android::JavaRef<jobject>& jurl);
-  void RecordOpenedMostVisitedItem(
-      JNIEnv* env,
-      jint index,
-      jint tile_type,
-      jint title_source,
-      jint source);
-
-  jdouble GetSuggestionScore(JNIEnv* env, const GURL& url);
+  double GetSuggestionScore(const GURL& url);
 
  private:
   ~MostVisitedSitesBridge();

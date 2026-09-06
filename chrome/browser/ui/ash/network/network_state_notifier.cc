@@ -10,12 +10,11 @@
 #include "ash/constants/notifier_catalogs.h"
 #include "ash/public/cpp/notification_utils.h"
 #include "ash/public/cpp/system_tray_client.h"
+#include "ash/resources/vector_icons/vector_icons.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/app/vector_icons/vector_icons.h"
-#include "chrome/browser/notifications/system_notification_helper.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/ash/components/network/cellular_esim_profile_handler.h"
 #include "chromeos/ash/components/network/network_configuration_handler.h"
@@ -31,6 +30,7 @@
 #include "ui/chromeos/shill_error.h"
 #include "ui/chromeos/strings/grit/ui_chromeos_strings.h"
 #include "ui/gfx/vector_icon_types.h"
+#include "ui/message_center/message_center.h"
 #include "ui/message_center/public/cpp/notification.h"
 
 namespace ash {
@@ -60,9 +60,8 @@ bool IsConfigurationError(const std::string& shill_error) {
          shill_error == shill::kErrorBadWEPKey;
 }
 
-std::string GetStringFromDictionary(
-    const std::optional<base::Value::Dict>& dict,
-    const std::string& key) {
+std::string GetStringFromDictionary(const std::optional<base::DictValue>& dict,
+                                    const std::string& key) {
   const std::string* v = dict ? dict->FindString(key) : nullptr;
   return v ? *v : std::string();
 }
@@ -96,12 +95,12 @@ std::u16string GetConnectErrorString(const std::string& error_name) {
 const gfx::VectorIcon& GetErrorNotificationVectorIcon(
     const std::string& network_type) {
   if (network_type == shill::kTypeVPN) {
-    return kNotificationVpnIcon;
+    return ash::kNotificationVpnIcon;
   }
   if (network_type == shill::kTypeCellular) {
-    return kNotificationMobileDataOffIcon;
+    return ash::kNotificationMobileDataOffIcon;
   }
-  return kNotificationWifiOffIcon;
+  return ash::kNotificationWifiOffIcon;
 }
 
 // |identifier| may be a service path or guid.
@@ -114,7 +113,7 @@ void ShowErrorNotification(const std::string& identifier,
                            base::RepeatingClosure callback) {
   NET_LOG(ERROR) << "ShowErrorNotification: " << identifier << ": "
                  << base::UTF16ToUTF8(title);
-  message_center::Notification notification = CreateSystemNotification(
+  auto notification = CreateSystemNotificationPtr(
       message_center::NOTIFICATION_TYPE_SIMPLE, notification_id, title, message,
       std::u16string() /* display_source */, GURL(),
       message_center::NotifierId(message_center::NotifierType::SYSTEM_COMPONENT,
@@ -123,7 +122,8 @@ void ShowErrorNotification(const std::string& identifier,
       new message_center::HandleNotificationClickDelegate(std::move(callback)),
       GetErrorNotificationVectorIcon(network_type),
       message_center::SystemNotificationWarningLevel::WARNING);
-  SystemNotificationHelper::GetInstance()->Display(notification);
+  message_center::MessageCenter::Get()->AddNotification(
+      std::move(notification));
 }
 
 bool ShouldConnectFailedNotificationBeShown(const std::string& error_name,
@@ -412,7 +412,7 @@ void NetworkStateNotifier::UpdateCellularActivating(
   }
 
   cellular_activating_guids_.erase(cellular_guid);
-  message_center::Notification notification = CreateSystemNotification(
+  auto notification = CreateSystemNotificationPtr(
       message_center::NOTIFICATION_TYPE_SIMPLE, kNetworkActivateNotificationId,
       l10n_util::GetStringUTF16(IDS_NETWORK_CELLULAR_ACTIVATED_TITLE),
       l10n_util::GetStringFUTF16(IDS_NETWORK_CELLULAR_ACTIVATED,
@@ -425,9 +425,10 @@ void NetworkStateNotifier::UpdateCellularActivating(
       new message_center::HandleNotificationClickDelegate(
           base::BindRepeating(&NetworkStateNotifier::ShowNetworkSettings,
                               weak_ptr_factory_.GetWeakPtr(), cellular_guid)),
-      kNotificationMobileDataIcon,
+      ash::kNotificationMobileDataIcon,
       message_center::SystemNotificationWarningLevel::WARNING);
-  SystemNotificationHelper::GetInstance()->Display(notification);
+  message_center::MessageCenter::Get()->AddNotification(
+      std::move(notification));
 }
 
 void NetworkStateNotifier::ShowNetworkConnectErrorForGuid(
@@ -455,7 +456,7 @@ void NetworkStateNotifier::ShowMobileActivationErrorForGuid(
                    << guid;
     return;
   }
-  message_center::Notification notification = CreateSystemNotification(
+  auto notification = CreateSystemNotificationPtr(
       message_center::NOTIFICATION_TYPE_SIMPLE, kNetworkActivateNotificationId,
       l10n_util::GetStringUTF16(IDS_NETWORK_ACTIVATION_ERROR_TITLE),
       l10n_util::GetStringFUTF16(IDS_NETWORK_ACTIVATION_NEEDS_CONNECTION,
@@ -468,25 +469,22 @@ void NetworkStateNotifier::ShowMobileActivationErrorForGuid(
       new message_center::HandleNotificationClickDelegate(base::BindRepeating(
           &NetworkStateNotifier::ShowNetworkSettings,
           weak_ptr_factory_.GetWeakPtr(), cellular->guid())),
-      kNotificationMobileDataOffIcon,
+      ash::kNotificationMobileDataOffIcon,
       message_center::SystemNotificationWarningLevel::WARNING);
-  SystemNotificationHelper::GetInstance()->Display(notification);
+  message_center::MessageCenter::Get()->AddNotification(
+      std::move(notification));
 }
 
 void NetworkStateNotifier::RemoveConnectNotification() {
-  SystemNotificationHelper::GetInstance()->Close(kNetworkConnectNotificationId);
+  message_center::MessageCenter::Get()->RemoveNotification(
+      kNetworkConnectNotificationId, /*by_user=*/false);
   connect_error_notification_network_guid_.clear();
-}
-
-void NetworkStateNotifier::RemoveCarrierUnlockNotification() {
-  SystemNotificationHelper::GetInstance()->Close(
-      kNetworkCarrierUnlockNotificationId);
 }
 
 void NetworkStateNotifier::OnConnectErrorGetProperties(
     const std::string& error_name,
     const std::string& service_path,
-    std::optional<base::Value::Dict> shill_properties) {
+    std::optional<base::DictValue> shill_properties) {
   if (!shill_properties) {
     ShowConnectErrorNotification(error_name, service_path,
                                  std::move(shill_properties));
@@ -499,7 +497,7 @@ void NetworkStateNotifier::OnConnectErrorGetProperties(
       NetworkState::StateIsConnecting(state)) {
     NET_LOG(EVENT) << "Skipping connect error notification. State: " << state;
     // Network is no longer in an error state. This can happen if an
-    // unexpected idle state transition occurs, see http://crbug.com/333955.
+    // unexpected idle state transition occurs, see http://crbug.com/41083575.
     return;
   }
   ShowConnectErrorNotification(error_name, service_path,
@@ -509,7 +507,7 @@ void NetworkStateNotifier::OnConnectErrorGetProperties(
 void NetworkStateNotifier::ShowConnectErrorNotification(
     const std::string& error_name,
     const std::string& service_path,
-    std::optional<base::Value::Dict> shill_properties) {
+    std::optional<base::DictValue> shill_properties) {
   std::u16string error = GetConnectErrorString(error_name);
   NET_LOG(DEBUG) << "Notify: " << NetworkPathId(service_path)
                  << ": Connect error: " << error_name << ": "
@@ -647,7 +645,7 @@ void NetworkStateNotifier::ShowVpnDisconnectedNotification(VpnDetails* vpn) {
 void NetworkStateNotifier::ShowCarrierUnlockNotification() {
   std::u16string message =
       l10n_util::GetStringUTF16(IDS_NETWORK_CARRIER_UNLOCK_BODY);
-  message_center::Notification notification = CreateSystemNotification(
+  auto notification = CreateSystemNotificationPtr(
       message_center::NOTIFICATION_TYPE_SIMPLE,
       kNetworkCarrierUnlockNotificationId,
       l10n_util::GetStringFUTF16(IDS_NETWORK_CARRIER_UNLOCK_TITLE,
@@ -662,7 +660,8 @@ void NetworkStateNotifier::ShowCarrierUnlockNotification() {
                               weak_ptr_factory_.GetWeakPtr())),
       gfx::VectorIcon::EmptyIcon(),
       message_center::SystemNotificationWarningLevel::NORMAL);
-  SystemNotificationHelper::GetInstance()->Display(notification);
+  message_center::MessageCenter::Get()->AddNotification(
+      std::move(notification));
 }
 
 void NetworkStateNotifier::ShowNetworkSettings(const std::string& network_id) {

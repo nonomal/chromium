@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 package org.chromium.chrome.browser.hub;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
@@ -12,30 +14,29 @@ import android.app.Activity;
 import android.view.LayoutInflater;
 import android.view.View;
 
-import androidx.test.ext.junit.rules.ActivityScenarioRule;
-
 import com.google.common.collect.ImmutableSet;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.ParameterizedRobolectricTestRunner;
 import org.robolectric.ParameterizedRobolectricTestRunner.Parameter;
 import org.robolectric.ParameterizedRobolectricTestRunner.Parameters;
-import org.robolectric.shadows.ShadowLooper;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 
 import org.chromium.base.DeviceInfo;
-import org.chromium.base.supplier.ObservableSupplierImpl;
 import org.chromium.base.supplier.ObservableSuppliers;
-import org.chromium.base.supplier.SettableNullableObservableSupplier;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRule;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.toolbar.menu_button.MenuButton;
 import org.chromium.chrome.browser.toolbar.menu_button.MenuButtonCoordinator;
 import org.chromium.chrome.browser.ui.searchactivityutils.SearchActivityClient;
@@ -62,24 +63,19 @@ public class HubToolbarCoordinatorUnitTest {
 
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
 
-    @Rule
-    public ActivityScenarioRule<TestActivity> mActivityScenarioRule =
-            new ActivityScenarioRule<>(TestActivity.class);
-
     @Rule public BaseRobolectricTestRule mBaseRule = new BaseRobolectricTestRule();
 
-    @Spy
-    private final ObservableSupplierImpl<Boolean> mIsAnimatingSupplier =
-            new ObservableSupplierImpl<>();
+    private final SettableNonNullObservableSupplier<Boolean> mIsAnimatingSupplier =
+            ObservableSuppliers.createNonNull(false);
 
-    private final ObservableSupplierImpl<Pane> mFocusedPaneSupplier =
-            new ObservableSupplierImpl<>();
-    private final SettableNullableObservableSupplier<Tab> mCurrentTabSupplier =
-            ObservableSuppliers.createNullable();
+    private final SettableMonotonicObservableSupplier<Pane> mFocusedPaneSupplier =
+            ObservableSuppliers.createMonotonic();
+    private ActivityController<TestActivity> mActivityController;
     private HubToolbarCoordinator mCoordinator;
     private HubToolbarView mHubToolbarView;
     private MenuButton mMenuButton;
-    private ObservableSupplierImpl<Boolean> mBottomToolbarVisibilitySupplier;
+    private final SettableNonNullObservableSupplier<Boolean> mBottomToolbarVisibilitySupplier =
+            ObservableSuppliers.createNonNull(false);
 
     @Mock private PaneManager mPaneManager;
     @Mock private PaneOrderController mPaneOrderController;
@@ -97,8 +93,13 @@ public class HubToolbarCoordinatorUnitTest {
         when(mPaneManager.getFocusedPaneSupplier()).thenReturn(mFocusedPaneSupplier);
         when(mPaneManager.getPaneOrderController()).thenReturn(mPaneOrderController);
         when(mPaneOrderController.getPaneOrder()).thenReturn(ImmutableSet.of());
-        mBottomToolbarVisibilitySupplier = spy(new ObservableSupplierImpl<>());
-        mActivityScenarioRule.getScenario().onActivity(this::onActivity);
+        mActivityController = Robolectric.buildActivity(TestActivity.class).setup();
+        onActivity(mActivityController.get());
+    }
+
+    @After
+    public void tearDown() {
+        mActivityController.close();
     }
 
     private void onActivity(Activity activity) {
@@ -121,29 +122,44 @@ public class HubToolbarCoordinatorUnitTest {
                         mUserEducationHelper,
                         mIsAnimatingSupplier,
                         mBottomToolbarVisibilitySupplier,
-                        mCurrentTabSupplier,
                         mExitHubRunnable);
     }
 
     @Test
     public void isIphTriggered() {
-        verify(mIsAnimatingSupplier).addSyncObserver(any());
+        assertTrue(mIsAnimatingSupplier.hasObservers());
+        mIsAnimatingSupplier.set(true);
         mIsAnimatingSupplier.set(false);
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         verify(mUserEducationHelper).requestShowIph(any());
-        verify(mIsAnimatingSupplier).removeObserver(any());
+        assertFalse(mIsAnimatingSupplier.hasObservers());
     }
 
     @Test
     public void testBottomToolbarVisibilitySupplier() {
         // Verify that observer was added to the bottom toolbar visibility supplier
-        verify(mBottomToolbarVisibilitySupplier).addObserver(any());
+        assertTrue(mBottomToolbarVisibilitySupplier.hasObservers());
 
         // Destroy coordinator
         mCoordinator.destroy();
 
         // Verify that observer was removed from the bottom toolbar visibility supplier
-        verify(mBottomToolbarVisibilitySupplier).removeObserver(any());
+        assertFalse(mBottomToolbarVisibilitySupplier.hasObservers());
+    }
+
+    @Test
+    public void testSetPaneSwitcherScrollPosition() {
+        mCoordinator.setPaneSwitcherScrollPosition(1, 0.5f);
+        verify(mHubToolbarView).setPaneSwitcherScrollPosition(1, 0.5f);
+    }
+
+    @Test
+    public void testSetBlockTabSelectionCallback() {
+        mCoordinator.setBlockTabSelectionCallback(true);
+        verify(mHubToolbarView).setBlockTabSelectionCallback(true);
+
+        mCoordinator.setBlockTabSelectionCallback(false);
+        verify(mHubToolbarView).setBlockTabSelectionCallback(false);
     }
 }

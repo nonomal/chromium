@@ -8,8 +8,10 @@
 #include "base/files/file_util.h"
 #include "base/notreached.h"
 #include "base/test/test_file_util.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
@@ -103,7 +105,7 @@ class FileSystemAccessPickerRequiresUserGestureTest
 
   void SetupFakePermissionContext() {
     // Required to bypass permission prompt for directory picker.
-    content::SetFileSystemAccessPermissionContext(browser()->profile(),
+    content::SetFileSystemAccessPermissionContext(browser()->GetProfile(),
                                                   &permission_context_);
   }
 
@@ -136,7 +138,7 @@ class FileSystemAccessPickerRequiresUserGestureTest
   }
 
   content::WebContents* GetWebContents() {
-    return browser()->tab_strip_model()->GetActiveWebContents();
+    return browser()->GetTabStripModel()->GetActiveWebContents();
   }
 
   std::string GetScript() {
@@ -154,7 +156,7 @@ class FileSystemAccessPickerRequiresUserGestureTest
 
   void SetPolicy(const std::string& allowlisted_origin) {
     policy::PolicyMap policy_map;
-    base::Value::List allowed_origins;
+    base::ListValue allowed_origins;
     allowed_origins.Append(base::Value(allowlisted_origin));
     policy_map.Set(
         policy::key::kFileOrDirectoryPickerWithoutGestureAllowedForOrigins,

@@ -4,7 +4,6 @@
 
 #include "chrome/browser/media/router/discovery/access_code/access_code_cast_feature.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/web_ui_mocha_browser_test.h"
 #include "components/prefs/pref_service.h"
@@ -17,7 +16,7 @@ class AccessCodeCastTest : public WebUIMochaBrowserTest {
   }
 
   void SetUpOnMainThread() override {
-    browser()->profile()->GetPrefs()->SetBoolean(
+    browser()->GetProfile()->GetPrefs()->SetBoolean(
         media_router::prefs::kAccessCodeCastEnabled, true);
     WebUIMochaBrowserTest::SetUpOnMainThread();
   }
@@ -35,8 +34,6 @@ IN_PROC_BROWSER_TEST_F(AccessCodeCastTest, ErrorMessage) {
   RunTest("access_code_cast/error_message_test.js", "mocha.run()");
 }
 
-// TODO(crbug.com/40864933): PasscodeInput has started acting flaky ().
-// Disabling for now pending investigation.
-IN_PROC_BROWSER_TEST_F(AccessCodeCastTest, DISABLED_PasscodeInput) {
+IN_PROC_BROWSER_TEST_F(AccessCodeCastTest, PasscodeInput) {
   RunTest("access_code_cast/passcode_input_test.js", "mocha.run()");
 }

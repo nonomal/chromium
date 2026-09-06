@@ -17,6 +17,7 @@ import android.text.style.TypefaceSpan;
 import android.util.AttributeSet;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 
@@ -89,6 +90,7 @@ public class ReaderModePrefsView extends LinearLayout
     private @FontFamily.EnumType int mCurrentFontFamily;
     private Slider mFontScalingSlider;
     private HorizontalScrollView mHorizontalScrollView;
+    private MaterialButton mToggleLinksButton;
 
     private DistilledPagePrefs mDistilledPagePrefs;
 
@@ -131,6 +133,15 @@ public class ReaderModePrefsView extends LinearLayout
     public void onFinishInflate() {
         super.onFinishInflate();
 
+        ViewGroup bottomContainer = findViewById(R.id.bottom_container);
+        LayoutInflater.from(getContext())
+                .inflate(
+                        DomDistillerFeatures.sReaderModeToggleLinks.isEnabled()
+                                ? R.layout.reader_mode_prefs_bottom_content_with_toggle_links
+                                : R.layout.reader_mode_prefs_bottom_content,
+                        bottomContainer,
+                        true);
+
         initializeFontButton(R.id.font_sans_serif, FontFamily.SANS_SERIF, 0);
         initializeFontButton(R.id.font_serif, FontFamily.SERIF, 1);
         initializeFontButton(R.id.font_monospace, FontFamily.MONOSPACE, 2);
@@ -159,7 +170,7 @@ public class ReaderModePrefsView extends LinearLayout
         mFontScalingSlider.setStepSize(FONT_SCALE_STEP_SIZE);
         mFontScalingSlider.setTickActiveRadius(0);
         mFontScalingSlider.setTickInactiveRadius(0);
-        mFontScalingSlider.setLabelFormatter(value -> mPercentageFormatter.format(value));
+        mFontScalingSlider.setLabelFormatter(mPercentageFormatter::format);
 
         mFontScalingSlider.addOnChangeListener(
                 (slider, value, fromUser) -> {
@@ -175,6 +186,17 @@ public class ReaderModePrefsView extends LinearLayout
 
         View themeContainer = findViewById(R.id.theme_container);
         setCollectionInfoAccessibilityDelegate(themeContainer, mThemeButtons.size());
+
+        // TODO: Hide behind a feature flag.
+        mToggleLinksButton = findViewById(R.id.toggle_links_button);
+        if (mToggleLinksButton != null) {
+            mToggleLinksButton.setOnClickListener(
+                    v -> {
+                        boolean enabled = !mDistilledPagePrefs.getLinksEnabled();
+                        ReaderModeMetrics.reportReaderModePrefsLinksEnabled(enabled);
+                        mDistilledPagePrefs.setLinksEnabled(enabled);
+                    });
+        }
     }
 
     /**
@@ -239,21 +261,18 @@ public class ReaderModePrefsView extends LinearLayout
         final int fontHeightPx = fontMetrics.descent - fontMetrics.ascent;
         final int fontDescentPx = fontMetrics.descent;
         fontStyleSignifierString.setSpan(
-                new LineHeightSpan() {
-                    @Override
-                    public void chooseHeight(
-                            CharSequence text,
-                            int start,
-                            int end,
-                            int spanstartv,
-                            int v,
-                            FontMetricsInt fm) {
-                        fm.ascent = -(fontHeightPx - fontDescentPx);
-                        fm.descent = fontDescentPx;
-                        fm.top = fm.ascent;
-                        fm.bottom = fm.descent;
-                    }
-                },
+                (LineHeightSpan)
+                        (CharSequence text,
+                                int start,
+                                int end,
+                                int spanstartv,
+                                int v,
+                                FontMetricsInt fm) -> {
+                            fm.ascent = -(fontHeightPx - fontDescentPx);
+                            fm.descent = fontDescentPx;
+                            fm.top = fm.ascent;
+                            fm.bottom = fm.descent;
+                        },
                 0,
                 line1.length(),
                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -280,6 +299,7 @@ public class ReaderModePrefsView extends LinearLayout
         onChangeFontFamily(mCurrentFontFamily);
         onChangeFontScaling(mDistilledPagePrefs.getFontScaling());
         onChangeTheme(mDistilledPagePrefs.getTheme());
+        onChangeLinksEnabled(mDistilledPagePrefs.getLinksEnabled());
     }
 
     private void initializeColorButton(@IdRes int id, final int theme, final int index) {
@@ -360,6 +380,22 @@ public class ReaderModePrefsView extends LinearLayout
             mFontScalingSlider.setStateDescription(userFriendlyFontSizeDescription);
         } else {
             mFontScalingSlider.setContentDescription(userFriendlyFontSizeDescription);
+        }
+    }
+
+    @Override
+    public void onChangeLinksEnabled(boolean enabled) {
+        if (mToggleLinksButton != null) {
+            mToggleLinksButton.setIconResource(
+                    enabled ? R.drawable.ic_link_24dp : R.drawable.ic_link_off_24dp);
+            mToggleLinksButton.setContentDescription(
+                    getContext()
+                            .getString(
+                                    enabled
+                                            ? R.string
+                                                    .reader_mode_toggle_links_off_accessibility_label
+                                            : R.string
+                                                    .reader_mode_toggle_links_on_accessibility_label));
         }
     }
 

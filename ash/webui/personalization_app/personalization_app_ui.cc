@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
 #include "ash/webui/personalization_app/personalization_app_ui.h"
 
 #include <memory>
@@ -27,8 +26,6 @@
 #include "ash/webui/personalization_app/personalization_app_user_provider.h"
 #include "ash/webui/personalization_app/personalization_app_wallpaper_provider.h"
 #include "base/check.h"
-#include "base/containers/contains.h"
-#include "base/metrics/histogram_functions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -65,7 +62,7 @@ AmbientBackendController* GetAmbientBackendController() {
 }
 
 void AddResources(content::WebUIDataSource* source) {
-  source->AddResourcePath("", IDR_ASH_PERSONALIZATION_APP_INDEX_HTML);
+  source->SetDefaultResource(IDR_ASH_PERSONALIZATION_APP_INDEX_HTML);
   source->AddResourcePaths(kAshPersonalizationAppResources);
   source->AddResourcePath("test_loader.html", IDR_WEBUI_TEST_LOADER_HTML);
   source->AddResourcePath("test_loader.js", IDR_WEBUI_JS_TEST_LOADER_JS);
@@ -445,7 +442,6 @@ PersonalizationAppUI::PersonalizationAppUI(
       theme_provider_(std::move(theme_provider)),
       user_provider_(std::move(user_provider)),
       wallpaper_provider_(std::move(wallpaper_provider)) {
-  start_time_ = base::Time::Now();
   DCHECK(wallpaper_provider_);
 
   content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
@@ -474,13 +470,7 @@ PersonalizationAppUI::PersonalizationAppUI(
   AddIntegers(source);
 }
 
-PersonalizationAppUI::~PersonalizationAppUI() {
-  base::TimeDelta duration = base::Time::Now() - start_time_;
-  base::UmaHistogramCustomTimes("Ash.Personalization.App.Duration", duration,
-                                /*min=*/base::Minutes(1),
-                                /*max=*/base::Minutes(30),
-                                /*buckets=*/31);
-}
+PersonalizationAppUI::~PersonalizationAppUI() = default;
 
 void PersonalizationAppUI::BindInterface(
     mojo::PendingReceiver<personalization_app::mojom::AmbientProvider>
@@ -520,9 +510,6 @@ void PersonalizationAppUI::AddBooleans(content::WebUIDataSource* source) {
   source->AddBoolean("isGooglePhotosIntegrationEnabled",
                      wallpaper_provider_->IsEligibleForGooglePhotos());
 
-  source->AddBoolean("isGooglePhotosSharedAlbumsEnabled",
-                     features::IsWallpaperGooglePhotosSharedAlbumsEnabled());
-
   source->AddBoolean("isAmbientModeAllowed", IsAmbientModeAllowed());
 
   source->AddBoolean(
@@ -543,9 +530,8 @@ void PersonalizationAppUI::AddBooleans(content::WebUIDataSource* source) {
 
   const bool common_sea_pen_requirements =
       sea_pen_provider_->IsEligibleForSeaPen();
-  source->AddBoolean("isSeaPenEnabled",
-                     ::ash::features::IsSeaPenEnabled() &&
-                         common_sea_pen_requirements);
+  source->AddBoolean("isSeaPenEnabled", ::ash::features::IsSeaPenEnabled() &&
+                                            common_sea_pen_requirements);
   source->AddBoolean("isSeaPenTextInputEnabled",
                      common_sea_pen_requirements &&
                          ::ash::features::IsSeaPenTextInputEnabled() &&
@@ -569,7 +555,7 @@ void PersonalizationAppUI::AddIntegers(content::WebUIDataSource* source) {
 void PersonalizationAppUI::HandleWebUIRequest(
     const std::string& path,
     content::WebUIDataSource::GotDataCallback callback) {
-  DCHECK(base::Contains(path, "?key="))
+  DCHECK(path.contains("?key="))
       << "wallpaper key must be provided to prevent browser cache collisions";
   wallpaper_provider_->GetWallpaperAsJpegBytes(std::move(callback));
 }

@@ -48,7 +48,7 @@ using network::mojom::ContentSecurityPolicyType;
 namespace {
 
 String GetRawDirectiveForMessage(
-    const HashMap<CSPDirectiveName, String> raw_directives,
+    const HashMap<CSPDirectiveName, String>& raw_directives,
     CSPDirectiveName directive_name) {
   return StrCat({ContentSecurityPolicy::GetDirectiveName(directive_name), " ",
                  raw_directives.at(directive_name)});
@@ -68,6 +68,10 @@ String GetSha256String(const String& content) {
 
 String GetEvalSha256String(const String& content) {
   return StrCat({"eval-", GetSha256String(content)});
+}
+
+String GetUrlSha256String(const String& url) {
+  return StrCat({"url-", GetSha256String(url)});
 }
 
 // https://w3c.github.io/webappsec-csp/#effective-directive-for-inline-check
@@ -133,7 +137,9 @@ void ReportViolation(
         ContentSecurityPolicyViolationType::kURLViolation,
     const String& sample = String(),
     const String& sample_prefix = String(),
-    std::optional<base::UnguessableToken> issue_id = std::nullopt) {
+    std::optional<base::UnguessableToken> issue_id = std::nullopt,
+    std::optional<String> eval_hash = std::nullopt,
+    std::optional<String> url_hash = std::nullopt) {
   String message =
       StrCat({console_message,
               CSPDirectiveListIsReportOnly(csp)
@@ -151,7 +157,7 @@ void ReportViolation(
                           violation_type, nullptr,
                           nullptr,  // localFrame
                           nullptr,  // Element*
-                          sample, sample_prefix, issue_id);
+                          sample, sample_prefix, issue_id, eval_hash, url_hash);
 }
 
 void ReportViolationWithLocation(
@@ -162,7 +168,7 @@ void ReportViolationWithLocation(
     const String& console_message,
     const KURL& blocked_url,
     const String& context_url,
-    const OrdinalNumber& context_line,
+    const TextPosition& context_position,
     Element* element,
     const String& source) {
   String message =
@@ -176,7 +182,8 @@ void ReportViolationWithLocation(
                          ? mojom::blink::ConsoleMessageLevel::kInfo
                          : mojom::blink::ConsoleMessageLevel::kError;
   SourceLocation* source_location =
-      CaptureSourceLocation(context_url, context_line.OneBasedInt(), 0);
+      CaptureSourceLocation(context_url, context_position.line_.OneBasedInt(),
+                            context_position.column_.OneBasedInt());
   policy->LogToConsole(MakeGarbageCollected<ConsoleMessage>(
       mojom::ConsoleMessageSource::kSecurity, error_level, message,
       source_location));
@@ -425,11 +432,11 @@ bool CheckEvalAndReportViolation(
     policy->LogToConsole(suffix_console_message);
   }
   String content_for_sample =
-      content.Substring(0, ContentSecurityPolicy::kMaxSampleLength);
+      content.substr(0, ContentSecurityPolicy::kMaxSampleLength);
   ReportEvalViolation(
       csp, policy, raw_directive, CSPDirectiveName::ScriptSrc,
       StrCat({console_message, "\"", raw_directive, "\".", suffix, "\n"}),
-      KURL(), exception_status,
+      NullUrl(), exception_status,
       directive.source_list->report_sample ? content_for_sample
                                            : g_empty_string,
       hash);
@@ -462,7 +469,7 @@ bool CheckWasmEvalAndReportViolation(
       GetRawDirectiveForMessage(csp.raw_directives, directive.type);
   ReportWasmEvalViolation(
       csp, policy, raw_directive, CSPDirectiveName::ScriptSrc,
-      StrCat({console_message, "\"", raw_directive, "\".", suffix}), KURL(),
+      StrCat({console_message, "\"", raw_directive, "\".", suffix}), NullUrl(),
       exception_status,
       directive.source_list->report_sample ? content : g_empty_string);
   if (!CSPDirectiveListIsReportOnly(csp)) {
@@ -479,7 +486,7 @@ bool CheckInlineAndReportViolation(
     Element* element,
     const String& source,
     const String& context_url,
-    const OrdinalNumber& context_line,
+    const TextPosition& context_position,
     ContentSecurityPolicy::InlineType inline_type,
     const String& hash_value,
     CSPDirectiveName effective_type) {
@@ -551,7 +558,7 @@ bool CheckInlineAndReportViolation(
       StrCat({console_message,
               " violates the following Content Security Policy directive '",
               raw_directive, "'.", suffix}),
-      KURL(), context_url, context_line, element,
+      NullUrl(), context_url, context_position, element,
       directive.source_list->report_sample ? source : g_empty_string);
 
   if (!CSPDirectiveListIsReportOnly(csp)) {
@@ -662,12 +669,25 @@ void ReportViolationForCheckSource(
   String raw_directive =
       GetRawDirectiveForMessage(csp.raw_directives, directive.type);
 
+  std::optional<String> url_hash;
+  if (policy && policy->ScriptSrcExtendedHashesEnabled() &&
+      (effective_type == CSPDirectiveName::ScriptSrc ||
+       effective_type == CSPDirectiveName::ScriptSrcElem ||
+       effective_type == CSPDirectiveName::ScriptSrcAttr ||
+       effective_type == CSPDirectiveName::WorkerSrc)) {
+    String stripped_url = CSPStripURL(url_before_redirects).GetString();
+    if (!stripped_url.empty()) {
+      url_hash = GetUrlSha256String(stripped_url);
+    }
+  }
+
   ReportViolation(
       csp, policy, raw_directive, effective_type,
       StrCat({prefix, url.ElidedString(),
               "' violates the following Content Security Policy directive: \"",
               raw_directive, "\".", suffix}),
-      url_before_redirects);
+      url_before_redirects, ContentSecurityPolicyViolationType::kURLViolation,
+      String(), String(), std::nullopt, std::nullopt, url_hash);
 }
 
 CSPCheckResult CheckSource(
@@ -745,7 +765,7 @@ bool CSPDirectiveListAllowTrustedTypeAssignmentFailure(
       csp, policy,
       ContentSecurityPolicy::GetDirectiveName(
           CSPDirectiveName::RequireTrustedTypesFor),
-      CSPDirectiveName::RequireTrustedTypesFor, message, KURL(),
+      CSPDirectiveName::RequireTrustedTypesFor, message, NullUrl(),
       ContentSecurityPolicyViolationType::kTrustedTypesSinkViolation, sample,
       sample_prefix, issue_id);
   return CSPDirectiveListIsReportOnly(csp);
@@ -759,7 +779,7 @@ bool CSPDirectiveListAllowInline(
     const String& content,
     const String& nonce,
     const String& context_url,
-    const OrdinalNumber& context_line,
+    const TextPosition& context_position,
     ReportingDisposition reporting_disposition) {
   CSPDirectiveName type = EffectiveDirectiveForInlineCheck(inline_type);
 
@@ -793,7 +813,7 @@ bool CSPDirectiveListAllowInline(
     }
 
     return CheckInlineAndReportViolation(csp, policy, directive, element,
-                                         content, context_url, context_line,
+                                         content, context_url, context_position,
                                          inline_type, hash_value, type);
   }
 
@@ -961,32 +981,28 @@ bool CSPDirectiveListShouldDisableWasmEval(
               "following Content Security policy directive because ",
               infix,
               " an allowed source of script in the following Content Security "
-              "Policy directive: "});
+              "Policy directive: \"",
+              raw_directive, "\"."});
   return true;
 }
 
-String JoinPath(const Vector<String>& tokens) {
+String JoinPath(const Vector<StringView>& tokens) {
   StringBuilder b;
-  for (size_t i = 0; i < tokens.size(); i++) {
-    b.Append(tokens[i]);
-    if (i != tokens.size() - 1) {
-      b.Append("/");
-    }
-  }
-  return b.ToString();
+  b.AppendRange(tokens, "/");
+  return b.ReleaseString();
 }
 
 String GetRelativeScriptUrl(const KURL& document_url, const KURL& script_url) {
   // TODO: Make this behave more like
   // https://html.spec.whatwg.org/multipage/semantics.html#the-base-element
-  if (!document_url.ProtocolIsInHTTPFamily() ||
-      !script_url.ProtocolIsInHTTPFamily() ||
+  if (!document_url.ProtocolIsInHttpFamily() ||
+      !script_url.ProtocolIsInHttpFamily() ||
       !SecurityOrigin::AreSameOrigin(document_url, script_url)) {
     return String();
   }
   // Ignore URLs with empty paths. This also covers cases like
   // https://example.com?abc#def.
-  if (script_url.GetPath().ToString() == "/") {
+  if (script_url.GetPath() == "/") {
     return String();
   }
   // For the document URL, use its base string as the starting point. This
@@ -995,21 +1011,19 @@ String GetRelativeScriptUrl(const KURL& document_url, const KURL& script_url) {
   // after the origin except for the fragment, which is stripped due to privacy
   // reasons (see https://www.w3.org/TR/CSP3/#strip-url-for-use-in-reports).
   KURL document_base(document_url.BaseAsString().ToString());
-  String document_path = document_base.GetPath().ToString();
-  String script_path = StrCat({script_url.GetPath().ToString(),
-                               script_url.QueryWithLeadingQuestionMark()});
+  StringView document_path = document_base.GetPath();
+  String script_path =
+      StrCat({script_url.GetPath(), script_url.QueryWithLeadingQuestionMark()});
 
-  Vector<String> document_path_tokens;
-  Vector<String> script_path_tokens;
   // Paths of resolved KURLs always start with "/", even if the actual path is
   // empty. Remove it then split.
-  document_path.Substring(1).Split("/", /*allow_empty_entries=*/false,
-                                   document_path_tokens);
-  script_path.Substring(1).Split("/", /*allow_empty_entries=*/false,
-                                 script_path_tokens);
+  Vector<StringView> document_path_tokens =
+      document_path.substr(1).SplitSkippingEmpty('/');
+  Vector<StringView> script_path_tokens =
+      StringView(script_path).substr(1).SplitSkippingEmpty('/');
 
-  size_t common_prefix_len = 0;
-  size_t min_len =
+  wtf_size_t common_prefix_len = 0;
+  wtf_size_t min_len =
       std::min(document_path_tokens.size(), script_path_tokens.size());
   while (common_prefix_len < min_len &&
          document_path_tokens[common_prefix_len] ==
@@ -1017,14 +1031,13 @@ String GetRelativeScriptUrl(const KURL& document_url, const KURL& script_url) {
     common_prefix_len++;
   }
 
-  int level_difference = document_path_tokens.size() - common_prefix_len;
-  Vector<String> relative_path_tokens;
-  for (int i = 0; i < level_difference; i++) {
+  wtf_size_t level_difference = document_path_tokens.size() - common_prefix_len;
+  Vector<StringView> relative_path_tokens;
+  for (wtf_size_t i = 0; i < level_difference; ++i) {
     relative_path_tokens.push_back("..");
   }
-  for (size_t i = common_prefix_len; i < script_path_tokens.size(); i++) {
-    relative_path_tokens.push_back(script_path_tokens[i]);
-  }
+  relative_path_tokens.append_range(
+      base::span(script_path_tokens).subspan(common_prefix_len));
   return JoinPath(relative_path_tokens);
 }
 
@@ -1055,9 +1068,20 @@ bool CheckURLHash(const KURL& document_url,
     return true;
   }
   String relative_url = GetRelativeScriptUrl(document_url, url);
-  return !relative_url.empty() &&
-         URLHashMatchesSourceList(relative_url, hash_algorithms_used,
-                                  source_list);
+  if (relative_url.empty()) {
+    return false;
+  }
+  // For relative URLs, first check for the hash of the url without a leading
+  // '/', then with one, and allow it if either matches.
+  if (URLHashMatchesSourceList(relative_url, hash_algorithms_used,
+                               source_list)) {
+    return true;
+  }
+  StringBuilder sb;
+  sb.Append("/");
+  sb.Append(relative_url);
+  return (URLHashMatchesSourceList(sb.ReleaseString(), hash_algorithms_used,
+                                   source_list));
 }
 
 CSPCheckResult CSPDirectiveListAllowFromSource(
@@ -1165,7 +1189,8 @@ bool CSPDirectiveListAllowTrustedTypePolicy(
                     raw_directive, "\"."});
   ReportViolation(
       csp, policy, "trusted-types", CSPDirectiveName::TrustedTypes, message,
-      KURL(), ContentSecurityPolicyViolationType::kTrustedTypesPolicyViolation,
+      NullUrl(),
+      ContentSecurityPolicyViolationType::kTrustedTypesPolicyViolation,
       policy_name, String(), issue_id);
 
   return CSPDirectiveListIsReportOnly(csp);

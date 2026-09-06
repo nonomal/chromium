@@ -7,6 +7,7 @@
 #include <absl/cleanup/cleanup.h>
 
 #include <algorithm>
+#include <ranges>
 #include <utility>
 #include <vector>
 
@@ -25,18 +26,13 @@
 #include "ash/wm/workspace/backdrop_controller.h"
 #include "ash/wm/workspace/workspace_layout_manager.h"
 #include "ash/wm/workspace_controller.h"
-#include "base/containers/adapters.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_set.h"
-#include "base/debug/crash_logging.h"
-#include "base/debug/dump_without_crashing.h"
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/stringprintf.h"
 #include "chromeos/ui/base/app_types.h"
 #include "chromeos/ui/base/window_properties.h"
-#include "components/app_restore/full_restore_utils.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window_tracker.h"
 #include "ui/compositor/layer.h"
@@ -330,7 +326,7 @@ void Desk::OnRootWindowClosing(aura::Window* root) {
 }
 
 void Desk::AddWindowToDesk(aura::Window* window) {
-  DCHECK(!base::Contains(windows_, window));
+  DCHECK(!std::ranges::contains(windows_, window));
 
   // Maybe update stacking data for all-desk windows when a window is added. If
   // `window` itself is an all-desk window, it will be handled by
@@ -396,7 +392,7 @@ void Desk::AddWindowToDesk(aura::Window* window) {
 }
 
 void Desk::RemoveWindowFromDesk(aura::Window* window) {
-  DCHECK(base::Contains(windows_, window));
+  DCHECK(std::ranges::contains(windows_, window));
 
   std::erase(windows_, window);
   // No need to refresh the mini_views if the destroyed window doesn't show up
@@ -551,7 +547,8 @@ void Desk::Activate(bool update_window_activation) {
     const auto* window_state = WindowState::Get(window);
     // Floated window should be activated with the desk window, but it doesn't
     // belong to `windows_`.
-    if (!base::Contains(windows_, window) && !window_state->IsFloated()) {
+    if (!std::ranges::contains(windows_, window) &&
+        !window_state->IsFloated()) {
       continue;
     }
 
@@ -593,7 +590,7 @@ void Desk::Deactivate(bool update_window_activation) {
   // containers have been hidden. This is to prevent the focus controller from
   // activating another window on the same desk when the active window loses
   // focus.
-  if (active_window && base::Contains(windows_, active_window))
+  if (active_window && std::ranges::contains(windows_, active_window))
     wm::DeactivateWindow(active_window);
 }
 
@@ -654,7 +651,7 @@ void Desk::MoveWindowsToDesk(Desk* target_desk) {
   aura::WindowTracker windows_to_move;
   for (aura::Window* root : Shell::GetAllRootWindows()) {
     const aura::Window* container = GetDeskContainerForRoot(root);
-    for (aura::Window* window : base::Reversed(container->children())) {
+    for (aura::Window* window : std::views::reverse(container->children())) {
       windows_to_move.Add(window);
     }
   }
@@ -669,7 +666,7 @@ void Desk::MoveWindowsToDesk(Desk* target_desk) {
     // It's possible the `window` was already moved to the `target_desk`
     // indirectly, such as when one window in a Snap Group moves and the other
     // will follow. If this is the case, skip the explicit window move.
-    if (base::Contains(target_desk->windows(), window)) {
+    if (std::ranges::contains(target_desk->windows(), window)) {
       continue;
     }
 
@@ -690,7 +687,7 @@ void Desk::MoveWindowToDesk(aura::Window* window,
   DCHECK(window);
   DCHECK(target_desk);
   DCHECK(target_root);
-  DCHECK(base::Contains(windows_, window));
+  DCHECK(std::ranges::contains(windows_, window));
   DCHECK(this != target_desk);
 
   ScopedWindowPositionerDisabler window_positioner_disabler;
@@ -842,7 +839,7 @@ void Desk::BuildAllDeskStackingData() {
 
     adw_data.clear();
     size_t order = 0;
-    for (aura::Window* window : base::Reversed(desk_windows)) {
+    for (aura::Window* window : std::views::reverse(desk_windows)) {
       if (desks_util::IsZOrderTracked(window)) {
         if (desks_util::IsWindowVisibleOnAllWorkspaces(window))
           adw_data.push_back({.window = window, .order = order});
@@ -872,7 +869,7 @@ void Desk::RestackAllDeskWindows() {
     // Find the place to insert, counting only windows that are Z-order tracked.
     auto find_window_to_stack_below = [&](size_t order) -> aura::Window* {
       size_t index = 0;
-      for (aura::Window* w : base::Reversed(container->children())) {
+      for (aura::Window* w : std::views::reverse(container->children())) {
         if (desks_util::IsZOrderTracked(w) &&
             (!desks_util::IsWindowVisibleOnAllWorkspaces(w) ||
              already_stacked.contains(w))) {
@@ -889,18 +886,6 @@ void Desk::RestackAllDeskWindows() {
       DCHECK(adw.window);
 
       if (adw.window->parent() != container) {
-        // TODO(b/295371112): Clean this up when the root cause has been
-        // resolved. When this function is called, `this` is going to be the
-        // active desk and it is expected that all all-desk windows have been
-        // moved to this desk. If this branch is taken, we have an ADW that is
-        // *not* on the current desk and we must not try to stack it.
-        SCOPED_CRASH_KEY_NUMBER(
-            "Restack", "adw_app_type",
-            static_cast<int>(adw.window->GetProperty(chromeos::kAppTypeKey)));
-        SCOPED_CRASH_KEY_STRING32("Restack", "adw_app_id",
-                                  full_restore::GetAppId(adw.window));
-
-        base::debug::DumpWithoutCrashing();
         continue;
       }
 
@@ -992,7 +977,7 @@ bool Desk::ContentUpdateNotificationSuspended() const {
 void Desk::MoveWindowToDeskInternal(aura::Window* window,
                                     Desk* target_desk,
                                     aura::Window* target_root) {
-  DCHECK(base::Contains(windows_, window));
+  DCHECK(std::ranges::contains(windows_, window));
   DCHECK(CanMoveWindowOutOfDeskContainer(window))
       << "Non-desk windows are not allowed to move out of the container.";
 

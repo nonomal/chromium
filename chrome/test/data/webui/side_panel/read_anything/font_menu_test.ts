@@ -4,27 +4,25 @@
 
 import 'chrome-untrusted://read-anything-side-panel.top-chrome/read_anything.js';
 
-import {ReadAnythingSettingsChange, ToolbarEvent} from 'chrome-untrusted://read-anything-side-panel.top-chrome/read_anything.js';
 import type {FontMenuElement} from 'chrome-untrusted://read-anything-side-panel.top-chrome/read_anything.js';
+import {DEFAULT_SETTINGS, ReadAnythingSettingsChange, ToolbarEvent} from 'chrome-untrusted://read-anything-side-panel.top-chrome/read_anything.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome-untrusted://webui-test/chai_assert.js';
-import {microtasksFinished} from 'chrome-untrusted://webui-test/test_util.js';
+import {eventToPromise, microtasksFinished} from 'chrome-untrusted://webui-test/test_util.js';
 
-import {assertCheckMarksForDropdown, assertHeadersForDropdown, getItemsInMenu, mockMetrics, stubAnimationFrame} from './common.js';
-import {FakeReadingMode} from './fake_reading_mode.js';
+import {assertCheckMarksForDropdown, getItemsInMenu, setupTestEnvironment, stubAnimationFrame} from './common.js';
 import type {TestMetricsBrowserProxy} from './test_metrics_browser_proxy.js';
+import type {TestVisualBrowserProxy} from './test_visual_browser_proxy.js';
 
 suite('FontMenu', () => {
   let fontMenu: FontMenuElement;
   let fontMenuOptions: HTMLButtonElement[];
   let metrics: TestMetricsBrowserProxy;
+  let visualBrowserProxy: TestVisualBrowserProxy;
 
   setup(() => {
-    // Clearing the DOM should always be done first.
-    document.body.innerHTML = window.trustedTypes!.emptyHTML;
-    const readingMode = new FakeReadingMode();
-    chrome.readingMode = readingMode as unknown as typeof chrome.readingMode;
-    chrome.readingMode.supportedFonts = [];
-    metrics = mockMetrics();
+    const result = setupTestEnvironment();
+    visualBrowserProxy = result.visualBrowserProxy;
+    metrics = result.metrics;
     fontMenu = document.createElement('font-menu');
     document.body.appendChild(fontMenu);
   });
@@ -36,7 +34,7 @@ suite('FontMenu', () => {
   }
 
   async function updateFonts(supportedFonts: string[]): Promise<void> {
-    chrome.readingMode.supportedFonts = supportedFonts;
+    visualBrowserProxy.supportedFonts = supportedFonts;
     fontMenu.pageLanguage = 'hi' + supportedFonts.length;
     await microtasksFinished();
     fontMenuOptions = getItemsInMenu(fontMenu.$.menu.$.lazyMenu);
@@ -46,25 +44,23 @@ suite('FontMenu', () => {
     assertCheckMarksForDropdown(fontMenu);
   });
 
-  test('does not have headers', () => {
-    assertHeadersForDropdown(fontMenu.$.menu, /*shouldHaveHeaders=*/ false);
-  });
+
 
   test('updates fonts on page language change', async () => {
-    chrome.readingMode.supportedFonts =
+    visualBrowserProxy.supportedFonts =
         ['font 1', 'font 2', 'font 3', 'font 4'];
     fontMenu.pageLanguage = 'hi';
     await microtasksFinished();
     assertEquals(4, getItemsInMenu(fontMenu.$.menu.$.lazyMenu).length);
 
-    chrome.readingMode.supportedFonts = ['font 1', 'font 2'];
+    visualBrowserProxy.supportedFonts = ['font 1', 'font 2'];
     fontMenu.pageLanguage = 'jp';
     await microtasksFinished();
     assertEquals(2, getItemsInMenu(fontMenu.$.menu.$.lazyMenu).length);
   });
 
   test('updates font titles on fonts loaded', async () => {
-    chrome.readingMode.supportedFonts = ['font 1', 'font 2', 'font 3'];
+    visualBrowserProxy.supportedFonts = ['font 1', 'font 2', 'font 3'];
     fontMenuOptions = getItemsInMenu(fontMenu.$.menu.$.lazyMenu);
     assertTrue(fontMenuOptions.every(
         option => option.innerText.includes('(loading)')));
@@ -77,21 +73,16 @@ suite('FontMenu', () => {
   });
 
   test('updates fonts when settings are restored', async () => {
-    chrome.readingMode.supportedFonts = ['font 1', 'font 2', 'font 3'];
-    chrome.readingMode.fontName = 'font 1';
+    visualBrowserProxy.supportedFonts = ['font 1', 'font 2', 'font 3'];
+    visualBrowserProxy.fontName = 'font 1';
     fontMenu.areFontsLoaded = true;
     await microtasksFinished();
     assertEquals(0, fontMenu.$.menu.currentSelectedIndex);
 
-    chrome.readingMode.fontName = 'font 2';
+    visualBrowserProxy.fontName = 'font 2';
     fontMenu.settingsPrefs = {
-      letterSpacing: 0,
-      lineSpacing: 0,
-      theme: 0,
-      speechRate: 0,
-      font: chrome.readingMode.fontName,
-      highlightGranularity: 0,
-      lineFocus: 0,
+      ...DEFAULT_SETTINGS,
+      font: visualBrowserProxy.getFontName(),
     };
     await microtasksFinished();
 
@@ -102,8 +93,8 @@ suite('FontMenu', () => {
     // Set the current font to one that will be removed
     const defaultFont = 'EB Garamond';
     const fonts = ['Andika', 'Poppins', 'STIX Two Text'];
-    chrome.readingMode.fontName = defaultFont;
-    await updateFonts(fonts.concat(chrome.readingMode.fontName));
+    visualBrowserProxy.fontName = defaultFont;
+    await updateFonts(fonts.concat(visualBrowserProxy.getFontName()));
 
     // Update the fonts to exclude the previously chosen font
     await updateFonts(fonts);
@@ -118,7 +109,7 @@ suite('FontMenu', () => {
     assertEquals(2, hiddenCheckMarks.length);
     assertEquals(0, fontMenu.$.menu.currentSelectedIndex);
     // Avoid overriding the user default font
-    assertEquals(defaultFont, chrome.readingMode.fontName);
+    assertEquals(defaultFont, visualBrowserProxy.getFontName());
   });
 
   test('each font option is styled with the font that it is', async () => {
@@ -131,25 +122,39 @@ suite('FontMenu', () => {
   });
 
   test('propagates font', async () => {
+    const numberOfFonts = 3;
+
     const font1 = 'Times';
+    const closePromise1 =
+        eventToPromise(ToolbarEvent.CLOSE_ALL_MENUS, document);
     fontMenu.$.menu.dispatchEvent(
         new CustomEvent(ToolbarEvent.FONT, {detail: {data: font1}}));
-    assertEquals(font1, chrome.readingMode.fontName);
+    await closePromise1;
+    assertEquals(font1, await visualBrowserProxy.whenCalled('onFontChange'));
 
+    visualBrowserProxy.resetResolver('onFontChange');
     const font2 = 'Poppins';
+    const closePromise2 =
+        eventToPromise(ToolbarEvent.CLOSE_ALL_MENUS, document);
     fontMenu.$.menu.dispatchEvent(
         new CustomEvent(ToolbarEvent.FONT, {detail: {data: font2}}));
-    assertEquals(font2, chrome.readingMode.fontName);
+    await closePromise2;
+    assertEquals(font2, await visualBrowserProxy.whenCalled('onFontChange'));
 
+    visualBrowserProxy.resetResolver('onFontChange');
     const font3 = 'STIX Two Text';
+    const closePromise3 =
+        eventToPromise(ToolbarEvent.CLOSE_ALL_MENUS, document);
     fontMenu.$.menu.dispatchEvent(
         new CustomEvent(ToolbarEvent.FONT, {detail: {data: font3}}));
-    assertEquals(font3, chrome.readingMode.fontName);
+    await closePromise3;
+    assertEquals(font3, await visualBrowserProxy.whenCalled('onFontChange'));
 
     assertEquals(
         ReadAnythingSettingsChange.FONT_CHANGE,
         await metrics.whenCalled('recordTextSettingsChange'));
-    assertEquals(3, metrics.getCallCount('recordTextSettingsChange'));
+    assertEquals(
+        numberOfFonts, metrics.getCallCount('recordTextSettingsChange'));
   });
 
   test('can be closed programatically', () => {

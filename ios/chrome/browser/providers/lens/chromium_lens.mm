@@ -28,14 +28,6 @@ enum ChromiumLensProviderErrors : NSInteger {
 
 }  // namespace
 
-using LensWebParamsCallback =
-    base::OnceCallback<void(web::NavigationManager::WebLoadParams)>;
-
-id<ChromeLensController> NewChromeLensController(LensConfiguration* config) {
-  // Lens is not supported in Chromium.
-  return nil;
-}
-
 UIViewController<ChromeLensViewFinderController>*
 NewChromeLensViewFinderController(LensConfiguration* config) {
   // Lens is not supported in Chromium.
@@ -51,31 +43,9 @@ UIViewController<ChromeLensOverlay>* NewChromeLensOverlay(
   return nil;
 }
 
-UIViewController<ChromeLensOverlay>* NewChromeLensOverlay(
-    LensImageSource* imageSource,
-    LensConfiguration* config,
-    NSArray<UIAction*>* additionalMenuItems) {
-  // Lens is not supported in Chromium.
-  return nil;
-}
-
 bool IsLensSupported() {
   // Lens is not supported in Chromium.
   return false;
-}
-
-bool IsLensWebResultsURL(const GURL& url) {
-  // Lens is not supported in Chromium.
-  return false;
-}
-
-std::optional<LensEntrypoint> GetLensEntryPointFromURL(const GURL& url) {
-  return std::nullopt;
-}
-
-void GenerateLensLoadParamsAsync(LensQuery* query,
-                                 LensWebParamsCallback completion) {
-  NOTREACHED() << "Lens is not supported.";
 }
 
 }  // namespace provider

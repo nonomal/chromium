@@ -48,6 +48,7 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
       const std::optional<std::vector<uint8_t>>& ech_retry_configs,
       bool trust_anchor_ids_from_dns,
       bool retried_with_trust_anchor_ids,
+      bool trust_anchor_retry_used_mtc_fallback,
       const LoadTimingInfo::ConnectTiming& connect_timing);
 
   // These values are persisted to logs. Entries should not be renumbered
@@ -77,7 +78,19 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
     // There was no DNS hint, and the connection failed after retrying with
     // fresh Trust Anchor IDs.
     kNoDnsErrorRetry = 7,
-    kMaxValue = kNoDnsErrorRetry,
+    // There was a DNS hint, and the connection succeeded after retrying with
+    // the MTC fallback.
+    kDnsSuccessRetryMtcFallback = 8,
+    // There was a DNS hint, and the connection failed after retrying with
+    // the MTC fallback.
+    kDnsErrorRetryMtcFallback = 9,
+    // There was no DNS hint, and the connection succeeded after retrying with
+    // the MTC fallback.
+    kNoDnsSuccessRetryMtcFallback = 10,
+    // There was no DNS hint, and the connection failed after retrying with
+    // the MTC fallback.
+    kNoDnsErrorRetryMtcFallback = 11,
+    kMaxValue = kNoDnsErrorRetryMtcFallback,
   };
 
   SSLClientSocket();
@@ -96,8 +109,7 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
   // the server provided in the handshake. The connection can be retried with
   // these new Trust Anchor IDs, overriding the Trust Anchor IDs that the server
   // advertised in DNS.
-  virtual std::vector<std::vector<uint8_t>>
-  GetServerTrustAnchorIDsForRetry() = 0;
+  virtual std::vector<std::vector<uint8_t>> GetServerTrustAnchorIDs() = 0;
 
   // Log SSL key material to |logger|. Must be called before any
   // SSLClientSockets are created.
@@ -167,6 +179,14 @@ class NET_EXPORT SSLClientContext : public SSLConfigService::Observer,
   SCTAuditingDelegate* sct_auditing_delegate() {
     return sct_auditing_delegate_;
   }
+
+  // Returns the EchMode for `hostname`. If `ssl_config_service_` is null,
+  // defaults to EchMode::kOpportunistic.
+  EchMode GetEchMode(std::string_view hostname) const;
+
+  // Returns true if ECH is enabled for `hostname` (i.e. GetEchMode(hostname) !=
+  // EchMode::kDisabled).
+  bool IsEchEnabled(std::string_view hostname) const;
 
   // Creates a new SSLClientSocket which can then be used to establish an SSL
   // connection to |host_and_port| over the already-connected |stream_socket|.

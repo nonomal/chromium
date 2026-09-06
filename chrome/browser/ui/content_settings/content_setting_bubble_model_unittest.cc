@@ -51,8 +51,10 @@
 #include "components/permissions/permission_decision_auto_blocker.h"
 #include "components/permissions/permission_recovery_success_rate_tracker.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/subresource_filter/content/browser/content_subresource_filter_throttle_manager.h"
 #include "components/url_formatter/elide_url.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_features.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/web_contents_tester.h"
 #include "net/base/schemeful_site.h"
@@ -61,6 +63,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/window_open_disposition.h"
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "base/test/gmock_expected_support.h"
@@ -70,6 +73,10 @@
 #include "chrome/browser/web_applications/test/web_app_install_test_utils.h"
 #include "services/data_decoder/public/cpp/test_support/in_process_data_decoder.h"
 #endif  // !BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(IS_MAC)
+#include "chrome/browser/permissions/system/system_media_permission_cache_mac_test_helper.h"
+#endif  // BUILDFLAG(IS_MAC)
 
 using content::WebContentsTester;
 using content_settings::PageSpecificContentSettings;
@@ -92,13 +99,31 @@ class ContentSettingBubbleModelTest : public ChromeRenderViewHostTestHarness {
 
     permissions::PermissionRecoverySuccessRateTracker::CreateForWebContents(
         web_contents());
+#if BUILDFLAG(IS_MAC)
+    // The camera/mic bubbles reflect whatever the bot happens to have granted
+    // Chrome in macOS System Settings: when the OS denies access,
+    // `ContentSettingMediaStreamBubbleModel` swaps in the "turned off in Mac
+    // System Settings" bubble instead of the per-site one, leaving the title,
+    // message and radio group under test unset.
+    system_media_permissions_.SetCameraStatus(/*denied=*/false);
+    system_media_permissions_.SetMicStatus(/*denied=*/false);
+#endif  // BUILDFLAG(IS_MAC)
   }
 
+  content::Page& page() { return web_contents()->GetPrimaryPage(); }
   TestingProfile::TestingFactories GetTestingFactories() const override {
     return {TestingProfile::TestingFactory{
         HistoryServiceFactory::GetInstance(),
         HistoryServiceFactory::GetDefaultFactory()}};
   }
+
+ private:
+#if BUILDFLAG(IS_MAC)
+  // Installs itself as the system media permission source on construction and
+  // uninstalls on destruction, so the stubbing is scoped to each test.
+  system_permission_settings::SystemMediaPermissionCacheMacTestHelper
+      system_media_permissions_;
+#endif  // BUILDFLAG(IS_MAC)
 };
 
 TEST_F(ContentSettingBubbleModelTest, ImageRadios) {
@@ -111,7 +136,7 @@ TEST_F(ContentSettingBubbleModelTest, ImageRadios) {
 
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-          nullptr, web_contents(), ContentSettingsType::IMAGES));
+          nullptr, page(), ContentSettingsType::IMAGES));
   const ContentSettingBubbleModel::BubbleContent& bubble_content =
       content_setting_bubble_model->bubble_content();
   EXPECT_FALSE(bubble_content.title.empty());
@@ -163,7 +188,7 @@ TEST_F(ContentSettingBubbleModelTest,
   VerifyBubbleContent(
       CONTENT_SETTING_BLOCK,
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-          nullptr, web_contents(), ContentSettingsType::COOKIES)
+          nullptr, page(), ContentSettingsType::COOKIES)
           ->bubble_content());
 }
 
@@ -189,7 +214,7 @@ TEST_P(CookiesContentSettingBubbleModelTest,
   content_settings->OnContentAllowed(ContentSettingsType::COOKIES);
   VerifyBubbleContent(
       site_setting, ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-                        nullptr, web_contents(), ContentSettingsType::COOKIES)
+                        nullptr, page(), ContentSettingsType::COOKIES)
                         ->bubble_content());
 
   // Even if cookies are allowed on the 1P site, it's still possible for
@@ -198,7 +223,7 @@ TEST_P(CookiesContentSettingBubbleModelTest,
   content_settings->OnContentBlocked(ContentSettingsType::COOKIES);
   VerifyBubbleContent(
       site_setting, ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-                        nullptr, web_contents(), ContentSettingsType::COOKIES)
+                        nullptr, page(), ContentSettingsType::COOKIES)
                         ->bubble_content());
 }
 
@@ -229,7 +254,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamMicAndCamera) {
                                                microphone_camera_state);
 
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
-      new ContentSettingMediaStreamBubbleModel(nullptr, web_contents()));
+      new ContentSettingMediaStreamBubbleModel(nullptr, page()));
   const ContentSettingBubbleModel::BubbleContent& bubble_content =
       content_setting_bubble_model->bubble_content();
   EXPECT_EQ(bubble_content.title,
@@ -279,7 +304,7 @@ TEST_F(ContentSettingBubbleModelTest, BlockedMediastreamMicAndCamera) {
   content_settings->OnMediaStreamPermissionSet(url, microphone_camera_state);
 
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
-      new ContentSettingMediaStreamBubbleModel(nullptr, web_contents()));
+      new ContentSettingMediaStreamBubbleModel(nullptr, page()));
   const ContentSettingBubbleModel::BubbleContent& bubble_content =
       content_setting_bubble_model->bubble_content();
   // Test if the correct radio item is selected for the blocked mediastream
@@ -336,7 +361,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamContentBubble) {
   content_settings->OnMediaStreamPermissionSet(url, microphone_camera_state);
   {
     std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
-        new ContentSettingMediaStreamBubbleModel(nullptr, web_contents()));
+        new ContentSettingMediaStreamBubbleModel(nullptr, page()));
     const ContentSettingBubbleModel::BubbleContent& bubble_content =
         content_setting_bubble_model->bubble_content();
     // Test if the correct radio item is selected for the blocked mediastream
@@ -355,7 +380,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamContentBubble) {
 
   {
     std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
-        new ContentSettingMediaStreamBubbleModel(nullptr, web_contents()));
+        new ContentSettingMediaStreamBubbleModel(nullptr, page()));
     const ContentSettingBubbleModel::BubbleContent& bubble_content =
         content_setting_bubble_model->bubble_content();
     // Test that the reload hint is displayed.
@@ -378,7 +403,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamContentBubble) {
 
   {
     std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
-        new ContentSettingMediaStreamBubbleModel(nullptr, web_contents()));
+        new ContentSettingMediaStreamBubbleModel(nullptr, page()));
     const ContentSettingBubbleModel::BubbleContent& bubble_content =
         content_setting_bubble_model->bubble_content();
     // Test that the reload hint is not displayed any more.
@@ -413,7 +438,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamMic) {
                                                microphone_camera_state);
 
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
-      new ContentSettingMediaStreamBubbleModel(nullptr, web_contents()));
+      new ContentSettingMediaStreamBubbleModel(nullptr, page()));
   const ContentSettingBubbleModel::BubbleContent& bubble_content =
       content_setting_bubble_model->bubble_content();
   EXPECT_EQ(bubble_content.title,
@@ -437,8 +462,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamMic) {
   content_settings->OnMediaStreamPermissionSet(security_origin,
                                                microphone_camera_state);
   content_setting_bubble_model =
-      std::make_unique<ContentSettingMediaStreamBubbleModel>(nullptr,
-                                                             web_contents());
+      std::make_unique<ContentSettingMediaStreamBubbleModel>(nullptr, page());
   const ContentSettingBubbleModel::BubbleContent& new_bubble_content =
       content_setting_bubble_model->bubble_content();
   EXPECT_EQ(new_bubble_content.title,
@@ -482,7 +506,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamCamera) {
                                                microphone_camera_state);
 
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
-      new ContentSettingMediaStreamBubbleModel(nullptr, web_contents()));
+      new ContentSettingMediaStreamBubbleModel(nullptr, page()));
   const ContentSettingBubbleModel::BubbleContent& bubble_content =
       content_setting_bubble_model->bubble_content();
   EXPECT_EQ(bubble_content.title,
@@ -506,8 +530,7 @@ TEST_F(ContentSettingBubbleModelTest, MediastreamCamera) {
   content_settings->OnMediaStreamPermissionSet(security_origin,
                                                microphone_camera_state);
   content_setting_bubble_model =
-      std::make_unique<ContentSettingMediaStreamBubbleModel>(nullptr,
-                                                             web_contents());
+      std::make_unique<ContentSettingMediaStreamBubbleModel>(nullptr, page());
   const ContentSettingBubbleModel::BubbleContent& new_bubble_content =
       content_setting_bubble_model->bubble_content();
   EXPECT_EQ(new_bubble_content.title,
@@ -554,7 +577,7 @@ TEST_F(ContentSettingBubbleModelTest, AccumulateMediastreamMicAndCamera) {
                                                microphone_camera_state);
 
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
-      new ContentSettingMediaStreamBubbleModel(nullptr, web_contents()));
+      new ContentSettingMediaStreamBubbleModel(nullptr, page()));
   const ContentSettingBubbleModel::BubbleContent& bubble_content =
       content_setting_bubble_model->bubble_content();
   EXPECT_EQ(bubble_content.title,
@@ -576,8 +599,7 @@ TEST_F(ContentSettingBubbleModelTest, AccumulateMediastreamMicAndCamera) {
                                                microphone_camera_state);
 
   content_setting_bubble_model =
-      std::make_unique<ContentSettingMediaStreamBubbleModel>(nullptr,
-                                                             web_contents());
+      std::make_unique<ContentSettingMediaStreamBubbleModel>(nullptr, page());
   const ContentSettingBubbleModel::BubbleContent& new_bubble_content =
       content_setting_bubble_model->bubble_content();
   EXPECT_EQ(new_bubble_content.title,
@@ -595,44 +617,12 @@ TEST_F(ContentSettingBubbleModelTest, AccumulateMediastreamMicAndCamera) {
   EXPECT_EQ(0, new_bubble_content.radio_group.default_item);
 }
 
-// Enable geolocation bubble tests to be run with OS-level permission
-// integration enabled or disabled on platforms where support is toggleable.
-class ContentSettingGeolocationBubbleModelTest
-    : public ContentSettingBubbleModelTest,
-      public testing::WithParamInterface<bool> {
- public:
-  void SetUp() override {
-    ContentSettingBubbleModelTest::SetUp();
-#if BUILDFLAG(IS_WIN)
-    if (GetParam()) {
-      scoped_feature_list_.InitWithFeatures(
-          {features::kWinSystemLocationPermission}, {});
-    }
-#endif  // BUILDFLAG(IS_WIN)
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
+TEST_F(ContentSettingBubbleModelTest, Geolocation) {
   system_permission_settings::MockPlatformHandle mock_platform_handle;
   system_permission_settings::SetInstanceForTesting(&mock_platform_handle);
 
-  // This parameter is meaningful only on Windows, where geolocation permissions
-  // are controlled by the 'features::kWinSystemLocationPermission' feature.
-  // If the feature is disabled (GetParam() returns false), the location system
-  // permission is expected to be always allowed.
-  const bool is_os_level_geolocation_permission_support_enabled = GetParam();
-  if (is_os_level_geolocation_permission_support_enabled) {
-    EXPECT_CALL(mock_platform_handle,
-                IsAllowed(ContentSettingsType::GEOLOCATION))
-        .WillRepeatedly(Return(false));
-  } else {
-    EXPECT_CALL(mock_platform_handle,
-                IsAllowed(ContentSettingsType::GEOLOCATION))
-        .WillRepeatedly(Return(true));
-  }
+  EXPECT_CALL(mock_platform_handle, IsAllowed(ContentSettingsType::GEOLOCATION))
+      .WillRepeatedly(Return(false));
 
   WebContentsTester::For(web_contents())
       ->NavigateAndCommit(GURL("https://www.example.com"));
@@ -649,10 +639,9 @@ TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
 
 #if BUILDFLAG(OS_LEVEL_GEOLOCATION_PERMISSION_SUPPORTED)
   // System-level geolocation permission is blocked.
-  if (is_os_level_geolocation_permission_support_enabled) {
+  {
     auto content_setting_bubble_model =
-        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents());
+        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr, page());
     std::unique_ptr<FakeOwner> owner =
         FakeOwner::Create(*content_setting_bubble_model, 0);
     const auto& bubble_content = content_setting_bubble_model->bubble_content();
@@ -670,10 +659,9 @@ TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
 
   // System-level geolocation permission is blocked, but allowed while the
   // bubble is visible. The displayed message should not change.
-  if (is_os_level_geolocation_permission_support_enabled) {
+  {
     auto content_setting_bubble_model =
-        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents());
+        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr, page());
     std::unique_ptr<FakeOwner> owner =
         FakeOwner::Create(*content_setting_bubble_model, 0);
     const auto& bubble_content = content_setting_bubble_model->bubble_content();
@@ -698,7 +686,7 @@ TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
   {
     std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
         std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents()));
+                                                               page()));
     const auto& bubble_content = content_setting_bubble_model->bubble_content();
 
     EXPECT_EQ(bubble_content.title,
@@ -719,8 +707,7 @@ TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
                                            CONTENT_SETTING_BLOCK);
     content_settings->OnContentBlocked(ContentSettingsType::GEOLOCATION);
     content_setting_bubble_model =
-        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents());
+        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr, page());
     const auto& bubble_content_2 =
         content_setting_bubble_model->bubble_content();
 
@@ -742,8 +729,7 @@ TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
                                            CONTENT_SETTING_ALLOW);
     content_settings->OnContentAllowed(ContentSettingsType::GEOLOCATION);
     content_setting_bubble_model =
-        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents());
+        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr, page());
     const auto& bubble_content_3 =
         content_setting_bubble_model->bubble_content();
     EXPECT_EQ(bubble_content_3.title,
@@ -773,7 +759,7 @@ TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
     content_settings->OnContentBlocked(ContentSettingsType::GEOLOCATION);
     std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
         std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents()));
+                                                               page()));
 
     const auto& bubble_content = content_setting_bubble_model->bubble_content();
 
@@ -795,8 +781,7 @@ TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
                                            CONTENT_SETTING_ALLOW);
     content_settings->OnContentAllowed(ContentSettingsType::GEOLOCATION);
     content_setting_bubble_model =
-        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents());
+        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr, page());
     const auto& bubble_content_2 =
         content_setting_bubble_model->bubble_content();
 
@@ -818,8 +803,7 @@ TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
                                            CONTENT_SETTING_BLOCK);
     content_settings->OnContentBlocked(ContentSettingsType::GEOLOCATION);
     content_setting_bubble_model =
-        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents());
+        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr, page());
     const auto& bubble_content_3 =
         content_setting_bubble_model->bubble_content();
 
@@ -856,7 +840,7 @@ TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
     content_settings->OnContentBlocked(ContentSettingsType::GEOLOCATION);
     std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
         std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents()));
+                                                               page()));
     const auto& bubble_content = content_setting_bubble_model->bubble_content();
 
     EXPECT_EQ(bubble_content.title,
@@ -877,8 +861,7 @@ TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
   // and becomes the default selection next time a bubble is created.
   {
     auto content_setting_bubble_model =
-        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents());
+        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr, page());
     std::unique_ptr<FakeOwner> owner =
         FakeOwner::Create(*content_setting_bubble_model, 0);
     const auto& bubble_content = content_setting_bubble_model->bubble_content();
@@ -889,8 +872,7 @@ TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
   }
   {
     auto content_setting_bubble_model =
-        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents());
+        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr, page());
     std::unique_ptr<FakeOwner> owner =
         FakeOwner::Create(*content_setting_bubble_model, 0);
     const auto& bubble_content = content_setting_bubble_model->bubble_content();
@@ -900,8 +882,7 @@ TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
   }
   {
     auto content_setting_bubble_model =
-        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents());
+        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr, page());
     std::unique_ptr<FakeOwner> owner =
         FakeOwner::Create(*content_setting_bubble_model, 0);
     const auto& bubble_content = content_setting_bubble_model->bubble_content();
@@ -909,15 +890,6 @@ TEST_P(ContentSettingGeolocationBubbleModelTest, Geolocation) {
     EXPECT_EQ(bubble_content.radio_group.default_item, 1);
   }
 }
-
-INSTANTIATE_TEST_SUITE_P(ContentSettingGeolocationBubbleModelTests,
-                         ContentSettingGeolocationBubbleModelTest,
-#if BUILDFLAG(IS_WIN)
-                         testing::Values(false, true)
-#else
-                         testing::Values(true)
-#endif
-);
 
 TEST_F(ContentSettingBubbleModelTest, FileURL) {
   std::string file_url("file:///tmp/test.html");
@@ -927,7 +899,7 @@ TEST_F(ContentSettingBubbleModelTest, FileURL) {
       ->OnContentBlocked(ContentSettingsType::IMAGES);
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-          nullptr, web_contents(), ContentSettingsType::IMAGES));
+          nullptr, page(), ContentSettingsType::IMAGES));
   std::u16string title =
       content_setting_bubble_model->bubble_content().radio_group.radio_items[0];
   ASSERT_NE(std::u16string::npos, title.find(base::UTF8ToUTF16(file_url)));
@@ -947,6 +919,7 @@ class ContentSettingBubbleModelIsolatedWebAppTest
 };
 
 TEST_F(ContentSettingBubbleModelIsolatedWebAppTest, IsolatedWebAppUrl) {
+  base::test::ScopedFeatureList scoped_feature_list{features::kIsolatedWebApps};
   const std::string app_name("Test IWA Name");
   std::unique_ptr<web_app::ScopedBundledIsolatedWebApp> iwa =
       web_app::IsolatedWebAppBuilder(
@@ -965,7 +938,7 @@ TEST_F(ContentSettingBubbleModelIsolatedWebAppTest, IsolatedWebAppUrl) {
 
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-          nullptr, web_contents(), ContentSettingsType::IMAGES));
+          nullptr, page(), ContentSettingsType::IMAGES));
   std::u16string title =
       content_setting_bubble_model->bubble_content().radio_group.radio_items[0];
   ASSERT_NE(std::u16string::npos, title.find(base::UTF8ToUTF16(app_name)));
@@ -979,8 +952,8 @@ TEST_F(ContentSettingBubbleModelTest, RegisterProtocolHandler) {
       ->set_pending_protocol_handler(ProtocolHandler::CreateProtocolHandler(
           "mailto", GURL("https://www.toplevel.example/")));
 
-  ContentSettingRPHBubbleModel content_setting_bubble_model(
-      nullptr, web_contents(), nullptr);
+  ContentSettingRPHBubbleModel content_setting_bubble_model(nullptr, page(),
+                                                            nullptr);
 
   const ContentSettingBubbleModel::BubbleContent& bubble_content =
       content_setting_bubble_model.bubble_content();
@@ -1007,8 +980,8 @@ TEST_F(ContentSettingBubbleModelTest, RPHAllow) {
       "mailto", GURL("https://www.toplevel.example/"));
   content_settings->set_pending_protocol_handler(test_handler);
 
-  ContentSettingRPHBubbleModel content_setting_bubble_model(
-      nullptr, web_contents(), &registry);
+  ContentSettingRPHBubbleModel content_setting_bubble_model(nullptr, page(),
+                                                            &registry);
   std::unique_ptr<FakeOwner> owner =
       FakeOwner::Create(content_setting_bubble_model, 0);
 
@@ -1074,8 +1047,8 @@ TEST_F(ContentSettingBubbleModelTest, RPHDefaultDone) {
       "mailto", GURL("https://www.toplevel.example/"));
   content_settings->set_pending_protocol_handler(test_handler);
 
-  ContentSettingRPHBubbleModel content_setting_bubble_model(
-      nullptr, web_contents(), &registry);
+  ContentSettingRPHBubbleModel content_setting_bubble_model(nullptr, page(),
+                                                            &registry);
   std::unique_ptr<FakeOwner> owner = FakeOwner::Create(
       content_setting_bubble_model,
       content_setting_bubble_model.bubble_content().radio_group.default_item);
@@ -1095,7 +1068,7 @@ TEST_F(ContentSettingBubbleModelTest, RPHDefaultDone) {
 
 TEST_F(ContentSettingBubbleModelTest, SubresourceFilter) {
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
-      new ContentSettingSubresourceFilterBubbleModel(nullptr, web_contents()));
+      new ContentSettingSubresourceFilterBubbleModel(nullptr, page()));
   const ContentSettingBubbleModel::BubbleContent& bubble_content =
       content_setting_bubble_model->bubble_content();
   EXPECT_EQ(bubble_content.title,
@@ -1109,6 +1082,43 @@ TEST_F(ContentSettingBubbleModelTest, SubresourceFilter) {
   EXPECT_FALSE(bubble_content.custom_link_enabled);
   EXPECT_EQ(bubble_content.manage_text,
             l10n_util::GetStringUTF16(IDS_ALWAYS_ALLOW_ADS));
+}
+
+TEST_F(ContentSettingBubbleModelTest, SubresourceFilterNavigated) {
+  base::HistogramTester histogram_tester;
+  GURL page_url("https://www.example.com");
+  HostContentSettingsMap* settings_map =
+      HostContentSettingsMapFactory::GetForProfile(profile());
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            settings_map->GetContentSetting(page_url, GURL(),
+                                            ContentSettingsType::ADS));
+  WebContentsTester::For(web_contents())->NavigateAndCommit(page_url);
+
+  std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
+      new ContentSettingSubresourceFilterBubbleModel(nullptr, page()));
+
+  content_setting_bubble_model->OnManageCheckboxChecked(true);
+
+  // Simulate navigation.
+  GURL new_page_url("https://new.example.com");
+  WebContentsTester::For(web_contents())->NavigateAndCommit(new_page_url);
+
+  // This should not crash or apply settings to the new page.
+  content_setting_bubble_model->CommitChanges();
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            settings_map->GetContentSetting(page_url, GURL(),
+                                            ContentSettingsType::ADS));
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            settings_map->GetContentSetting(new_page_url, GURL(),
+                                            ContentSettingsType::ADS));
+
+  histogram_tester.ExpectBucketCount(
+      "SubresourceFilter.Actions2",
+      subresource_filter::SubresourceFilterAction::kDetailsShown, 1);
+  histogram_tester.ExpectBucketCount(
+      "SubresourceFilter.Actions2",
+      subresource_filter::SubresourceFilterAction::kAllowlistedSite, 1);
 }
 
 class GenericSensorContentSettingBubbleModelTest
@@ -1125,7 +1135,7 @@ class GenericSensorContentSettingBubbleModelTest
   base::test::ScopedFeatureList scoped_feature_list_;
 };
 
-// Regression test for https://crbug.com/955408
+// Regression test for https://crbug.com/41454392
 // See also: ContentSettingImageModelTest.SensorAccessPermissionsChanged
 TEST_F(GenericSensorContentSettingBubbleModelTest,
        SensorAccessPermissionsChanged) {
@@ -1144,7 +1154,7 @@ TEST_F(GenericSensorContentSettingBubbleModelTest,
     content_settings->OnContentAllowed(ContentSettingsType::SENSORS);
     std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
         ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-            nullptr, web_contents(), ContentSettingsType::SENSORS));
+            nullptr, page(), ContentSettingsType::SENSORS));
     const auto& bubble_content = content_setting_bubble_model->bubble_content();
 
     EXPECT_EQ(bubble_content.title,
@@ -1166,7 +1176,7 @@ TEST_F(GenericSensorContentSettingBubbleModelTest,
     content_settings->OnContentBlocked(ContentSettingsType::SENSORS);
     content_setting_bubble_model =
         ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-            nullptr, web_contents(), ContentSettingsType::SENSORS);
+            nullptr, page(), ContentSettingsType::SENSORS);
     const auto& bubble_content_2 =
         content_setting_bubble_model->bubble_content();
 
@@ -1189,7 +1199,7 @@ TEST_F(GenericSensorContentSettingBubbleModelTest,
     content_settings->OnContentAllowed(ContentSettingsType::SENSORS);
     content_setting_bubble_model =
         ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-            nullptr, web_contents(), ContentSettingsType::SENSORS);
+            nullptr, page(), ContentSettingsType::SENSORS);
     const auto& bubble_content_3 =
         content_setting_bubble_model->bubble_content();
 
@@ -1220,7 +1230,7 @@ TEST_F(GenericSensorContentSettingBubbleModelTest,
     content_settings->OnContentBlocked(ContentSettingsType::SENSORS);
     std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
         ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-            nullptr, web_contents(), ContentSettingsType::SENSORS));
+            nullptr, page(), ContentSettingsType::SENSORS));
     const auto& bubble_content = content_setting_bubble_model->bubble_content();
 
     EXPECT_EQ(bubble_content.title,
@@ -1242,7 +1252,7 @@ TEST_F(GenericSensorContentSettingBubbleModelTest,
     content_settings->OnContentAllowed(ContentSettingsType::SENSORS);
     content_setting_bubble_model =
         ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-            nullptr, web_contents(), ContentSettingsType::SENSORS);
+            nullptr, page(), ContentSettingsType::SENSORS);
     const auto& bubble_content_2 =
         content_setting_bubble_model->bubble_content();
 
@@ -1265,7 +1275,7 @@ TEST_F(GenericSensorContentSettingBubbleModelTest,
     content_settings->OnContentBlocked(ContentSettingsType::SENSORS);
     content_setting_bubble_model =
         ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-            nullptr, web_contents(), ContentSettingsType::SENSORS);
+            nullptr, page(), ContentSettingsType::SENSORS);
     const auto& bubble_content_3 =
         content_setting_bubble_model->bubble_content();
 
@@ -1300,7 +1310,7 @@ TEST_F(GenericSensorContentSettingBubbleModelTest,
     content_settings->OnContentAllowed(ContentSettingsType::SENSORS);
     std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
         ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-            nullptr, web_contents(), ContentSettingsType::SENSORS));
+            nullptr, page(), ContentSettingsType::SENSORS));
     const auto& bubble_content = content_setting_bubble_model->bubble_content();
 
     EXPECT_EQ(bubble_content.title,
@@ -1336,7 +1346,7 @@ TEST_F(GenericSensorContentSettingBubbleModelTest,
     content_settings->OnContentBlocked(ContentSettingsType::SENSORS);
     std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
         ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-            nullptr, web_contents(), ContentSettingsType::SENSORS));
+            nullptr, page(), ContentSettingsType::SENSORS));
     const auto& bubble_content = content_setting_bubble_model->bubble_content();
 
     EXPECT_EQ(bubble_content.title,
@@ -1366,7 +1376,7 @@ TEST_F(ContentSettingBubbleModelTest, PopupBubbleModelListItems) {
   blocked_content::PopupBlockerTabHelper::CreateForWebContents(web_contents());
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-          nullptr, web_contents(), ContentSettingsType::POPUPS));
+          nullptr, page(), ContentSettingsType::POPUPS));
   const auto& list_items =
       content_setting_bubble_model->bubble_content().list_items;
   EXPECT_EQ(0U, list_items.size());
@@ -1389,6 +1399,44 @@ TEST_F(ContentSettingBubbleModelTest, PopupBubbleModelListItems) {
   }
 }
 
+TEST_F(ContentSettingBubbleModelTest, PopupBubbleModelListItemsSpoofing) {
+  const GURL url("https://www.example.test/");
+  WebContentsTester::For(web_contents())->NavigateAndCommit(url);
+  blocked_content::PopupBlockerTabHelper::CreateForWebContents(web_contents());
+
+  // Malicious URL
+  GURL spoof_url("http://google.com:VeryLongString@evil.com");
+
+  BlockedWindowParams params(spoof_url, url::Origin(), nullptr,
+                             content::Referrer(), std::string(),
+                             WindowOpenDisposition::NEW_POPUP,
+                             blink::mojom::WindowFeatures(), false, true);
+
+  NavigateParams navigate_params =
+      params.CreateNavigateParams(process(), web_contents());
+  blocked_content::MaybeBlockPopup(
+      web_contents(), &url,
+      std::make_unique<ChromePopupNavigationDelegate>(
+          std::move(navigate_params)),
+      nullptr, params.features(),
+      HostContentSettingsMapFactory::GetForProfile(profile()));
+
+  std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
+      ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+          nullptr, page(), ContentSettingsType::POPUPS));
+
+  const auto& list_items =
+      content_setting_bubble_model->bubble_content().list_items;
+  ASSERT_EQ(1U, list_items.size());
+
+  // Check the title
+  std::u16string title = list_items[0].title;
+  // It should NOT contain "google.com" if it's formatted correctly for
+  // security.
+  EXPECT_EQ(std::u16string::npos, title.find(u"google.com"));
+  EXPECT_NE(std::u16string::npos, title.find(u"evil.com"));
+}
+
 TEST_F(ContentSettingBubbleModelTest, ValidUrl) {
   WebContentsTester::For(web_contents())
       ->NavigateAndCommit(GURL("https://www.example.com"));
@@ -1400,7 +1448,7 @@ TEST_F(ContentSettingBubbleModelTest, ValidUrl) {
 
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-          nullptr, web_contents(), ContentSettingsType::COOKIES));
+          nullptr, page(), ContentSettingsType::COOKIES));
   const ContentSettingBubbleModel::BubbleContent& bubble_content =
       content_setting_bubble_model->bubble_content();
 
@@ -1418,7 +1466,7 @@ TEST_F(ContentSettingBubbleModelTest, InvalidUrl) {
 
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-          nullptr, web_contents(), ContentSettingsType::COOKIES));
+          nullptr, page(), ContentSettingsType::COOKIES));
   const ContentSettingBubbleModel::BubbleContent& bubble_content =
       content_setting_bubble_model->bubble_content();
 
@@ -1443,7 +1491,7 @@ TEST_F(ContentSettingBubbleModelTest, StorageAccess) {
 
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-          nullptr, web_contents(), ContentSettingsType::STORAGE_ACCESS));
+          nullptr, page(), ContentSettingsType::STORAGE_ACCESS));
   t.ExpectUniqueSample("ContentSettings.Bubble.StorageAccess.Action",
                        ContentSettingBubbleAction::kOpened, 1);
   const ContentSettingBubbleModel::BubbleContent& bubble_content =
@@ -1467,6 +1515,49 @@ TEST_F(ContentSettingBubbleModelTest, StorageAccess) {
                                    ContentSettingsType::STORAGE_ACCESS));
 }
 
+TEST_F(ContentSettingBubbleModelTest,
+       StorageAccessCommittedWhenNavigatingAway) {
+  const GURL page_url("https://not-example.test");
+  WebContentsTester::For(web_contents())->NavigateAndCommit(page_url);
+  auto* content_settings = PageSpecificContentSettings::GetForFrame(
+      web_contents()->GetPrimaryMainFrame());
+
+  net::SchemefulSite site(GURL("https://example.com"));
+  auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
+  map->SetContentSettingDefaultScope(site.GetURL(), page_url,
+                                     ContentSettingsType::STORAGE_ACCESS,
+                                     CONTENT_SETTING_BLOCK);
+
+  content_settings->OnTwoSitePermissionChanged(
+      ContentSettingsType::STORAGE_ACCESS, site, CONTENT_SETTING_BLOCK);
+
+  std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
+      ContentSettingBubbleModel::CreateContentSettingBubbleModel(
+          nullptr, page(), ContentSettingsType::STORAGE_ACCESS));
+  const ContentSettingBubbleModel::BubbleContent& bubble_content =
+      content_setting_bubble_model->bubble_content();
+
+  EXPECT_EQ(bubble_content.subtitle,
+            url_formatter::FormatUrlForSecurityDisplay(
+                page_url, url_formatter::SchemeDisplay::OMIT_CRYPTOGRAPHIC));
+  EXPECT_EQ(0U, bubble_content.radio_group.radio_items.size());
+  EXPECT_THAT(bubble_content.site_list,
+              UnorderedElementsAre(Pair(site, false)));
+
+  content_setting_bubble_model->OnSiteRowClicked(site, true);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            map->GetContentSetting(site.GetURL(), page_url,
+                                   ContentSettingsType::STORAGE_ACCESS));
+  WebContentsTester::For(web_contents())
+      ->NavigateAndCommit(GURL("https://another-example.test"));
+  // Simulate a CommitChanges call, which in the real implementation is called
+  // during the widget's WindowClosing as a result of PrimaryPageChanged().
+  content_setting_bubble_model->CommitChanges();
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            map->GetContentSetting(site.GetURL(), page_url,
+                                   ContentSettingsType::STORAGE_ACCESS));
+}
+
 #if BUILDFLAG(IS_CHROMEOS)
 TEST_F(ContentSettingBubbleModelTest, SmartCard) {
   const GURL page_url("https://toplevel.example/");
@@ -1476,7 +1567,7 @@ TEST_F(ContentSettingBubbleModelTest, SmartCard) {
   content_settings->OnDeviceUsed(ContentSettingsType::SMART_CARD_GUARD);
 
   ContentSettingSimpleBubbleModel content_setting_bubble_model(
-      nullptr, web_contents(), ContentSettingsType::SMART_CARD_GUARD);
+      nullptr, page(), ContentSettingsType::SMART_CARD_GUARD);
 
   const ContentSettingBubbleModel::BubbleContent& bubble_content =
       content_setting_bubble_model.bubble_content();
@@ -1512,8 +1603,7 @@ TEST_F(ContentSettingBubbleModelTest, ProtectedMediaIdentifier_Allowed) {
 
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-          nullptr, web_contents(),
-          ContentSettingsType::PROTECTED_MEDIA_IDENTIFIER));
+          nullptr, page(), ContentSettingsType::PROTECTED_MEDIA_IDENTIFIER));
   const auto& bubble_content = content_setting_bubble_model->bubble_content();
 
   // Assert
@@ -1553,8 +1643,7 @@ TEST_F(ContentSettingBubbleModelTest, ProtectedMediaIdentifier_Blocked) {
 
   std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
       ContentSettingBubbleModel::CreateContentSettingBubbleModel(
-          nullptr, web_contents(),
-          ContentSettingsType::PROTECTED_MEDIA_IDENTIFIER));
+          nullptr, page(), ContentSettingsType::PROTECTED_MEDIA_IDENTIFIER));
   const auto& bubble_content = content_setting_bubble_model->bubble_content();
 
   // Assert
@@ -1635,7 +1724,7 @@ TEST_F(ContentSettingBubbleModelUnusedPermissionRevocationForAllSurfacesTest,
   {
     // Simulate the user choosing the "Allow" radio button and clicking "Done".
     std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
-        new ContentSettingMediaStreamBubbleModel(nullptr, web_contents()));
+        new ContentSettingMediaStreamBubbleModel(nullptr, page()));
     std::unique_ptr<FakeOwner> owner =
         FakeOwner::Create(*content_setting_bubble_model, 1);
     owner->SetSelectedRadioOptionAndCommit(0);
@@ -1667,7 +1756,7 @@ TEST_F(ContentSettingBubbleModelUnusedPermissionRevocationForAllSurfacesTest,
   {
     // Simulate the user choosing the "Block" radio button and clicking "Done".
     std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model(
-        new ContentSettingMediaStreamBubbleModel(nullptr, web_contents()));
+        new ContentSettingMediaStreamBubbleModel(nullptr, page()));
     std::unique_ptr<FakeOwner> owner =
         FakeOwner::Create(*content_setting_bubble_model, 0);
     owner->SetSelectedRadioOptionAndCommit(1);
@@ -1705,7 +1794,7 @@ TEST_F(ContentSettingBubbleModelUnusedPermissionRevocationForAllSurfacesTest,
   DownloadRequestLimiter* limiter =
       g_browser_process->download_request_limiter();
   DownloadRequestLimiter::TabDownloadState* tab_download_state =
-      limiter->GetDownloadState(web_contents(), /* create */ true);
+      limiter->GetOrCreateDownloadState(web_contents());
   tab_download_state->set_download_seen();
   tab_download_state->SetDownloadStatusAndNotify(
       url::Origin::Create(url), DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED);
@@ -1715,8 +1804,7 @@ TEST_F(ContentSettingBubbleModelUnusedPermissionRevocationForAllSurfacesTest,
   {
     // Simulate the user choosing the "Allow" radio button and clicking "Done".
     auto content_setting_bubble_model =
-        std::make_unique<ContentSettingDownloadsBubbleModel>(nullptr,
-                                                             web_contents());
+        std::make_unique<ContentSettingDownloadsBubbleModel>(nullptr, page());
     auto owner =
         FakeOwner::Create(*content_setting_bubble_model, /*default_index=*/1);
     owner->SetSelectedRadioOptionAndCommit(0);
@@ -1740,8 +1828,7 @@ TEST_F(ContentSettingBubbleModelUnusedPermissionRevocationForAllSurfacesTest,
   {
     // Simulate the user choosing the "Block" radio button and clicking "Done".
     auto content_setting_bubble_model =
-        std::make_unique<ContentSettingDownloadsBubbleModel>(nullptr,
-                                                             web_contents());
+        std::make_unique<ContentSettingDownloadsBubbleModel>(nullptr, page());
     auto owner =
         FakeOwner::Create(*content_setting_bubble_model, /*default_index=*/0);
     owner->SetSelectedRadioOptionAndCommit(1);
@@ -1779,8 +1866,7 @@ TEST_F(ContentSettingBubbleModelUnusedPermissionRevocationForAllSurfacesTest,
   {
     // Simulate the user choosing the "Allow" radio button and clicking "Done".
     auto content_setting_bubble_model =
-        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents());
+        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr, page());
     std::unique_ptr<FakeOwner> owner =
         FakeOwner::Create(*content_setting_bubble_model, 0);
     owner->SetSelectedRadioOptionAndCommit(0);
@@ -1800,8 +1886,7 @@ TEST_F(ContentSettingBubbleModelUnusedPermissionRevocationForAllSurfacesTest,
   {
     // Simulate the user choosing the "Block" radio button and clicking "Done".
     auto content_setting_bubble_model =
-        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                               web_contents());
+        std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr, page());
     std::unique_ptr<FakeOwner> owner =
         FakeOwner::Create(*content_setting_bubble_model, 0);
     owner->SetSelectedRadioOptionAndCommit(1);
@@ -1834,7 +1919,7 @@ TEST_F(ContentSettingBubbleModelUnusedPermissionRevocationForAllSurfacesTest,
   // Assert bubble is in the Blocked state (index 1) and simulate the user
   // choosing Allow radio button (index 0) and clicking Done.
   auto bubble_model = std::make_unique<ContentSettingSingleRadioGroup>(
-      nullptr, web_contents(), ContentSettingsType::JAVASCRIPT);
+      nullptr, page(), ContentSettingsType::JAVASCRIPT);
   EXPECT_EQ(bubble_model->bubble_content().radio_group.default_item, 1);
   auto owner = FakeOwner::Create(*bubble_model, /*default_index=*/1);
   owner->SetSelectedRadioOptionAndCommit(0);
@@ -1877,8 +1962,7 @@ TEST_F(ContentSettingBubbleModelUnusedPermissionRevocationForAllSurfacesTest,
 
   // Simulate the user choosing the "Allow" radio button and clicking "Done".
   auto content_setting_bubble_model =
-      std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr,
-                                                             web_contents());
+      std::make_unique<ContentSettingGeolocationBubbleModel>(nullptr, page());
   std::unique_ptr<FakeOwner> owner =
       FakeOwner::Create(*content_setting_bubble_model, 0);
   owner->SetSelectedRadioOptionAndCommit(0);

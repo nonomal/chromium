@@ -8,7 +8,6 @@
 
 #include "ash/public/cpp/accelerator_actions.h"
 #include "ash/public/cpp/accelerators_util.h"
-#include "ash/public/mojom/accelerator_info.mojom-shared.h"
 #include "ash/public/mojom/accelerator_info.mojom.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "base/check_op.h"
@@ -286,6 +285,9 @@ const NonConfigurableActionsMap& GetNonConfigurableActionsMap() {
           {NonConfigurableActions::kBrowserFocusInactivePopupForAccessibility,
            NonConfigurableAcceleratorDetails({ui::Accelerator(
                ui::VKEY_A, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN)})},
+          {NonConfigurableActions::kBrowserShowReadingMode,
+           NonConfigurableAcceleratorDetails({ui::Accelerator(
+               ui::VKEY_R, ui::EF_SHIFT_DOWN | ui::EF_ALT_DOWN)})},
           {NonConfigurableActions::kBrowserBottomPage,
            NonConfigurableAcceleratorDetails(
                {ui::Accelerator(ui::VKEY_END, ui::EF_NONE)})},
@@ -1835,6 +1837,14 @@ const AcceleratorLayoutMap& GetAcceleratorLayoutMap() {
             mojom::AcceleratorSubcategory::kVisibility,
             /*locked=*/false, mojom::AcceleratorLayoutStyle::kDefault,
             mojom::AcceleratorSource::kAsh)},
+       {NonConfigurableActions::kBrowserShowReadingMode,
+        AcceleratorLayoutDetails(
+            NonConfigurableActions::kBrowserShowReadingMode,
+            IDS_BROWSER_ACCELERATOR_DESCRIPTION_SHOW_READING_MODE,
+            mojom::AcceleratorCategory::kAccessibility,
+            mojom::AcceleratorSubcategory::kVisibility,
+            /*locked=*/true, mojom::AcceleratorLayoutStyle::kDefault,
+            mojom::AcceleratorSource::kAmbient)},
        {AcceleratorAction::kAccessibilityAction,
         AcceleratorLayoutDetails(
             AcceleratorAction::kAccessibilityAction,

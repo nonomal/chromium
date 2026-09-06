@@ -8,6 +8,7 @@
 #include <dawn/wire/client/webgpu_cpp.h>
 #include <dawn/wire/client/webgpu_cpp_print.h>
 
+#include <map>
 #include <memory>
 
 #include "build/build_config.h"
@@ -67,6 +68,8 @@ class WebGPUTest : public testing::Test {
 
   void RunPendingTasks();
   void WaitForCompletion(wgpu::Device device);
+  void WaitForFutureCompletion(wgpu::Device device,
+                               wgpu::FutureWaitInfo wait_info);
   void PollUntilIdle();
 
   wgpu::Device GetNewDevice(
@@ -84,6 +87,8 @@ class WebGPUTest : public testing::Test {
 
   static std::map<std::pair<WGPUDevice, wgpu::ErrorType>, /* matched */ bool>
       s_expected_errors;
+
+  static std::map<WGPUDevice, /* matched */ bool> s_expected_devices_lost;
 
   wgpu::Instance instance_ = nullptr;
   wgpu::Adapter adapter_ = nullptr;
@@ -106,6 +111,18 @@ class WebGPUTest : public testing::Test {
     EXPECT_TRUE(it.first->second)                                              \
         << "Expected error (" << type << ") in `" #statement "`";              \
     s_expected_errors.erase(it.first);                                         \
+  } while (0)
+
+#define EXPECT_WEBGPU_DEVICE_LOST(device, statement)                        \
+  do {                                                                      \
+    PollUntilIdle();                                                        \
+    auto it = s_expected_devices_lost.insert({device.Get(), false});        \
+    EXPECT_TRUE(it.second) << "Only one expectation per-device supported."; \
+    statement;                                                              \
+    PollUntilIdle();                                                        \
+    EXPECT_TRUE(it.first->second)                                           \
+        << "Expected device lost in `" #statement "`";                      \
+    s_expected_devices_lost.erase(it.first);                                \
   } while (0)
 
 }  // namespace gpu

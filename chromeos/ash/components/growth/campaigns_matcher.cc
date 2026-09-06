@@ -4,6 +4,7 @@
 
 #include "chromeos/ash/components/growth/campaigns_matcher.h"
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -13,7 +14,6 @@
 #include "ash/constants/ash_pref_names.h"
 #include "ash/constants/ash_switches.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/features.h"
 #include "base/logging.h"
@@ -31,13 +31,14 @@
 #include "chromeos/ash/components/growth/campaigns_model.h"
 #include "chromeos/ash/components/growth/campaigns_utils.h"
 #include "chromeos/ash/components/growth/growth_metrics.h"
+#include "chromeos/ash/components/signin/identity_manager_provider.h"
 #include "components/account_id/account_id.h"
 #include "components/prefs/pref_service.h"
+#include "components/session_manager/core/session.h"
+#include "components/session_manager/core/session_manager.h"
 #include "components/signin/public/identity_manager/account_capabilities.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/tribool.h"
-#include "components/user_manager/user.h"
-#include "components/user_manager/user_manager.h"
 #include "components/version_info/version_info.h"
 #include "google_apis/gaia/gaia_id.h"
 #include "third_party/re2/src/re2/re2.h"
@@ -66,7 +67,7 @@ base::Time GetDeviceCurrentTimeForScheduling() {
   return base::Time::Now();
 }
 
-bool MatchPref(const base::Value::List* criterias,
+bool MatchPref(const base::ListValue* criterias,
                std::string_view pref_path,
                const PrefService* pref_service) {
   if (!pref_service) {
@@ -85,7 +86,7 @@ bool MatchPref(const base::Value::List* criterias,
 
   // String list targeting.
   if (criterias) {
-    return Contains(*criterias, value);
+    return std::ranges::contains(*criterias, value);
   }
 
   return false;
@@ -130,7 +131,7 @@ bool MatchSchedulings(const std::vector<std::unique_ptr<TimeWindowTargeting>>&
   return false;
 }
 
-bool MatchExperimentTags(const base::Value::List* experiment_tags,
+bool MatchExperimentTags(const base::ListValue* experiment_tags,
                          std::optional<const base::Feature*> feature) {
   if (!ash::features::IsGrowthCampaignsExperimentTagTargetingEnabled()) {
     // Campaign not match if experiment tag targeting is not enabled.
@@ -168,7 +169,7 @@ bool MatchExperimentTags(const base::Value::List* experiment_tags,
 
   // Campaign is matched if the tag from field trail param matches any of the
   // tag in the targeting criteria.
-  const bool exp_tag_matched = base::Contains(*experiment_tags, exp_tag);
+  const bool exp_tag_matched = experiment_tags->contains(exp_tag);
   if (!exp_tag_matched) {
     CAMPAIGNS_LOG(DEBUG) << "ExperimentTags is NOT matched.";
   }
@@ -176,10 +177,10 @@ bool MatchExperimentTags(const base::Value::List* experiment_tags,
 }
 
 // Match if the target values and the user pref has any overlap entries.
-bool HasOverlapEntries(const base::Value::List& pref_values,
-                       const base::Value::List& target_values) {
+bool HasOverlapEntries(const base::ListValue& pref_values,
+                       const base::ListValue& target_values) {
   for (auto& value : target_values) {
-    if (base::Contains(pref_values, value)) {
+    if (std::ranges::contains(pref_values, value)) {
       return true;
     }
   }
@@ -187,10 +188,10 @@ bool HasOverlapEntries(const base::Value::List& pref_values,
 }
 
 // Match if the values in the List and Vector has any overlap entries.
-bool HasOverlapEntries(const base::Value::List& list_values,
+bool HasOverlapEntries(const base::ListValue& list_values,
                        const std::vector<std::string>& vector_values) {
   for (const auto& value : vector_values) {
-    if (base::Contains(list_values, value)) {
+    if (list_values.contains(value)) {
       return true;
     }
   }
@@ -200,7 +201,7 @@ bool HasOverlapEntries(const base::Value::List& list_values,
 // Match if any value in the target is found in user pref.
 bool MatchUserPref(const PrefService& pref_service,
                    const std::string* pref_name,
-                   const base::Value::List* target_values) {
+                   const base::ListValue* target_values) {
   if (!pref_name || pref_name->empty()) {
     growth::RecordCampaignsManagerError(
         growth::CampaignsManagerError::kTargetingUserPrefParsingFail);
@@ -239,7 +240,7 @@ bool MatchUserPref(const PrefService& pref_service,
 
   // If the user pref is not a list, match if any entry in target values is the
   // pref value.
-  return base::Contains(*target_values, *pref_value);
+  return std::ranges::contains(*target_values, *pref_value);
 }
 
 // TODO: b/354060160 - Add more data type to pref targeting.
@@ -250,7 +251,7 @@ bool MatchUserPref(const PrefService& pref_service,
 //   ],
 // conditions_met = A1 || A2 || B1
 bool MatchUserPrefCriteria(const PrefService& pref_service,
-                           const base::Value::List& criteria) {
+                           const base::ListValue& criteria) {
   for (auto& criterion : criteria) {
     if (!criterion.is_dict()) {
       growth::RecordCampaignsManagerError(
@@ -279,7 +280,7 @@ bool MatchUserPrefCriteria(const PrefService& pref_service,
 // ]
 // conditions_met = (A1 || A2 || B1) && C1;
 bool MatchUserPrefs(const PrefService* pref_service,
-                    const base::Value::List* user_pref_targetings) {
+                    const base::ListValue* user_pref_targetings) {
   if (!user_pref_targetings || user_pref_targetings->empty()) {
     return true;
   }
@@ -333,14 +334,14 @@ bool MatchStringList(const StringListTargeting& string_list_targeting,
   const auto* includes = string_list_targeting.GetIncludes();
 
   // If the `includes` is empty, then it will not match.
-  if (includes && !Contains(*includes, value)) {
+  if (includes && !includes->contains(value)) {
     CAMPAIGNS_LOG(DEBUG) << "Value is not in the includes list of "
                          << target_name;
     return false;
   }
 
   const auto* excludes = string_list_targeting.GetExcludes();
-  if (excludes && Contains(*excludes, value)) {
+  if (excludes && excludes->contains(value)) {
     CAMPAIGNS_LOG(DEBUG) << "Value is in the excludes list of " << target_name;
     return false;
   }
@@ -481,13 +482,12 @@ bool CampaignsMatcher::MatchDemoModeTier(
   return true;
 }
 
-bool CampaignsMatcher::MatchRetailers(
-    const base::Value::List* retailers) const {
+bool CampaignsMatcher::MatchRetailers(const base::ListValue* retailers) const {
   if (!retailers) {
     return true;
   }
 
-  base::Value::List canonicalized_retailers;
+  base::ListValue canonicalized_retailers;
   for (auto& retailer : *retailers) {
     if (retailer.is_string()) {
       canonicalized_retailers.Append(
@@ -598,12 +598,12 @@ bool CampaignsMatcher::MatchDeviceTargeting(
 
   const auto* targeting_locales = targeting.GetLocales();
   if (targeting_locales &&
-      !Contains(*targeting_locales, client_->GetApplicationLocale())) {
+      !targeting_locales->contains(client_->GetApplicationLocale())) {
     return false;
   }
 
   const auto* user_locales = targeting.GetUserLocales();
-  if (user_locales && !Contains(*user_locales, client_->GetUserLocale())) {
+  if (user_locales && !user_locales->contains(client_->GetUserLocale())) {
     return false;
   }
 
@@ -619,13 +619,13 @@ bool CampaignsMatcher::MatchDeviceTargeting(
 
   const auto* included_countries = targeting.GetIncludedCountries();
   if (included_countries &&
-      !Contains(*included_countries, client_->GetCountryCode())) {
+      !included_countries->contains(client_->GetCountryCode())) {
     return false;
   }
 
   const auto* excluded_countries = targeting.GetExcludedCountries();
   if (excluded_countries &&
-      Contains(*excluded_countries, client_->GetCountryCode())) {
+      excluded_countries->contains(client_->GetCountryCode())) {
     return false;
   }
 
@@ -739,7 +739,7 @@ bool CampaignsMatcher::MatchTriggerTargeting(
       return true;
     }
 
-    const base::Value::List* trigger_events = trigger->GetTriggerEvents();
+    const base::ListValue* trigger_events = trigger->GetTriggerEvents();
     if (!trigger_events) {
       // If the trigger type is `kEvent`, but the `trigger_events` is not valid,
       // does not match.
@@ -889,7 +889,7 @@ bool CampaignsMatcher::MatchEvents(std::unique_ptr<EventsTargeting> config,
       CreateBasicConditionParams();
   // Here is to handle custom events targeting conditions.
   // The outer loop is AND logic and the inner loop is OR logic.
-  const base::Value::List* conditions = config->GetEventsConditions();
+  const base::ListValue* conditions = config->GetEventsConditions();
   if (!conditions) {
     // Campaign is matched if there is no custom events targeting conditions.
     return true;
@@ -949,21 +949,25 @@ bool CampaignsMatcher::MatchMinorUser(
   if (manta_capability_for_testing_) {
     capability = manta_capability_for_testing_.value();
   } else {
-    auto* identity_manager = client_->GetIdentityManager();
+    // TODO: We should pass account_id as a context via params from callers.
+    const AccountId& account_id = session_manager::SessionManager::Get()
+                                      ->GetActiveSession()
+                                      ->account_id();
+
+    auto* identity_manager =
+        ash::IdentityManagerProvider::Get().Find(account_id);
     if (!identity_manager) {
       // Identity manager is not available (e.g:guest mode). In that case,
       // a campaign with minor user targeting shouldn't be triggered.
       CAMPAIGNS_LOG(ERROR) << "IdentityManager is null.";
       return false;
     }
-    GaiaId gaia_id = user_manager::UserManager::Get()
-                         ->GetActiveUser()
-                         ->GetAccountId()
-                         .GetGaiaId();
+
     const AccountInfo account_info =
-        identity_manager->FindExtendedAccountInfoByGaiaId(gaia_id);
+        identity_manager->FindExtendedAccountInfoByGaiaId(
+            account_id.GetGaiaId());
     // TODO: b/333896450 - find a better signal for minor mode.
-    capability = account_info.capabilities.can_use_manta_service();
+    capability = account_info.GetAccountCapabilities().can_use_manta_service();
   }
 
   if (capability == signin::Tribool::kUnknown) {

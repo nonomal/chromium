@@ -7,7 +7,6 @@
 #include <stdint.h>
 
 #include <limits>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -27,7 +26,7 @@ const char kInterfaceIdKey[] = "interfaceId";
 const char kInterfaceClassKey[] = "interfaceClass";
 
 bool ExtractFromDict(const std::string& key,
-                     const base::Value::Dict* dict_value,
+                     const base::DictValue* dict_value,
                      int max,
                      int* value) {
   std::optional<int> temp = dict_value->FindInt(key);
@@ -83,20 +82,17 @@ bool UsbDevicePermissionData::Check(
           specific_param.interface_classes->count(interface_class_) > 0);
 }
 
-std::unique_ptr<base::Value> UsbDevicePermissionData::ToValue() const {
-  base::Value::Dict result;
+base::Value UsbDevicePermissionData::ToValue() const {
+  base::DictValue result;
   result.Set(kVendorIdKey, vendor_id_);
   result.Set(kProductIdKey, product_id_);
   result.Set(kInterfaceIdKey, interface_id_);
   result.Set(kInterfaceClassKey, interface_class_);
-  return std::make_unique<base::Value>(std::move(result));
+  return base::Value(std::move(result));
 }
 
-bool UsbDevicePermissionData::FromValue(const base::Value* value) {
-  if (!value)
-    return false;
-
-  const base::Value::Dict* dict_value = value->GetIfDict();
+bool UsbDevicePermissionData::FromValue(const base::Value& value) {
+  const base::DictValue* dict_value = value.GetIfDict();
   if (!dict_value)
     return false;
 

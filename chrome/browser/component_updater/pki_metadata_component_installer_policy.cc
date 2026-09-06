@@ -4,6 +4,10 @@
 
 #include "chrome/browser/component_updater/pki_metadata_component_installer_policy.h"
 
+#include <cstdint>
+#include <string>
+#include <vector>
+
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "chrome/browser/component_updater/pki_metadata_component_installer.h"
@@ -38,7 +42,7 @@ bool PKIMetadataComponentInstallerPolicy::RequiresNetworkEncryption() const {
 
 update_client::CrxInstaller::Result
 PKIMetadataComponentInstallerPolicy::OnCustomInstall(
-    const base::Value::Dict& /* manifest */,
+    const base::DictValue& /* manifest */,
     const base::FilePath& /* install_dir */) {
   return update_client::CrxInstaller::Result(0);  // Nothing custom here.
 }
@@ -48,14 +52,14 @@ void PKIMetadataComponentInstallerPolicy::OnCustomUninstall() {}
 void PKIMetadataComponentInstallerPolicy::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
-    base::Value::Dict /* manifest */) {
+    base::DictValue /* manifest */) {
   PKIMetadataComponentInstallerService::GetInstance()->OnComponentReady(
       install_dir);
 }
 
 // Called during startup and installation before ComponentReady().
 bool PKIMetadataComponentInstallerPolicy::VerifyInstallation(
-    const base::Value::Dict& /* manifest */,
+    const base::DictValue& /* manifest */,
     const base::FilePath& install_dir) const {
   if (!base::PathExists(install_dir)) {
     return false;
@@ -71,8 +75,7 @@ base::FilePath PKIMetadataComponentInstallerPolicy::GetRelativeInstallDir()
 
 void PKIMetadataComponentInstallerPolicy::GetHash(
     std::vector<uint8_t>* hash) const {
-  hash->assign(std::begin(kPKIMetadataPublicKeySHA256),
-               std::end(kPKIMetadataPublicKeySHA256));
+  hash->assign_range(kPKIMetadataPublicKeySHA256);
 }
 
 std::string PKIMetadataComponentInstallerPolicy::GetName() const {

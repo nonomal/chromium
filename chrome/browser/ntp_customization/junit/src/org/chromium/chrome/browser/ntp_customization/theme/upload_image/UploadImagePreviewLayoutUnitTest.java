@@ -5,6 +5,8 @@
 package org.chromium.chrome.browser.ntp_customization.theme.upload_image;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import android.app.Activity;
 import android.graphics.Bitmap;
@@ -25,6 +27,9 @@ import org.robolectric.Robolectric;
 import org.robolectric.Shadows;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.util.Features.DisableFeatures;
+import org.chromium.base.test.util.Features.EnableFeatures;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.logo.LogoUtils;
 import org.chromium.chrome.browser.ntp_customization.R;
 
@@ -34,8 +39,8 @@ public class UploadImagePreviewLayoutUnitTest {
     private Activity mActivity;
     private UploadImagePreviewLayout mLayout;
     private ImageView mLogoView;
+    private View mSearchBoxContainer;
     private Guideline mGuidelineTop;
-    private Guideline mGuidelineBottom;
 
     @Before
     public void setUp() {
@@ -49,7 +54,7 @@ public class UploadImagePreviewLayoutUnitTest {
 
         mLogoView = mLayout.findViewById(R.id.default_search_engine_logo);
         mGuidelineTop = mLayout.findViewById(R.id.guideline_top);
-        mGuidelineBottom = mLayout.findViewById(R.id.guideline_bottom);
+        mSearchBoxContainer = mLayout.findViewById(R.id.search_box_container);
     }
 
     @Test
@@ -102,40 +107,81 @@ public class UploadImagePreviewLayoutUnitTest {
     }
 
     @Test
-    public void testSetTopInsets() {
-        int logoHeight = 100;
-        int logoTopMargin = 50;
-        mLayout.setLogoViewLayoutParams(logoHeight, logoTopMargin);
+    public void testSetLogoSearchBoxMargin() {
+        int expectedMargin = 60;
 
+        mLayout.setSearchBoxContainerTopMargin(expectedMargin);
+
+        ViewGroup.MarginLayoutParams params =
+                (ViewGroup.MarginLayoutParams) mSearchBoxContainer.getLayoutParams();
+
+        assertEquals(
+                "Search box top margin should be updated to create the gap",
+                expectedMargin,
+                params.topMargin);
+    }
+
+    @Test
+    public void testSetTopInsets() {
         int topInsetAndToolBarHeight = 120;
-        mLayout.setTopInsets(topInsetAndToolBarHeight);
+        mLayout.setTopGuidelineBegin(topInsetAndToolBarHeight);
 
         // Verifies the guideline was moved
         ConstraintLayout.LayoutParams params =
                 (ConstraintLayout.LayoutParams) mGuidelineTop.getLayoutParams();
 
         assertEquals(
-                "Guideline begin should be sum of inset and logo margin",
-                topInsetAndToolBarHeight + logoTopMargin,
+                "Guideline should only account for top inset and toolbar height",
+                topInsetAndToolBarHeight,
                 params.guideBegin);
     }
 
     @Test
-    public void testSetBottomInsets() {
-        int inputBottomInset = 80;
-        int resourceMargin =
+    @EnableFeatures(ChromeFeatureList.NTP_AURORA)
+    public void testSearchBoxShadow_NtpAuroraEnabled() {
+        UploadImagePreviewLayout layout =
+                (UploadImagePreviewLayout)
+                        LayoutInflater.from(mActivity)
+                                .inflate(
+                                        R.layout.ntp_customization_theme_preview_dialog_layout,
+                                        null);
+        View searchBox = layout.findViewById(R.id.search_box);
+        ViewGroup searchBoxContainer = layout.findViewById(R.id.search_box_container);
+
+        float expectedElevation =
+                mActivity.getResources().getDimensionPixelSize(R.dimen.fake_search_box_elevation);
+        int expectedLateralPadding =
                 mActivity
                         .getResources()
-                        .getDimensionPixelSize(R.dimen.ntp_customization_back_button_margin_start);
+                        .getDimensionPixelSize(R.dimen.search_box_padding_for_shadow_lateral);
 
-        mLayout.setBottomInsets(inputBottomInset);
+        assertEquals(expectedElevation, searchBox.getElevation(), 0.01f);
+        assertEquals(expectedLateralPadding, searchBoxContainer.getPaddingLeft());
+        assertEquals(expectedLateralPadding, searchBoxContainer.getPaddingRight());
+        assertFalse(searchBoxContainer.getClipToPadding());
+        assertFalse(searchBoxContainer.getClipChildren());
+        assertFalse(layout.getClipChildren());
+        assertFalse(layout.getClipToPadding());
+    }
 
-        ConstraintLayout.LayoutParams params =
-                (ConstraintLayout.LayoutParams) mGuidelineBottom.getLayoutParams();
+    @Test
+    @DisableFeatures(ChromeFeatureList.NTP_AURORA)
+    public void testSearchBoxShadow_NtpAuroraDisabled() {
+        UploadImagePreviewLayout layout =
+                (UploadImagePreviewLayout)
+                        LayoutInflater.from(mActivity)
+                                .inflate(
+                                        R.layout.ntp_customization_theme_preview_dialog_layout,
+                                        null);
+        View searchBox = layout.findViewById(R.id.search_box);
+        ViewGroup searchBoxContainer = layout.findViewById(R.id.search_box_container);
 
-        assertEquals(
-                "Guideline end should be sum of inset and resource margin",
-                inputBottomInset + resourceMargin,
-                params.guideEnd);
+        assertEquals(0f, searchBox.getElevation(), 0.01f);
+        assertEquals(0, searchBoxContainer.getPaddingLeft());
+        assertEquals(0, searchBoxContainer.getPaddingRight());
+        assertTrue(searchBoxContainer.getClipToPadding());
+        assertTrue(searchBoxContainer.getClipChildren());
+        assertFalse(layout.getClipChildren());
+        assertFalse(layout.getClipToPadding());
     }
 }

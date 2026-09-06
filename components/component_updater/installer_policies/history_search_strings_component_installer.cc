@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -45,7 +46,7 @@ HistorySearchStringsComponentInstallerPolicy::
     ~HistorySearchStringsComponentInstallerPolicy() = default;
 
 bool HistorySearchStringsComponentInstallerPolicy::VerifyInstallation(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) const {
   // No need to validate the proto file here. It will be validated in
   // history_embeddings::SearchStringsUpdateListener.
@@ -64,7 +65,7 @@ bool HistorySearchStringsComponentInstallerPolicy::RequiresNetworkEncryption()
 
 update_client::CrxInstaller::Result
 HistorySearchStringsComponentInstallerPolicy::OnCustomInstall(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) {
   return update_client::CrxInstaller::Result(0);  // Nothing custom here.
 }
@@ -74,7 +75,7 @@ void HistorySearchStringsComponentInstallerPolicy::OnCustomUninstall() {}
 void HistorySearchStringsComponentInstallerPolicy::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
-    base::Value::Dict manifest) {
+    base::DictValue manifest) {
   DVLOG(1) << "History Search component ready in "
            << GetInstalledPath(install_dir);
   history_embeddings::SearchStringsUpdateListener::GetInstance()
@@ -88,8 +89,7 @@ HistorySearchStringsComponentInstallerPolicy::GetRelativeInstallDir() const {
 
 void HistorySearchStringsComponentInstallerPolicy::GetHash(
     std::vector<uint8_t>* hash) const {
-  hash->assign(std::begin(kHistorySearchStringsPublicKeySHA256),
-               std::end(kHistorySearchStringsPublicKeySHA256));
+  hash->assign_range(kHistorySearchStringsPublicKeySHA256);
 }
 
 std::string HistorySearchStringsComponentInstallerPolicy::GetName() const {

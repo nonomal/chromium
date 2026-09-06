@@ -7,7 +7,7 @@
 
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/policy/policy_test_utils.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/permissions/permission_request_manager.h"
 #include "components/permissions/test/mock_permission_prompt_factory.h"
@@ -89,7 +89,7 @@ class MediaStreamDevicesControllerBrowserTest
     if (allowlist_policy) {
       // Add an entry to the allowlist that allows the specified URL regardless
       // of the setting of kAudioCapturedAllowed.
-      base::Value::List list;
+      base::ListValue list;
       if (allow_rule) {
         list.Append(allow_rule);
         request_url_allowed_via_allowlist_ = true;

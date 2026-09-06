@@ -19,17 +19,21 @@
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
+#include "components/sync/base/features.h"
 #include "components/sync/service/sync_service_utils.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
-using testing::Return;
-
 namespace {
+
+using ::testing::Return;
+
 constexpr char kErrorMessageDismissalReasonHistogramName[] =
     "PasswordManager.ErrorMessageDismissalReason.";
 constexpr char kErrorMessageDisplayReasonHistogramName[] =
     "PasswordManager.ErrorMessageDisplayReason";
+
 }  // namespace
 
 class PasswordManagerErrorMessageDelegateTest
@@ -66,6 +70,8 @@ class PasswordManagerErrorMessageDelegateTest
   }
 
   messages::MessageWrapper* GetMessageWrapper();
+
+  base::test::ScopedFeatureList scoped_feature_list_;
 
  private:
   TestingPrefServiceSimple test_pref_service_;
@@ -284,11 +290,12 @@ TEST_F(PasswordManagerErrorMessageDelegateTest,
       password_manager::PasswordStoreBackendErrorType::kKeyRetrievalRequired);
   EXPECT_NE(nullptr, GetMessageWrapper());
 
-  EXPECT_CALL(
-      *helper_bridge(),
-      StartTrustedVaultKeyRetrievalFlow(
-          web_contents(), trusted_vault::TrustedVaultUserActionTriggerForUMA::
-                              kPasswordManagerErrorMessage));
+  EXPECT_CALL(*helper_bridge(),
+              StartTrustedVaultKeyRetrievalFlow(
+                  web_contents(),
+                  trusted_vault::TrustedVaultUserActionTriggerForUMA::
+                      kPasswordManagerErrorMessage,
+                  testing::_));
   GetMessageWrapper()->HandleActionClick(base::android::AttachCurrentThread());
 
   // The message needs to be dismissed manually in tests. In production code
@@ -311,11 +318,12 @@ TEST_F(PasswordManagerErrorMessageDelegateTest,
       password_manager::PasswordStoreBackendErrorType::kEmptySecurityDomain);
   EXPECT_NE(nullptr, GetMessageWrapper());
 
-  EXPECT_CALL(
-      *helper_bridge(),
-      StartTrustedVaultKeyRetrievalFlow(
-          web_contents(), trusted_vault::TrustedVaultUserActionTriggerForUMA::
-                              kPasswordManagerErrorMessage));
+  EXPECT_CALL(*helper_bridge(),
+              StartTrustedVaultKeyRetrievalFlow(
+                  web_contents(),
+                  trusted_vault::TrustedVaultUserActionTriggerForUMA::
+                      kPasswordManagerErrorMessage,
+                  testing::_));
   GetMessageWrapper()->HandleActionClick(base::android::AttachCurrentThread());
 
   // The message needs to be dismissed manually in tests. In production code
@@ -339,11 +347,12 @@ TEST_F(PasswordManagerErrorMessageDelegateTest,
           kIrretrievableSecurityDomain);
   EXPECT_NE(nullptr, GetMessageWrapper());
 
-  EXPECT_CALL(
-      *helper_bridge(),
-      StartTrustedVaultKeyRetrievalFlow(
-          web_contents(), trusted_vault::TrustedVaultUserActionTriggerForUMA::
-                              kPasswordManagerErrorMessage));
+  EXPECT_CALL(*helper_bridge(),
+              StartTrustedVaultKeyRetrievalFlow(
+                  web_contents(),
+                  trusted_vault::TrustedVaultUserActionTriggerForUMA::
+                      kPasswordManagerErrorMessage,
+                  testing::_));
   GetMessageWrapper()->HandleActionClick(base::android::AttachCurrentThread());
 
   // The message needs to be dismissed manually in tests. In production code
@@ -353,4 +362,58 @@ TEST_F(PasswordManagerErrorMessageDelegateTest,
       base::StrCat({kErrorMessageDismissalReasonHistogramName,
                     "IrretrievableSecurityDomain"}),
       messages::DismissReason::PRIMARY_ACTION, 1);
+}
+
+// Test that SaveErrorUIShownTimestamp is NOT called on display for
+// KeyRetrievalRequired when the feature is enabled. It IS called when the
+// is dismissed by user gesture.
+TEST_F(PasswordManagerErrorMessageDelegateTest,
+       TrustedVaultMessageSavesTimestampOnUserDismissal) {
+  scoped_feature_list_.InitAndEnableFeature(
+      syncer::kSyncTrustedVaultErrorMessageDuration);
+
+  // Expect NO save on display.
+  EXPECT_CALL(*helper_bridge(), SaveErrorUIShownTimestamp(web_contents()))
+      .Times(0);
+  DisplayMessageAndExpectEnqueued(
+      password_manager::ErrorMessageFlowType::kSaveFlow,
+      password_manager::PasswordStoreBackendErrorType::kKeyRetrievalRequired);
+
+  // Expect SAVE on dismissal by user gesture.
+  EXPECT_CALL(*helper_bridge(), SaveErrorUIShownTimestamp(web_contents()));
+  DismissMessageAndExpectDismissed(messages::DismissReason::GESTURE);
+}
+
+// Test that SaveErrorUIShownTimestamp is NOT called on display for
+// KeyRetrievalRequired when the feature is enabled. It ALSO not called when the
+// is dismissed by timer of that message — another message may follow.
+TEST_F(PasswordManagerErrorMessageDelegateTest,
+       TrustedVaultMessageDoesNotSaveTimestampOnTimerDismissal) {
+  scoped_feature_list_.InitAndEnableFeature(
+      syncer::kSyncTrustedVaultErrorMessageDuration);
+
+  // Expect NO save on display.
+  EXPECT_CALL(*helper_bridge(), SaveErrorUIShownTimestamp(web_contents()))
+      .Times(0);
+  DisplayMessageAndExpectEnqueued(
+      password_manager::ErrorMessageFlowType::kSaveFlow,
+      password_manager::PasswordStoreBackendErrorType::kKeyRetrievalRequired);
+
+  // Expect NO save on dismissal by timer.
+  EXPECT_CALL(*helper_bridge(), SaveErrorUIShownTimestamp(web_contents()))
+      .Times(0);
+  DismissMessageAndExpectDismissed(messages::DismissReason::TIMER);
+}
+
+// Test that SaveErrorUIShownTimestamp IS called on display if the feature is
+// disabled.
+TEST_F(PasswordManagerErrorMessageDelegateTest,
+       DisplaySavesTimestampForAuthErrorWithFeatureDisabled) {
+  scoped_feature_list_.InitAndDisableFeature(
+      syncer::kSyncTrustedVaultErrorMessageDuration);
+
+  EXPECT_CALL(*helper_bridge(), SaveErrorUIShownTimestamp(web_contents()));
+  DisplayMessageAndExpectEnqueued(
+      password_manager::ErrorMessageFlowType::kSaveFlow,
+      password_manager::PasswordStoreBackendErrorType::kKeyRetrievalRequired);
 }

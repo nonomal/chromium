@@ -10,14 +10,13 @@
 #include "base/time/time.h"
 #include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/ash/policy/scheduled_task_handler/test/fake_reboot_notifications_scheduler.h"
-#include "chrome/browser/notifications/notification_display_service_tester.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "chromeos/ash/components/browser_context_helper/annotated_account_id.h"
 #include "components/account_id/account_id.h"
 #include "components/prefs/pref_service.h"
-#include "components/prefs/testing_pref_service.h"
 #include "components/session_manager/core/fake_session_manager_delegate.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/scoped_user_manager.h"
@@ -25,6 +24,7 @@
 #include "google_apis/gaia/gaia_id.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/message_center/message_center.h"
 
 using testing::UnorderedElementsAre;
 
@@ -35,58 +35,67 @@ class RebootNotificationsSchedulerTest : public testing::Test {
   using Requester = RebootNotificationsScheduler::Requester;
 
   RebootNotificationsSchedulerTest()
-      : task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME),
-        prefs_(std::make_unique<TestingPrefServiceSimple>()),
-        notifications_scheduler_(
-            std::make_unique<FakeRebootNotificationsScheduler>(
-                task_environment_.GetMockClock(),
-                task_environment_.GetMockTickClock(),
-                prefs_.get())) {
-    RebootNotificationsScheduler::RegisterProfilePrefs(prefs_->registry());
-  }
+      : task_environment_(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
+
+  ~RebootNotificationsSchedulerTest() override = default;
 
   void SetUp() override {
-    ASSERT_TRUE(profile_manager_.SetUp());
+    session_manager_ = std::make_unique<session_manager::SessionManager>(
+        std::make_unique<session_manager::FakeSessionManagerDelegate>());
+    user_manager_.Reset(std::make_unique<ash::FakeChromeUserManager>());
+    session_manager_->OnUserManagerCreated(user_manager_.Get());
 
-    std::unique_ptr<ash::FakeChromeUserManager> fake_user_manager =
-        std::make_unique<ash::FakeChromeUserManager>();
-    fake_user_manager_ = fake_user_manager.get();
-    scoped_user_manager_ = std::make_unique<user_manager::ScopedUserManager>(
-        std::move(fake_user_manager));
+    profile_manager_ = std::make_unique<TestingProfileManager>(
+        TestingBrowserProcess::GetGlobal());
+    ASSERT_TRUE(profile_manager_->SetUp());
+
     AccountId account_id =
         AccountId::FromUserEmailGaiaId("test@example.com", GaiaId("12345"));
-    profile_ = profile_manager_.CreateTestingProfile(account_id.GetUserEmail());
-    fake_user_manager_->AddUser(account_id);
-    display_service_tester_ =
-        std::make_unique<NotificationDisplayServiceTester>(profile_);
-    fake_user_manager_->LoginUser(account_id, true);
+    user_manager_->AddUser(account_id);
+
+    profile_ =
+        profile_manager_->CreateTestingProfile(account_id.GetUserEmail());
+    ash::AnnotatedAccountId::Set(profile_, account_id);
+    prefs_ = profile_->GetPrefs();
+
+    notifications_scheduler_ =
+        std::make_unique<FakeRebootNotificationsScheduler>(
+            task_environment_.GetMockClock(),
+            task_environment_.GetMockTickClock(), prefs_.get());
+
+    message_center::MessageCenter::Initialize();
+    user_manager_->LoginUser(account_id, true);
     EXPECT_EQ(ProfileManager::GetActiveUserProfile(), profile_);
 
     ASSERT_EQ(RebootNotificationsScheduler::Get(),
               notifications_scheduler_.get());
   }
 
-  ~RebootNotificationsSchedulerTest() override = default;
+  void TearDown() override {
+    notifications_scheduler_.reset();
+    message_center::MessageCenter::Shutdown();
+    prefs_ = nullptr;
+    profile_ = nullptr;
+    profile_manager_.reset();
+    session_manager_.reset();
+    user_manager_.Reset();
+  }
 
   int GetDisplayedNotificationCount() const {
-    return display_service_tester_
-        ->GetDisplayedNotificationsForType(NotificationHandler::Type::TRANSIENT)
-        .size();
+    return message_center::MessageCenter::Get()->GetNotifications().size();
   }
 
  protected:
   content::BrowserTaskEnvironment task_environment_;
-  session_manager::SessionManager session_manager_{
-      std::make_unique<session_manager::FakeSessionManagerDelegate>()};
-  std::unique_ptr<TestingPrefServiceSimple> prefs_;
-  std::unique_ptr<FakeRebootNotificationsScheduler> notifications_scheduler_;
-  TestingProfileManager profile_manager_{TestingBrowserProcess::GetGlobal()};
-  raw_ptr<TestingProfile> profile_ = nullptr;
 
-  raw_ptr<ash::FakeChromeUserManager, DanglingUntriaged> fake_user_manager_ =
-      nullptr;
-  std::unique_ptr<user_manager::ScopedUserManager> scoped_user_manager_;
-  std::unique_ptr<NotificationDisplayServiceTester> display_service_tester_;
+  user_manager::TypedScopedUserManager<ash::FakeChromeUserManager>
+      user_manager_;
+  std::unique_ptr<session_manager::SessionManager> session_manager_;
+
+  std::unique_ptr<TestingProfileManager> profile_manager_;
+  raw_ptr<TestingProfile> profile_ = nullptr;
+  raw_ptr<PrefService> prefs_ = nullptr;
+  std::unique_ptr<FakeRebootNotificationsScheduler> notifications_scheduler_;
 };
 
 TEST_F(RebootNotificationsSchedulerTest, ShowNotificationAndDialogOnSchedule) {
@@ -195,7 +204,7 @@ TEST_F(RebootNotificationsSchedulerTest,
   EXPECT_TRUE(prefs_->GetBoolean(ash::prefs::kShowPostRebootNotification));
 
   // Start the session and show post reboot notification.
-  session_manager_.SessionStarted();
+  session_manager_->SessionStarted();
   EXPECT_EQ(GetDisplayedNotificationCount(), 1);
 
   // Verify pref is unset.
@@ -214,7 +223,7 @@ TEST_F(RebootNotificationsSchedulerTest,
 
   // Start the session and do not show post reboot notification.
   notifications_scheduler_->SetWaitFullRestoreInit(true);
-  session_manager_.SessionStarted();
+  session_manager_->SessionStarted();
   EXPECT_EQ(GetDisplayedNotificationCount(), 0);
 }
 

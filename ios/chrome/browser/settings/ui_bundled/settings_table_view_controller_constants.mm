@@ -26,6 +26,15 @@ NSString* const kSettingsPaymentMethodsCellId =
     @"kSettingsPaymentMethodsCellId";
 NSString* const kSettingsAddressesAndMoreCellId =
     @"kSettingsAddressesAndMoreCellId";
+NSString* const kSettingsIdentityDocsCellId = @"kSettingsIdentityDocsCellId";
+NSString* const kSettingsTravelInfoCellId = @"kSettingsTravelInfoCellId";
+NSString* const kSettingsShoppingInfoCellId = @"kSettingsShoppingInfoCellId";
+NSString* const kSettingsSuggestionsFromGeminiCellId =
+    @"kSettingsSuggestionsFromGeminiCellId";
+NSString* const kSettingsAutofillAndPasswordsCellId =
+    @"kSettingsAutofillAndPasswordsCellId";
+NSString* const kSettingsAutofillSettingsCellId =
+    @"kSettingsAutofillSettingsCellId";
 NSString* const kSettingsPrivacyCellId = @"kSettingsPrivacyCellId";
 NSString* const kSettingsArticleSuggestionsCellId =
     @"kSettingsArticleSuggestionsCellId";
@@ -47,9 +56,11 @@ NSString* const kSettingsPreloadCellId = @"kSettingsPreloadCellId";
 NSString* const kSettingsBlockPopupsCellId = @"kSettingsBlockPopupsCellId";
 NSString* const kSettingsShowLinkPreviewCellId =
     @"kSettingsShowLinkPreviewCellId";
+NSString* const kSettingsShowReadingModeAvailableCellId =
+    @"kSettingsShowReadingModeAvailableCellId";
 NSString* const kSettingsDetectAddressesCellId =
     @"kSettingsDetectAddressesCellId";
-NSString* const kSettingsMimiMapNativeCellId = @"kSettingsMimiMapNativeCellId";
+NSString* const kSettingsMiniMapNativeCellId = @"kSettingsMiniMapNativeCellId";
 NSString* const kSettingsDefaultAppsCellId = @"kSettingsDefaultAppsCellId";
 NSString* const kSettingsAddLanguageCellId = @"kSettingsAddLanguageCellId";
 NSString* const kSettingsClearBrowsingDataCellId =
@@ -59,6 +70,7 @@ NSString* const kSettingsCookiesCellId = @"kSettingsCookiesCellId";
 NSString* const kSettingsDefaultSiteModeCellId =
     @"kSettingsDefaultSiteModeCellId";
 NSString* const kSettingsWebInspectorCellId = @"kSettingsWebInspectorCellId";
+NSString* const kSettingsReaderModeCellId = @"kSettingsReaderModeCellId";
 NSString* const kDefaultBrowserSettingsTableViewId =
     @"kDefaultBrowserSettingsTableViewId";
 NSString* const kSettingsHttpsOnlyModeCellId = @"kSettingsHttpsOnlyModeCellId";
@@ -75,3 +87,7 @@ NSString* const kSettingsAutomaticallyOpenTabGroupsCellId =
     @"kSettingsAutomaticallyOpenTabGroupsCellId";
 NSString* const kSettingsDetectUnitsCellId = @"kSettingsDetectUnitsCellId";
 NSString* const kSettingsSafetyCheckCellId = @"SettingsSafetyCheckCellId";
+NSString* const kSettingsDefaultBrowserPassiveCellId =
+    @"kSettingsDefaultBrowserPassiveCellId";
+NSString* const kSettingsSitePermissionsCellId =
+    @"kSettingsSitePermissionsCellId";

@@ -4,10 +4,10 @@
 
 #include "content/browser/webui/url_data_manager_backend.h"
 
+#include <algorithm>
 #include <set>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
@@ -104,7 +104,7 @@ URLDataManagerBackend::~URLDataManagerBackend() = default;
 
 URLDataManagerBackend* URLDataManagerBackend::GetForBrowserContext(
     BrowserContext* context) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M158);
   if (!context->GetUserData(kURLDataManagerBackendKeyName)) {
     context->SetUserData(kURLDataManagerBackendKeyName,
                          std::make_unique<URLDataManagerBackend>());
@@ -114,7 +114,7 @@ URLDataManagerBackend* URLDataManagerBackend::GetForBrowserContext(
 }
 
 void URLDataManagerBackend::AddDataSource(URLDataSourceImpl* source) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M158);
   if (!source->source()->ShouldReplaceExistingSource() &&
       data_sources_.contains(source->source_name())) {
     return;
@@ -125,7 +125,7 @@ void URLDataManagerBackend::AddDataSource(URLDataSourceImpl* source) {
 
 void URLDataManagerBackend::UpdateWebUIDataSource(
     const std::string& source_name,
-    const base::Value::Dict& update) {
+    const base::DictValue& update) {
   auto it = data_sources_.find(source_name);
   if (it == data_sources_.end() || !it->second->IsWebUIDataSourceImpl()) {
     NOTREACHED();
@@ -239,8 +239,9 @@ scoped_refptr<net::HttpResponseHeaders> URLDataManagerBackend::GetHeaders(
 
   if (!origin.empty()) {
     std::string header = source->GetAccessControlAllowOriginForOrigin(origin);
-    DCHECK(header.empty() || header == origin || header == "*" ||
-           header == "null");
+    CHECK(
+        header.empty() || header == origin || header == "*" || header == "null",
+        base::NotFatalUntil::M158);
     if (!header.empty()) {
       headers->SetHeader("Access-Control-Allow-Origin", header);
       headers->SetHeader("Vary", "Origin");
@@ -252,11 +253,12 @@ scoped_refptr<net::HttpResponseHeaders> URLDataManagerBackend::GetHeaders(
 
 bool URLDataManagerBackend::CheckURLIsValid(const GURL& url) {
   std::vector<std::string> additional_schemes;
-  DCHECK(url.SchemeIs(kChromeUIScheme) ||
-         url.SchemeIs(kChromeUIUntrustedScheme) ||
-         (GetContentClient()->browser()->GetAdditionalWebUISchemes(
-              &additional_schemes),
-          base::Contains(additional_schemes, url.GetScheme())));
+  CHECK(url.SchemeIs(kChromeUIScheme) ||
+            url.SchemeIs(kChromeUIUntrustedScheme) ||
+            (GetContentClient()->browser()->GetAdditionalWebUISchemes(
+                 &additional_schemes),
+             std::ranges::contains(additional_schemes, url.GetScheme())),
+        base::NotFatalUntil::M158);
 
   if (!url.is_valid()) {
     NOTREACHED();
@@ -266,8 +268,8 @@ bool URLDataManagerBackend::CheckURLIsValid(const GURL& url) {
 }
 
 bool URLDataManagerBackend::IsValidNetworkErrorCode(int error_code) {
-  base::Value::Dict error_codes = net::GetNetConstants();
-  const base::Value::Dict* net_error_codes_dict =
+  base::DictValue error_codes = net::GetNetConstants();
+  const base::DictValue* net_error_codes_dict =
       error_codes.FindDict(kNetworkErrorKey);
   if (net_error_codes_dict) {
     for (auto [key, value] : *net_error_codes_dict) {

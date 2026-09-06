@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
@@ -27,9 +26,6 @@
 #include "url/origin.h"
 
 namespace favicon {
-
-BASE_FEATURE(kUseLastVisitedFallbackURLFavicon,
-             base::FEATURE_DISABLED_BY_DEFAULT);
 
 using RedirectList = std::vector<GURL>;
 
@@ -75,8 +71,9 @@ std::unique_ptr<FaviconBackend> FaviconBackend::Create(
   }
 
   // Computing metrics is costly, only do it every so often.
-  if (base::RandInt(1, 100) == 50)
+  if (base::RandIntInclusive(1, 100) == 50) {
     db->ComputeDatabaseMetrics();
+  }
 
   // WrapUnique() as constructor is private.
   return base::WrapUnique(new FaviconBackend(std::move(db), delegate));
@@ -88,13 +85,8 @@ FaviconBackend::~FaviconBackend() {
 
 void FaviconBackend::Commit() {
   db_->CommitTransaction();
-  DCHECK_EQ(db_->transaction_nesting(), 0)
-      << "Somebody left a transaction open";
+  DCHECK(!db_->HasActiveTransactions()) << "Somebody left a transaction open";
   db_->BeginTransaction();
-}
-
-void FaviconBackend::TrimMemory() {
-  db_->TrimMemory();
 }
 
 favicon_base::FaviconRawBitmapResult FaviconBackend::GetLargestFaviconForUrl(
@@ -199,24 +191,6 @@ FaviconBackend::GetFaviconsForUrl(const GURL& page_url,
                                  desired_sizes[0], bitmap_results));
   }
 
-  for (auto size : desired_sizes) {
-    // Only record histograms for sizes that are on the |icon_sizes| allowlist.
-    if (std::find(icon_sizes.begin(), icon_sizes.end(), size) ==
-        icon_sizes.end()) {
-      continue;
-    }
-    bool size_found = false;
-    for (auto result : bitmap_results) {
-      if (result.pixel_size.width() == size &&
-          result.pixel_size.height() == size) {
-        size_found = true;
-        break;
-      }
-    }
-    base::UmaHistogramBoolean(
-        "Favicons.IconSuccess." + base::NumberToString(size) + "px",
-        size_found);
-  }
   return bitmap_results;
 }
 
@@ -406,7 +380,7 @@ MergeFaviconResult FaviconBackend::MergeFavicon(
       // a favicon bitmap mapped to `icon_url`. The one there is more correct
       // and having multiple equally sized favicon bitmaps for `page_url` is
       // ambiguous in terms of GetFaviconsForURL().
-      if (base::Contains(favicon_sizes, bitmaps_to_copy[j].pixel_size))
+      if (std::ranges::contains(favicon_sizes, bitmaps_to_copy[j].pixel_size))
         continue;
 
       // Add the favicon bitmap as expired as it is not consistent with the
@@ -704,8 +678,7 @@ FaviconBackend::GetFaviconsFromDB(const GURL& page_url,
       // FindBestPageURLForHost() prioritizes page URLs that are not redirects.
       // Therefore, if the fallback it returns is a redirect, then all page
       // visits to the host are redirects.
-      if (fallback_for_host->second == PageUrlType::kRedirect &&
-          base::FeatureList::IsEnabled(kUseLastVisitedFallbackURLFavicon)) {
+      if (fallback_for_host->second == PageUrlType::kRedirect) {
         url::Origin page_origin = url::Origin::Create(page_url);
         fallback_page_url =
             delegate_->GetMostRecentlyVisitedURLForOrigin(page_origin);
@@ -910,8 +883,8 @@ bool FaviconBackend::ClearAllExcept(const std::vector<GURL>& kept_page_urls) {
   // Vacuum to remove all the pages associated with the dropped tables. There
   // must be no transaction open on the table when we do this. We assume that
   // our long-running transaction is open, so we complete it and start it again.
-  DCHECK_EQ(db_->transaction_nesting(), 1);
   db_->CommitTransaction();
+  DCHECK(!db_->HasActiveTransactions());
   db_->Vacuum();
   db_->BeginTransaction();
   return true;

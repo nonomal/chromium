@@ -13,6 +13,7 @@
 #include "components/password_manager/core/browser/password_form.h"
 #include "components/password_manager/core/browser/password_form_manager.h"
 #include "components/password_manager/core/browser/password_manager_test_utils.h"
+#include "components/password_manager/core/browser/password_string.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_registry_simple.h"
@@ -56,7 +57,7 @@ PasswordForm CreateForm(std::string username,
                         GURL origin) {
   PasswordForm form;
   form.username_value = base::ASCIIToUTF16(username);
-  form.password_value = base::ASCIIToUTF16(password);
+  form.password_value = PasswordString(base::ASCIIToUTF16(password));
   form.url = origin;
   form.signon_realm = origin.spec();
   return form;
@@ -133,7 +134,7 @@ TEST_F(PasswordManagerClientHelperTest,
 }
 
 TEST_F(PasswordManagerClientHelperTest, PromptMoveForMovableFormInAccountMode) {
-  ON_CALL(*client()->GetPasswordFeatureManager(), IsAccountStorageEnabled)
+  ON_CALL(*client()->GetPasswordFeatureManager(), IsAccountStorageActive)
       .WillByDefault(Return(true));
   EXPECT_CALL(*client(), PromptUserToEnableAutosignin).Times(0);
 #if !BUILDFLAG(IS_IOS) && !BUILDFLAG(IS_ANDROID)
@@ -152,7 +153,7 @@ TEST_F(PasswordManagerClientHelperTest, PromptMoveForMovableFormInAccountMode) {
 }
 
 TEST_F(PasswordManagerClientHelperTest, NoPromptToMoveForUnmovableForm) {
-  ON_CALL(*client()->GetPasswordFeatureManager(), IsAccountStorageEnabled)
+  ON_CALL(*client()->GetPasswordFeatureManager(), IsAccountStorageActive)
       .WillByDefault(Return(true));
   EXPECT_CALL(*client(), PromptUserToMovePasswordToAccount).Times(0);
   EXPECT_CALL(*client(), PromptUserToEnableAutosignin).Times(0);
@@ -165,7 +166,7 @@ TEST_F(PasswordManagerClientHelperTest, NoPromptToMoveForUnmovableForm) {
 }
 
 TEST_F(PasswordManagerClientHelperTest, NoPromptToMoveForGaiaAccountForm) {
-  ON_CALL(*client()->GetPasswordFeatureManager(), IsAccountStorageEnabled)
+  ON_CALL(*client()->GetPasswordFeatureManager(), IsAccountStorageActive)
       .WillByDefault(Return(true));
 
   EXPECT_CALL(*client(), PromptUserToMovePasswordToAccount).Times(0);
@@ -178,7 +179,7 @@ TEST_F(PasswordManagerClientHelperTest, NoPromptToMoveForGaiaAccountForm) {
 
 TEST_F(PasswordManagerClientHelperTest,
        NoPromptToMoveIfAccountStorageDisabled) {
-  ON_CALL(*client()->GetPasswordFeatureManager(), IsAccountStorageEnabled)
+  ON_CALL(*client()->GetPasswordFeatureManager(), IsAccountStorageActive)
       .WillByDefault(Return(false));
 
   EXPECT_CALL(*client(), PromptUserToMovePasswordToAccount).Times(0);

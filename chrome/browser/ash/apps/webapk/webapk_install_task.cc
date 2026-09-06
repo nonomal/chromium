@@ -9,6 +9,7 @@
 #include <string>
 #include <utility>
 
+#include "ash/constants/chrome_switches.h"
 #include "base/command_line.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
@@ -23,12 +24,12 @@
 #include "chrome/browser/ash/apps/webapk/webapk_prefs.h"
 #include "chrome/browser/ash/apps/webapk/webapk_utils.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/web_applications/model/web_app_icon_types.h"
+#include "chrome/browser/web_applications/web_app_filter.h"
 #include "chrome/browser/web_applications/web_app_icon_manager.h"
-#include "chrome/browser/web_applications/web_app_install_info.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/browser/web_applications/web_app_registrar.h"
 #include "chrome/browser/web_applications/web_app_utils.h"
-#include "chrome/common/chrome_switches.h"
 #include "chromeos/ash/experiences/arc/mojom/webapk.mojom.h"
 #include "chromeos/ash/experiences/arc/session/arc_bridge_service.h"
 #include "chromeos/ash/experiences/arc/session/arc_service_manager.h"
@@ -107,7 +108,7 @@ constexpr net::NetworkTrafficAnnotationTag kWebApksTrafficAnnotation =
 GURL GetServerUrl() {
   std::string server_url =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-          switches::kWebApkServerUrl);
+          ash::chrome_switches::kWebApkServerUrl);
 
   if (server_url.empty()) {
     server_url = base::StrCat({kWebApkServerUrl, google_apis::GetAPIKey()});
@@ -272,11 +273,10 @@ void WebApkInstallTask::Start(ResultCallback callback) {
   // again in case anything changed while the install request was queued.
   // Manifest URL is always set for apps installed or updated in recent
   // versions, but might be missing for older apps.
-  if (!registrar.IsInstallState(
-          app_id_,
-          {web_app::proto::InstallState::SUGGESTED_FROM_ANOTHER_DEVICE,
-           web_app::proto::InstallState::INSTALLED_WITHOUT_OS_INTEGRATION,
-           web_app::proto::InstallState::INSTALLED_WITH_OS_INTEGRATION}) ||
+  // TODO(crbug.com/379136842): This is likely too 'permissive' of a check, and
+  // different more restrictive filter should likely be used instead.
+  if (!registrar.AppMatches(app_id_,
+                            web_app::WebAppFilter::IsAppSurfaceableToUser()) ||
       !registrar.GetAppShareTarget(app_id_) ||
       registrar.GetAppManifestUrl(app_id_).is_empty()) {
     DeliverResult(WebApkInstallStatus::kAppInvalid);

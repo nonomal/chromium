@@ -97,10 +97,6 @@ public class BackgroundTaskJobService extends JobService {
                                 notificationId,
                                 notification,
                                 JobService.JOB_END_NOTIFICATION_POLICY_DETACH);
-                        BackgroundTaskSchedulerUma.getInstance()
-                                .reportNotificationWasSet(
-                                        mParams.getJobId(),
-                                        SystemClock.uptimeMillis() - mTaskStartTimeMs);
                     });
         }
 
@@ -114,6 +110,7 @@ public class BackgroundTaskJobService extends JobService {
     @Override
     public boolean onStartJob(JobParameters params) {
         ThreadUtils.assertOnUiThread();
+        Log.w(TAG, "Starting background task (jobId=%d)", params.getJobId());
         BackgroundTask backgroundTask =
                 BackgroundTaskSchedulerFactoryInternal.getBackgroundTaskFromTaskId(
                         params.getJobId());
@@ -127,7 +124,6 @@ public class BackgroundTaskJobService extends JobService {
         }
 
         if (BackgroundTaskSchedulerJobService.didTaskExpire(params, mClock.currentTimeMillis())) {
-            BackgroundTaskSchedulerUma.getInstance().reportTaskExpired(params.getJobId());
             return false;
         }
 
@@ -150,6 +146,7 @@ public class BackgroundTaskJobService extends JobService {
     @Override
     public boolean onStopJob(JobParameters params) {
         ThreadUtils.assertOnUiThread();
+        Log.w(TAG, "Stopping background task (jobId=%d)", params.getJobId());
         if (!mCurrentTasks.containsKey(params.getJobId())) {
             Log.w(
                     TAG,

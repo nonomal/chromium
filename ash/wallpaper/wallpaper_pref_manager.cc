@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -23,18 +24,23 @@
 #include "ash/wallpaper/wallpaper_utils/wallpaper_online_variant_utils.h"
 #include "base/check.h"
 #include "base/check_is_test.h"
-#include "base/containers/adapters.h"
 #include "base/containers/flat_map.h"
 #include "base/memory/raw_ptr.h"
 #include "base/observer_list.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "chromeos/ash/components/sync/sync_service_provider.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#include "components/sync/service/sync_service.h"
+#include "components/sync/service/sync_user_settings.h"
+#include "components/user_manager/user.h"
+#include "components/user_manager/user_manager.h"
 
 namespace ash {
 
@@ -48,9 +54,9 @@ bool GetWallpaperInfo(const AccountId& account_id,
   if (!pref_service) {
     return false;
   }
-  const base::Value::Dict& users_dict = pref_service->GetDict(pref_name);
+  const base::DictValue& users_dict = pref_service->GetDict(pref_name);
 
-  const base::Value::Dict* info_dict =
+  const base::DictValue* info_dict =
       users_dict.FindDict(account_id.GetUserEmail());
   if (!info_dict) {
     return false;
@@ -119,8 +125,23 @@ class WallpaperProfileHelperImpl : public WallpaperProfileHelper {
   }
 
   bool IsWallpaperSyncEnabled(const AccountId& id) const override {
-    DCHECK(wallpaper_controller_client_);
-    return wallpaper_controller_client_->IsWallpaperSyncEnabled(id);
+    syncer::SyncService* sync_service = SyncServiceProvider::Get().Find(id);
+    if (!sync_service) {
+      return false;
+    }
+    if (sync_service->GetUserSettings()->IsSyncAllOsTypesEnabled()) {
+      return true;
+    }
+    const user_manager::User* user =
+        user_manager::UserManager::Get()->FindUser(id);
+    if (!user) {
+      return false;
+    }
+    const PrefService* pref_service = user->GetProfilePrefs();
+    if (!pref_service) {
+      return false;
+    }
+    return pref_service->GetBoolean(prefs::kSyncOsWallpaper);
   }
 
   bool IsActiveUserSessionStarted() const override {
@@ -160,6 +181,10 @@ class WallpaperPrefManagerImpl : public WallpaperPrefManager {
 
   void SetClient(WallpaperControllerClient* client) override {
     profile_helper_->SetClient(client);
+  }
+
+  bool IsWallpaperSyncEnabled(const AccountId& id) const override {
+    return profile_helper_->IsWallpaperSyncEnabled(id);
   }
 
   void AddObserver(Observer* observer) override {
@@ -290,8 +315,8 @@ class WallpaperPrefManagerImpl : public WallpaperPrefManager {
       return false;
     ScopedDictPrefUpdate daily_google_photos_ids_update(
         local_state_, prefs::kRecentDailyGooglePhotosWallpapers);
-    base::Value::List id_list;
-    for (const auto& id : base::Reversed(ids)) {
+    base::ListValue id_list;
+    for (const auto& id : std::views::reverse(ids)) {
       id_list.Append(base::NumberToString(id));
     }
     base::Value id_list_value(std::move(id_list));
@@ -306,10 +331,10 @@ class WallpaperPrefManagerImpl : public WallpaperPrefManager {
     if (!local_state_)
       return false;
 
-    const base::Value::Dict& dict =
+    const base::DictValue& dict =
         local_state_->GetDict(prefs::kRecentDailyGooglePhotosWallpapers);
 
-    const base::Value::List* id_list = dict.FindList(account_id.GetUserEmail());
+    const base::ListValue* id_list = dict.FindList(account_id.GetUserEmail());
     if (!id_list)
       return false;
 
@@ -407,7 +432,7 @@ class WallpaperPrefManagerImpl : public WallpaperPrefManager {
       return std::nullopt;
     }
 
-    const base::Value::Dict& color_dict = local_state_->GetDict(pref_name);
+    const base::DictValue& color_dict = local_state_->GetDict(pref_name);
     auto* color_value = color_dict.Find(location);
     if (!color_value) {
       return std::nullopt;

@@ -10,10 +10,9 @@
 #include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/global_error/global_error_bubble_view_base.h"
 #include "chrome/grit/branded_strings.h"
@@ -24,6 +23,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/management_policy.h"
+#include "extensions/browser/ui_util.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -68,12 +68,12 @@ std::vector<std::u16string> GenerateEnterpriseMessage(
     for (const auto& extension : forbidden) {
       message.push_back(l10n_util::GetStringFUTF16(
           IDS_BLOCKLISTED_EXTENSIONS_ALERT_ITEM,
-          util::GetFixupExtensionNameForUIDisplay(extension->name())));
+          ui_util::GetFixupExtensionNameForUIDisplay(extension->name())));
     }
   } else {
     message.push_back(l10n_util::GetStringFUTF16(
         IDS_POLICY_BLOCKED_EXTENSION_ALERT_ITEM_DETAIL,
-        util::GetFixupExtensionNameForUIDisplay(
+        ui_util::GetFixupExtensionNameForUIDisplay(
             forbidden.begin()->get()->name())));
   }
   return message;
@@ -95,7 +95,7 @@ std::vector<std::u16string> GenerateMessage(
   if (forbidden.size() == 1) {
     message.push_back(
         l10n_util::GetStringFUTF16(IDS_EXTENSION_ALERT_ITEM_BLOCKLISTED_MALWARE,
-                                   util::GetFixupExtensionNameForUIDisplay(
+                                   ui_util::GetFixupExtensionNameForUIDisplay(
                                        forbidden.begin()->get()->name())));
     return message;
   }
@@ -104,7 +104,7 @@ std::vector<std::u16string> GenerateMessage(
   for (const auto& extension : forbidden) {
     message.push_back(l10n_util::GetStringFUTF16(
         IDS_BLOCKLISTED_EXTENSIONS_ALERT_ITEM,
-        util::GetFixupExtensionNameForUIDisplay(extension->name())));
+        ui_util::GetFixupExtensionNameForUIDisplay(extension->name())));
   }
   return message;
 }
@@ -153,7 +153,9 @@ class ExtensionGlobalError : public GlobalErrorWithStandardBubble {
 
   std::u16string MenuItemLabel() override { NOTREACHED(); }
 
-  void ExecuteMenuItem(Browser* browser) override { NOTREACHED(); }
+  void ExecuteMenuItem(BrowserWindowInterface* browser) override {
+    NOTREACHED();
+  }
 
   std::u16string GetBubbleViewTitle() override {
     return GenerateTitle(delegate_->GetBlocklistedExtensions(),
@@ -176,15 +178,15 @@ class ExtensionGlobalError : public GlobalErrorWithStandardBubble {
     return l10n_util::GetStringUTF16(IDS_EXTENSION_ALERT_ITEM_DETAILS);
   }
 
-  void OnBubbleViewDidClose(Browser* browser) override {
+  void OnBubbleViewDidClose(BrowserWindowInterface* browser) override {
     delegate_->OnAlertClosed();
   }
 
-  void BubbleViewAcceptButtonPressed(Browser* browser) override {
+  void BubbleViewAcceptButtonPressed(BrowserWindowInterface* browser) override {
     delegate_->OnAlertAccept();
   }
 
-  void BubbleViewCancelButtonPressed(Browser* browser) override {
+  void BubbleViewCancelButtonPressed(BrowserWindowInterface* browser) override {
     // Even though there is no cancel button, users can still cancel the dialog
     // by pressing escape.
     delegate_->OnAlertClosed();
@@ -194,7 +196,8 @@ class ExtensionGlobalError : public GlobalErrorWithStandardBubble {
     return weak_ptr_factory_.GetWeakPtr();
   }
 
-  void BubbleViewDetailsButtonPressed(Browser* browser) override {
+  void BubbleViewDetailsButtonPressed(
+      BrowserWindowInterface* browser) override {
     delegate_->OnAlertDetails();
   }
 
@@ -217,12 +220,13 @@ ExtensionErrorUIDesktop::ExtensionErrorUIDesktop(
 ExtensionErrorUIDesktop::~ExtensionErrorUIDesktop() = default;
 
 bool ExtensionErrorUIDesktop::ShowErrorInBubbleView() {
-  Browser* browser = chrome::FindLastActiveWithProfile(profile_);
+  BrowserWindowInterface* const browser =
+      ProfileBrowserCollection::GetForProfile(profile_)->GetLastActiveBrowser();
   if (!browser)
     return false;
 
   browser_ = browser;
-  global_error_->ShowBubbleView(browser);
+  global_error_->ShowBubbleView(browser_);
   return true;
 }
 

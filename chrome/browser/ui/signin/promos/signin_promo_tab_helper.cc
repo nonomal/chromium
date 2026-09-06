@@ -9,7 +9,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/signin_util.h"
-#include "chrome/browser/ui/browser.h"
 #include "components/signin/public/base/consent_level.h"
 
 namespace {
@@ -115,8 +114,10 @@ void SigninPromoTabHelper::OnErrorStateOfRefreshTokenUpdatedForAccount(
   // We only want to run the callback if the sign in event has the correct
   // access point, so if it was performed from the tab that was opened after
   // clicking the sign in promo.
-  if (identity_manager->FindExtendedAccountInfo(account_info).access_point !=
-      state_->access_point_) {
+  std::optional<signin_metrics::AccessPoint> account_info_access_point =
+      identity_manager->FindExtendedAccountInfo(account_info)
+          .GetLastAuthenticationAccessPoint();
+  if (account_info_access_point != state_->access_point_) {
     Reset();
     return;
   }

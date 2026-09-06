@@ -18,7 +18,8 @@
 #include "base/containers/queue.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
-#include "base/memory/ref_counted.h"
+#include "base/task/thread_pool.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/client_certificate_delegate.h"
@@ -184,13 +185,13 @@ static void StartClientCertificateRequest(
   }
 
   // Build the |host_name| and |port| JNI parameters, as a String and
-  // a jint.
+  // a int32_t.
   ScopedJavaLocalRef<jstring> host_name_ref =
       base::android::ConvertUTF8ToJavaString(
           env, request->cert_request_info()->host_and_port.host());
 
   // Pass the address of the delegate through to Java.
-  jlong request_id = reinterpret_cast<intptr_t>(request.get());
+  int64_t request_id = reinterpret_cast<intptr_t>(request.get());
 
   if (!Java_SSLClientCertificateRequest_selectClientCertificate(
           env, request_id, window->GetJavaObject(), key_types_ref,
@@ -302,6 +303,25 @@ void ClientCertRequest::OnCancel() {
   }
 }
 
+scoped_refptr<net::SSLPrivateKey> WrapPrivateKeyInBackground(
+    scoped_refptr<net::X509Certificate> cert,
+    base::android::ScopedJavaGlobalRef<jobject> key) {
+  base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
+                                                base::BlockingType::MAY_BLOCK);
+  return net::WrapJavaPrivateKey(cert.get(), key);
+}
+
+void OnPrivateKeyWrapped(std::unique_ptr<ClientCertRequest> req,
+                         scoped_refptr<net::X509Certificate> cert,
+                         scoped_refptr<net::SSLPrivateKey> private_key) {
+  if (!private_key) {
+    LOG(ERROR) << "Could not create OpenSSL wrapper for private key";
+    req->CertificateSelected(nullptr, nullptr);
+    return;
+  }
+  req->CertificateSelected(std::move(cert), std::move(private_key));
+}
+
 }  // namespace
 
 // Called from JNI on request completion/result.
@@ -318,7 +338,7 @@ void ClientCertRequest::OnCancel() {
 // the user didn't select a certificate.
 static void JNI_SSLClientCertificateRequest_OnSystemRequestCompletion(
     JNIEnv* env,
-    jlong request_id,
+    int64_t request_id,
     const JavaRef<jobjectArray>& encoded_chain_ref,
     const JavaRef<jobject>& private_key_ref) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -347,18 +367,20 @@ static void JNI_SSLClientCertificateRequest_OnSystemRequestCompletion(
       net::X509Certificate::CreateFromDERCertChain(encoded_chain));
   if (!client_cert) {
     LOG(ERROR) << "Could not decode client certificate chain";
+    request->CertificateSelected(nullptr, nullptr);
     return;
   }
 
-  // Create an SSLPrivateKey wrapper for the private key JNI reference.
-  scoped_refptr<net::SSLPrivateKey> private_key =
-      net::WrapJavaPrivateKey(client_cert.get(), private_key_ref);
-  if (!private_key) {
-    LOG(ERROR) << "Could not create OpenSSL wrapper for private key";
-    return;
-  }
+  base::android::ScopedJavaGlobalRef<jobject> key_ref(env, private_key_ref);
 
-  request->CertificateSelected(std::move(client_cert), std::move(private_key));
+  // Wrapping the Java PrivateKey calls Android KeyStore signature and cipher
+  // support checks which may involve blocking Binder IPC. Perform wrapping on
+  // the ThreadPool to avoid stalling the UI thread.
+  base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
+      base::BindOnce(&WrapPrivateKeyInBackground, client_cert,
+                     std::move(key_ref)),
+      base::BindOnce(&OnPrivateKeyWrapped, std::move(request), client_cert));
 }
 
 static void NotifyClientCertificatesChanged() {

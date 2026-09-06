@@ -34,10 +34,6 @@
 #include "media/mojo/services/media_service.h"  // nogncheck
 #endif  // BUILDFLAG(ENABLE_CAST_RENDERER)
 
-#if !BUILDFLAG(IS_ANDROID)
-#include "chromecast/browser/memory_pressure_controller_impl.h"
-#endif  // !BUILDFLAG(IS_ANDROID)
-
 namespace chromecast {
 namespace shell {
 
@@ -45,10 +41,6 @@ namespace {
 
 void CreateOriginId(cdm::MediaDrmStorageImpl::OriginIdObtainedCB callback) {
   std::move(callback).Run(true, base::UnguessableToken::Create());
-}
-
-void AllowEmptyOriginIdCB(base::OnceCallback<void(bool)> callback) {
-  std::move(callback).Run(false);
 }
 
 void CreateMediaDrmStorage(
@@ -65,9 +57,9 @@ void CreateMediaDrmStorage(
 
   // The object will be deleted on connection error, or when the frame navigates
   // away.
-  new cdm::MediaDrmStorageImpl(
-      *render_frame_host, pref_service, base::BindRepeating(&CreateOriginId),
-      base::BindRepeating(&AllowEmptyOriginIdCB), std::move(receiver));
+  new cdm::MediaDrmStorageImpl(*render_frame_host, pref_service,
+                               base::BindRepeating(&CreateOriginId),
+                               std::move(receiver));
 }
 
 }  // namespace
@@ -87,17 +79,6 @@ void CastContentBrowserClient::ExposeInterfacesToRenderer(
           &metrics::MetricsHelperImpl::AddReceiver,
           base::Unretained(cast_browser_main_parts_->metrics_helper())),
       base::SingleThreadTaskRunner::GetCurrentDefault());
-
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_FUCHSIA)
-  if (!memory_pressure_controller_) {
-    memory_pressure_controller_.reset(new MemoryPressureControllerImpl());
-  }
-
-  registry->AddInterface<mojom::MemoryPressureController>(
-      base::BindRepeating(&MemoryPressureControllerImpl::AddReceiver,
-                          base::Unretained(memory_pressure_controller_.get())),
-      base::SingleThreadTaskRunner::GetCurrentDefault());
-#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_FUCHSIA)
 }
 
 void CastContentBrowserClient::BindMediaServiceReceiver(

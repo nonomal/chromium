@@ -5,7 +5,6 @@
 #include "extensions/renderer/renderer_extension_registry.h"
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/lazy_instance.h"
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
@@ -58,7 +57,7 @@ bool RendererExtensionRegistry::Insert(
 
   if (!BackgroundInfo::IsServiceWorkerBased(extension.get())) {
     // Non-SW based extension should never have an activation token.
-    CHECK(!base::Contains(worker_activation_tokens_, extension->id()));
+    CHECK(!worker_activation_tokens_.contains(extension->id()));
     return extensions_.Insert(extension);
   }
 
@@ -74,7 +73,7 @@ bool RendererExtensionRegistry::Insert(
   bool is_incognito_spanning = client->IsIncognitoProcess() &&
                                IncognitoInfo::IsSpanningMode(extension.get());
   if (is_incognito_spanning) {
-    CHECK(!base::Contains(worker_activation_tokens_, extension->id()));
+    CHECK(!worker_activation_tokens_.contains(extension->id()));
   }
 #endif  // !BUILDFLAG(IS_CHROMEOS)
 
@@ -85,6 +84,7 @@ bool RendererExtensionRegistry::Remove(const ExtensionId& id) {
   DCHECK(content::RenderThread::Get());
   base::AutoLock lock(lock_);
   worker_activation_tokens_.erase(id);
+  service_worker_mojo_js_enabled_extensions_.erase(id);
   return extensions_.Remove(id);
 }
 
@@ -152,6 +152,23 @@ RendererExtensionRegistry::GetWorkerActivationToken(
     return std::nullopt;
   }
   return iter->second;
+}
+
+bool RendererExtensionRegistry::IsMojoJsEnabledForServiceWorker(
+    const ExtensionId& extension_id) const {
+  base::AutoLock lock(lock_);
+  return service_worker_mojo_js_enabled_extensions_.contains(extension_id);
+}
+
+void RendererExtensionRegistry::SetMojoJsEnabledForServiceWorker(
+    const ExtensionId& extension_id,
+    bool enabled) {
+  base::AutoLock lock(lock_);
+  if (enabled) {
+    service_worker_mojo_js_enabled_extensions_.insert(extension_id);
+  } else {
+    service_worker_mojo_js_enabled_extensions_.erase(extension_id);
+  }
 }
 
 }  // namespace extensions

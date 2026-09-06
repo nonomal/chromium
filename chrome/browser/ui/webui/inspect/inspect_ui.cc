@@ -11,6 +11,7 @@
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/user_metrics.h"
 #include "base/path_service.h"
 #include "base/task/single_thread_task_runner.h"
@@ -24,7 +25,8 @@
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/devtools/features.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_navigator_params.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/navigator/browser_navigator_params.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/chrome_paths.h"
@@ -46,7 +48,9 @@
 #include "content/public/browser/web_ui_data_source.h"
 #include "content/public/browser/web_ui_message_handler.h"
 #include "net/base/ip_endpoint.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/base/ui_base_features.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/views/widget/widget.h"
 
 using content::DevToolsAgentHost;
@@ -75,8 +79,14 @@ class BubbleLocking {
 };
 
 }  // namespace ui_devtools
-
 namespace {
+
+// This enum is used for UMA histograms and should not be renumbered.
+enum class DevToolsRemoteDebuggingServerAction {
+  kStarted = 0,
+  kStopped = 1,
+  kMaxValue = kStopped,
+};
 
 const char kInspectUiInitUICommand[] = "init-ui";
 const char kInspectUiInspectCommand[] = "inspect";
@@ -112,11 +122,11 @@ const char kInspectUiNameField[] = "name";
 const char kInspectUiUrlField[] = "url";
 const char kInspectUiIsNativeField[] = "isNative";
 
-base::Value::List GetUiDevToolsTargets() {
-  base::Value::List targets;
+base::ListValue GetUiDevToolsTargets() {
+  base::ListValue targets;
   for (const auto& client_pair :
        ui_devtools::UiDevToolsServer::GetClientNamesAndUrls()) {
-    base::Value::Dict target_data;
+    base::DictValue target_data;
     target_data.Set(kInspectUiNameField, client_pair.first);
     target_data.Set(kInspectUiUrlField, client_pair.second);
     target_data.Set(kInspectUiIsNativeField, true);
@@ -222,24 +232,24 @@ class InspectMessageHandler : public WebUIMessageHandler {
   // WebUIMessageHandler implementation.
   void RegisterMessages() override;
 
-  void HandleInitUICommand(const base::Value::List& args);
-  void HandleInspectCommand(const base::Value::List& args);
-  void HandleInspectFallbackCommand(const base::Value::List& args);
-  void HandleActivateCommand(const base::Value::List& args);
-  void HandleCloseCommand(const base::Value::List& args);
-  void HandleReloadCommand(const base::Value::List& args);
-  void HandleOpenCommand(const base::Value::List& args);
-  void HandlePauseCommand(const base::Value::List& args);
-  void HandleInspectBrowserCommand(const base::Value::List& args);
+  void HandleInitUICommand(const base::ListValue& args);
+  void HandleInspectCommand(const base::ListValue& args);
+  void HandleInspectFallbackCommand(const base::ListValue& args);
+  void HandleActivateCommand(const base::ListValue& args);
+  void HandleCloseCommand(const base::ListValue& args);
+  void HandleReloadCommand(const base::ListValue& args);
+  void HandleOpenCommand(const base::ListValue& args);
+  void HandlePauseCommand(const base::ListValue& args);
+  void HandleInspectBrowserCommand(const base::ListValue& args);
   void HandleBooleanPrefChanged(const char* pref_name,
-                                const base::Value::List& args);
-  void HandlePortForwardingConfigCommand(const base::Value::List& args);
-  void HandleTCPDiscoveryConfigCommand(const base::Value::List& args);
-  void HandleOpenNodeFrontendCommand(const base::Value::List& args);
-  void HandleLaunchUIDevToolsCommand(const base::Value::List& args);
-  void HandleSetBubbleLocking(const base::Value::List& args);
-  void HandleSetFocus(const base::Value::List& args);
-  void HandleSetRemoteDebuggingEnabled(const base::Value::List& args);
+                                const base::ListValue& args);
+  void HandlePortForwardingConfigCommand(const base::ListValue& args);
+  void HandleTCPDiscoveryConfigCommand(const base::ListValue& args);
+  void HandleOpenNodeFrontendCommand(const base::ListValue& args);
+  void HandleLaunchUIDevToolsCommand(const base::ListValue& args);
+  void HandleSetBubbleLocking(const base::ListValue& args);
+  void HandleSetFocus(const base::ListValue& args);
+  void HandleSetRemoteDebuggingEnabled(const base::ListValue& args);
 
   void CreateNativeUIInspectionSession(const std::string& url);
   void OnFrontEndFinished();
@@ -334,11 +344,11 @@ void InspectMessageHandler::RegisterMessages() {
           base::Unretained(this)));
 }
 
-void InspectMessageHandler::HandleInitUICommand(const base::Value::List&) {
+void InspectMessageHandler::HandleInitUICommand(const base::ListValue&) {
   inspect_ui_->InitUI();
 }
 
-static bool ParseStringArgs(const base::Value::List& args,
+static bool ParseStringArgs(const base::ListValue& args,
                             std::string* arg0,
                             std::string* arg1,
                             std::string* arg2 = nullptr) {
@@ -364,8 +374,7 @@ static bool ParseStringArgs(const base::Value::List& args,
   return true;
 }
 
-void InspectMessageHandler::HandleInspectCommand(
-    const base::Value::List& args) {
+void InspectMessageHandler::HandleInspectCommand(const base::ListValue& args) {
   std::string source;
   std::string id;
   if (ParseStringArgs(args, &source, &id)) {
@@ -374,7 +383,7 @@ void InspectMessageHandler::HandleInspectCommand(
 }
 
 void InspectMessageHandler::HandleInspectFallbackCommand(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   std::string source;
   std::string id;
   if (ParseStringArgs(args, &source, &id)) {
@@ -382,8 +391,7 @@ void InspectMessageHandler::HandleInspectFallbackCommand(
   }
 }
 
-void InspectMessageHandler::HandleActivateCommand(
-    const base::Value::List& args) {
+void InspectMessageHandler::HandleActivateCommand(const base::ListValue& args) {
   std::string source;
   std::string id;
   if (ParseStringArgs(args, &source, &id)) {
@@ -391,7 +399,7 @@ void InspectMessageHandler::HandleActivateCommand(
   }
 }
 
-void InspectMessageHandler::HandleCloseCommand(const base::Value::List& args) {
+void InspectMessageHandler::HandleCloseCommand(const base::ListValue& args) {
   std::string source;
   std::string id;
   if (ParseStringArgs(args, &source, &id)) {
@@ -399,7 +407,7 @@ void InspectMessageHandler::HandleCloseCommand(const base::Value::List& args) {
   }
 }
 
-void InspectMessageHandler::HandleReloadCommand(const base::Value::List& args) {
+void InspectMessageHandler::HandleReloadCommand(const base::ListValue& args) {
   std::string source;
   std::string id;
   if (ParseStringArgs(args, &source, &id)) {
@@ -407,7 +415,7 @@ void InspectMessageHandler::HandleReloadCommand(const base::Value::List& args) {
   }
 }
 
-void InspectMessageHandler::HandleOpenCommand(const base::Value::List& args) {
+void InspectMessageHandler::HandleOpenCommand(const base::ListValue& args) {
   std::string source_id;
   std::string browser_id;
   std::string url;
@@ -416,7 +424,7 @@ void InspectMessageHandler::HandleOpenCommand(const base::Value::List& args) {
   }
 }
 
-void InspectMessageHandler::HandlePauseCommand(const base::Value::List& args) {
+void InspectMessageHandler::HandlePauseCommand(const base::ListValue& args) {
   std::string source;
   std::string id;
   if (ParseStringArgs(args, &source, &id)) {
@@ -425,7 +433,7 @@ void InspectMessageHandler::HandlePauseCommand(const base::Value::List& args) {
 }
 
 void InspectMessageHandler::HandleInspectBrowserCommand(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   std::string source_id;
   std::string browser_id;
   std::string front_end;
@@ -437,7 +445,7 @@ void InspectMessageHandler::HandleInspectBrowserCommand(
 
 void InspectMessageHandler::HandleBooleanPrefChanged(
     const char* pref_name,
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   if (!profile) {
     return;
@@ -448,7 +456,7 @@ void InspectMessageHandler::HandleBooleanPrefChanged(
   }
 }
 
-void InspectMessageHandler::HandleSetFocus(const base::Value::List& args) {
+void InspectMessageHandler::HandleSetFocus(const base::ListValue& args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   if (!profile) {
     return;
@@ -465,14 +473,14 @@ void InspectMessageHandler::HandleSetFocus(const base::Value::List& args) {
 }
 
 void InspectMessageHandler::HandleSetRemoteDebuggingEnabled(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   if (args.size() == 1 && args[0].is_bool()) {
     inspect_ui_->SetRemoteDebuggingEnabled(args[0].GetBool());
   }
 }
 
 void InspectMessageHandler::HandlePortForwardingConfigCommand(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   if (!profile) {
     return;
@@ -487,7 +495,7 @@ void InspectMessageHandler::HandlePortForwardingConfigCommand(
 }
 
 void InspectMessageHandler::HandleTCPDiscoveryConfigCommand(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   if (!profile) {
     return;
@@ -499,7 +507,7 @@ void InspectMessageHandler::HandleTCPDiscoveryConfigCommand(
 }
 
 void InspectMessageHandler::HandleOpenNodeFrontendCommand(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   Profile* profile = Profile::FromWebUI(web_ui());
   if (!profile) {
     return;
@@ -509,7 +517,7 @@ void InspectMessageHandler::HandleOpenNodeFrontendCommand(
 }
 
 void InspectMessageHandler::HandleLaunchUIDevToolsCommand(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   // Start the UI DevTools server if needed and launch the front-end.
   if (!ui_devtools::ServerHolder::GetInstance()
            ->GetUiDevToolsServerInstance()) {
@@ -538,7 +546,7 @@ void InspectMessageHandler::HandleLaunchUIDevToolsCommand(
 }
 
 void InspectMessageHandler::HandleSetBubbleLocking(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   CHECK(args.size() == 1 && args[0].is_bool());
   ui_devtools::BubbleLocking::SetEnabled(args[0].GetBool());
 }
@@ -565,7 +573,7 @@ void InspectMessageHandler::CreateNativeUIInspectionSession(
 void InspectMessageHandler::OnFrontEndFinished() {
   // Clear the client list and re-enable the launch button when the front-end is
   // gone.
-  inspect_ui_->PopulateNativeUITargets(base::Value::List());
+  inspect_ui_->PopulateNativeUITargets(base::ListValue());
   inspect_ui_->ShowNativeUILaunchButton(/* enabled = */ true);
 }
 
@@ -660,6 +668,9 @@ void InspectUI::Open(const std::string& source_id,
 void InspectUI::Pause(const std::string& source_id,
                       const std::string& target_id) {
   scoped_refptr<DevToolsAgentHost> target = FindTarget(source_id, target_id);
+  if (!target) {
+    return;
+  }
   content::WebContents* web_contents = target->GetWebContents();
   if (web_contents) {
     DevToolsWindow::OpenDevToolsWindow(web_contents,
@@ -677,6 +688,17 @@ void InspectUI::SetRemoteDebuggingEnabled(bool enabled) {
           prefs::kDevToolsRemoteDebuggingAllowed)) {
     return;
   }
+
+  if (enabled) {
+    base::UmaHistogramEnumeration(
+        "DevTools.RemoteDebugging.ServerAction",
+        DevToolsRemoteDebuggingServerAction::kStarted);
+  } else {
+    base::UmaHistogramEnumeration(
+        "DevTools.RemoteDebugging.ServerAction",
+        DevToolsRemoteDebuggingServerAction::kStopped);
+  }
+
   g_browser_process->local_state()->SetBoolean(
       prefs::kDevToolsRemoteDebuggingEnabled, enabled);
   UpdateRemoteDebuggingEnabled();
@@ -725,7 +747,7 @@ void InspectUI::InspectBrowserWithCustomFrontend(const std::string& source_id,
   bindings_enabler->GetBindings()->AttachTo(agent_host);
 }
 
-void InspectUI::InspectDevices(Browser* browser) {
+void InspectUI::InspectDevices(BrowserWindowInterface* browser) {
   base::RecordAction(base::UserMetricsAction("InspectDevices"));
   ShowSingletonTabOverwritingNTP(browser, GURL(chrome::kChromeUIInspectURL),
                                  NavigateParams::IGNORE_AND_NAVIGATE);
@@ -787,6 +809,18 @@ void InspectUI::StartListeningNotifications() {
       prefs::kDevToolsTCPDiscoveryConfig,
       base::BindRepeating(&InspectUI::UpdateTCPDiscoveryConfig,
                           base::Unretained(this)));
+
+  if (g_browser_process && g_browser_process->local_state()) {
+    local_state_pref_change_registrar_.Init(g_browser_process->local_state());
+    local_state_pref_change_registrar_.Add(
+        prefs::kDevToolsRemoteDebuggingAllowed,
+        base::BindRepeating(&InspectUI::UpdateRemoteDebuggingEnabled,
+                            base::Unretained(this)));
+    local_state_pref_change_registrar_.Add(
+        prefs::kDevToolsRemoteDebuggingEnabled,
+        base::BindRepeating(&InspectUI::UpdateRemoteDebuggingEnabled,
+                            base::Unretained(this)));
+  }
 }
 
 void InspectUI::StopListeningNotifications() {
@@ -799,6 +833,7 @@ void InspectUI::StopListeningNotifications() {
   port_status_serializer_.reset();
 
   pref_change_registrar_.RemoveAll();
+  local_state_pref_change_registrar_.RemoveAll();
 }
 
 void InspectUI::UpdateDiscoverUsbDevicesEnabled() {
@@ -878,7 +913,7 @@ void InspectUI::SetPortForwardingDefaults() {
     return;
   }
 
-  const base::Value::Dict* config =
+  const base::DictValue* config =
       GetPrefValue(prefs::kDevToolsPortForwardingConfig)->GetIfDict();
   if (!config) {
     return;
@@ -889,7 +924,7 @@ void InspectUI::SetPortForwardingDefaults() {
     return;
   }
 
-  base::Value::Dict default_config;
+  base::DictValue default_config;
   default_config.Set(kInspectUiPortForwardingDefaultPort,
                      kInspectUiPortForwardingDefaultLocation);
   prefs->SetDict(prefs::kDevToolsPortForwardingConfig,
@@ -927,7 +962,7 @@ void InspectUI::PopulateTargets(const std::string& source,
                                          targets);
 }
 
-void InspectUI::PopulateNativeUITargets(const base::Value::List& targets) {
+void InspectUI::PopulateNativeUITargets(const base::ListValue& targets) {
   web_ui()->CallJavascriptFunctionUnsafe("populateNativeUITargets", targets);
 }
 

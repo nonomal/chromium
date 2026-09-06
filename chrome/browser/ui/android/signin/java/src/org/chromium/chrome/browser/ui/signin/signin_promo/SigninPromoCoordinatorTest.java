@@ -6,17 +6,27 @@ package org.chromium.chrome.browser.ui.signin.signin_promo;
 
 import static androidx.test.espresso.Espresso.onView;
 import static androidx.test.espresso.action.ViewActions.click;
+import static androidx.test.espresso.assertion.ViewAssertions.matches;
 import static androidx.test.espresso.matcher.ViewMatchers.isDisplayed;
+import static androidx.test.espresso.matcher.ViewMatchers.isEnabled;
+import static androidx.test.espresso.matcher.ViewMatchers.withEffectiveVisibility;
 import static androidx.test.espresso.matcher.ViewMatchers.withId;
 import static androidx.test.espresso.matcher.ViewMatchers.withText;
 
+import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.not;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import android.app.Activity;
 import android.content.Context;
@@ -28,6 +38,7 @@ import android.widget.LinearLayout;
 import androidx.annotation.IdRes;
 import androidx.annotation.LayoutRes;
 import androidx.test.espresso.assertion.ViewAssertions;
+import androidx.test.espresso.matcher.ViewMatchers.Visibility;
 import androidx.test.filters.MediumTest;
 
 import org.junit.After;
@@ -43,6 +54,7 @@ import org.mockito.junit.MockitoRule;
 import org.mockito.quality.Strictness;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.supplier.SupplierUtils;
 import org.chromium.base.test.BaseActivityTestRule;
 import org.chromium.base.test.params.MethodParamAnnotationRule;
 import org.chromium.base.test.params.ParameterAnnotations;
@@ -59,24 +71,38 @@ import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.profiles.ProfileManager;
+import org.chromium.chrome.browser.signin.services.AccountPreviewDataService;
+import org.chromium.chrome.browser.signin.services.AccountPreviewPreference;
+import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.services.SigninPreferencesManager;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.ui.signin.BottomSheetSigninAndHistorySyncConfig;
 import org.chromium.chrome.browser.ui.signin.BottomSheetSigninAndHistorySyncConfig.NoAccountSigninMode;
 import org.chromium.chrome.browser.ui.signin.BottomSheetSigninAndHistorySyncConfig.WithAccountSigninMode;
+import org.chromium.chrome.browser.ui.signin.BottomSheetSigninAndHistorySyncCoordinator;
 import org.chromium.chrome.browser.ui.signin.PersonalizedSigninPromoView;
 import org.chromium.chrome.browser.ui.signin.R;
 import org.chromium.chrome.browser.ui.signin.SigninAndHistorySyncActivityLauncher;
+import org.chromium.chrome.browser.ui.signin.SigninAndHistorySyncCoordinator;
 import org.chromium.chrome.browser.ui.signin.account_picker.AccountPickerBottomSheetStrings;
 import org.chromium.chrome.browser.ui.signin.history_sync.HistorySyncConfig;
 import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
 import org.chromium.chrome.test.util.browser.signin.SigninTestRule;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
+import org.chromium.components.browser_ui.device_lock.DeviceLockActivityLauncher;
+import org.chromium.components.externalauth.ExternalAuthUtils;
+import org.chromium.components.signin.SigninFeatureMap;
 import org.chromium.components.signin.SigninFeatures;
 import org.chromium.components.signin.metrics.SigninAccessPoint;
 import org.chromium.components.signin.test.util.TestAccounts;
 import org.chromium.components.sync.SyncService;
 import org.chromium.components.sync.UserSelectableType;
+import org.chromium.components.sync.protocol.SyncEnums;
 import org.chromium.content_public.browser.test.NativeLibraryTestUtils;
+import org.chromium.ui.base.ActivityResultTracker;
+import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.test.util.BlankUiTestActivity;
 import org.chromium.ui.test.util.NightModeTestUtils;
 import org.chromium.ui.test.util.RenderTestRule;
@@ -137,7 +163,7 @@ public class SigninPromoCoordinatorTest {
     @Rule
     public final RenderTestRule mRenderTestRule =
             RenderTestRule.Builder.withPublicCorpus()
-                    .setRevision(0)
+                    .setRevision(1)
                     .setBugComponent(RenderTestRule.Component.SERVICES_SIGN_IN)
                     .build();
 
@@ -146,19 +172,40 @@ public class SigninPromoCoordinatorTest {
 
     @Rule public final MethodRule mMethodParamAnnotationProcessor = new MethodParamAnnotationRule();
 
+    private @Mock WindowAndroid mWindow;
     private @Mock Profile mProfile;
+    private @Mock ActivityResultTracker mActivityResultTracker;
     private @Mock SigninAndHistorySyncActivityLauncher mLauncher;
+    private @Mock BottomSheetSigninAndHistorySyncCoordinator mCoordinator;
+    private @Mock BottomSheetController mBottomSheetController;
+    private @Mock ModalDialogManager mModalDialogManager;
+    private @Mock SnackbarManager mSnackbarManager;
+    private @Mock DeviceLockActivityLauncher mDeviceLockActivityLauncher;
+    private @Mock ExternalAuthUtils mExternalAuthUtilsMock;
+    private @Mock AccountPreviewDataService mAccountPreviewDataServiceMock;
     private @Mock Runnable mOnPromoStateChange;
     private @Mock Runnable mOnOpenSettings;
 
     private PersonalizedSigninPromoView mPromoView;
     private SigninPromoCoordinator mPromoCoordinator;
     private SigninPromoDelegate mDelegate;
+    private boolean mIsSetupListActive;
+    private boolean mIsActivityStarted;
+    private boolean mIsNativeInitialized;
 
     @Before
     public void setUp() {
-        NativeLibraryTestUtils.loadNativeLibraryAndInitBrowserProcess();
-        mActivityTestRule.launchActivity(null);
+        lenient()
+                .when(
+                        mLauncher.createBottomSheetSigninCoordinatorAndObserveAddAccountResult(
+                                any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                                anyInt()))
+                .thenReturn(mCoordinator);
+        ExternalAuthUtils.setInstanceForTesting(mExternalAuthUtilsMock);
+        lenient().when(mExternalAuthUtilsMock.canUseGooglePlayServices()).thenReturn(true);
+        lenient().when(mExternalAuthUtilsMock.isGooglePlayServicesMissing(any())).thenReturn(false);
+        IdentityServicesProvider.setAccountPreviewDataServiceForTesting(
+                mAccountPreviewDataServiceMock);
     }
 
     @ParameterAnnotations.UseMethodParameterBefore(RenderTestParams.class)
@@ -208,7 +255,7 @@ public class SigninPromoCoordinatorTest {
     @MediumTest
     @ParameterAnnotations.UseMethodParameter(AccessPointParams.class)
     public void testPromoNotShownWhenAccountsNotAvailable(@SigninAccessPoint int accessPoint) {
-        try (var unused = mSigninTestRule.blockGetAccountsUpdate(false)) {
+        try (var _ = mSigninTestRule.blockGetAccountsUpdate()) {
             setUpSignInPromo(accessPoint);
             ThreadUtils.runOnUiThreadBlocking(
                     () -> {
@@ -235,6 +282,63 @@ public class SigninPromoCoordinatorTest {
         testPrimaryButtonClick(accessPoint, R.id.sync_promo_signin_button);
     }
 
+    @Test
+    @MediumTest
+    @EnableFeatures(SigninFeatures.ENABLE_ACCOUNT_PREVIEW_PREFERRED_ACCOUNT)
+    @ParameterAnnotations.UseMethodParameter(AccessPointParams.class)
+    public void testVisibleAccountWithPreferredAccount_preferredAccountEnabled(
+            @SigninAccessPoint int accessPoint) {
+        if (accessPoint == SigninAccessPoint.HISTORY_PAGE) {
+            // Promo is only shown for signed-in users on the history page.
+            return;
+        }
+
+        mSigninTestRule.addAccount(TestAccounts.ACCOUNT1);
+        mSigninTestRule.addAccount(TestAccounts.ACCOUNT2);
+        AccountPreviewPreference preference =
+                new AccountPreviewPreference(
+                        TestAccounts.ACCOUNT2.getGaiaId(),
+                        new int[0],
+                        SyncEnums.DeviceFormFactor.DEVICE_FORM_FACTOR_UNSPECIFIED);
+        when(mAccountPreviewDataServiceMock.getPreferredAccountForPromo()).thenReturn(preference);
+        setUpSignInPromo(accessPoint);
+
+        // Since the flag is enabled and Account2 is preferred, the promo should show Account2.
+        ViewUtils.waitForVisibleView(
+                withText(
+                        mActivityTestRule
+                                .getActivity()
+                                .getString(
+                                        R.string.sync_promo_continue_as,
+                                        TestAccounts.ACCOUNT2.getGivenName())));
+    }
+
+    @Test
+    @MediumTest
+    @DisableFeatures(SigninFeatures.ENABLE_ACCOUNT_PREVIEW_PREFERRED_ACCOUNT)
+    @ParameterAnnotations.UseMethodParameter(AccessPointParams.class)
+    public void testVisibleAccountWithPreferredAccount_preferredAccountDisabled(
+            @SigninAccessPoint int accessPoint) {
+        if (accessPoint == SigninAccessPoint.HISTORY_PAGE) {
+            // Promo is only shown for signed-in users on the history page.
+            return;
+        }
+
+        mSigninTestRule.addAccount(TestAccounts.ACCOUNT1);
+        mSigninTestRule.addAccount(TestAccounts.ACCOUNT2);
+        setUpSignInPromo(accessPoint);
+
+        // When the feature is disabled, default to Account1.
+        ViewUtils.waitForVisibleView(
+                withText(
+                        mActivityTestRule
+                                .getActivity()
+                                .getString(
+                                        R.string.sync_promo_continue_as,
+                                        TestAccounts.ACCOUNT1.getGivenName())));
+        verify(mAccountPreviewDataServiceMock, never()).getPreferredAccountForPromo();
+    }
+
     private void testPrimaryButtonClick(
             @SigninAccessPoint int accessPoint, @IdRes int primaryButtonId) {
         var histogramWatcher =
@@ -243,36 +347,154 @@ public class SigninPromoCoordinatorTest {
                                 + getAccessPointToHistogramName(accessPoint),
                         1);
         var impressionHistogramWatcher =
-                getPromoImpressionHistogramWatcher(
-                        accessPoint,
-                        /* hasAccounts= */ accessPoint == SigninAccessPoint.HISTORY_PAGE);
+                getPromoImpressionHistogramWatcher(accessPoint, /* hasAccounts= */ true);
+        mSigninTestRule.addAccount(TestAccounts.ACCOUNT1);
         signinAndOptOutHistorySyncIfNeeded(accessPoint);
         setUpSignInPromo(accessPoint);
+        ViewUtils.waitForVisibleView(withId(primaryButtonId));
 
         onView(withId(primaryButtonId)).perform(click());
 
+        ArgumentCaptor<BottomSheetSigninAndHistorySyncConfig> configCaptor =
+                ArgumentCaptor.forClass(BottomSheetSigninAndHistorySyncConfig.class);
+        if (SigninFeatureMap.isEnabled(SigninFeatures.ENABLE_SEAMLESS_SIGNIN)) {
+            verify(mCoordinator).startSigninFlow(configCaptor.capture());
+        } else {
+            verify(mLauncher)
+                    .createBottomSheetSigninIntentOrShowError(
+                            eq(mActivityTestRule.getActivity()),
+                            eq(mProfile),
+                            configCaptor.capture(),
+                            eq(accessPoint));
+        }
+
+        BottomSheetSigninAndHistorySyncConfig config = configCaptor.getValue();
+        assertEquals(NoAccountSigninMode.BOTTOM_SHEET, config.noAccountSigninMode);
+
         @HistorySyncConfig.OptInMode
-        int historyOptInMode =
+        int expectedHistoryOptInMode =
                 (accessPoint == SigninAccessPoint.RECENT_TABS
                                 || accessPoint == SigninAccessPoint.HISTORY_PAGE)
                         ? HistorySyncConfig.OptInMode.REQUIRED
                         : HistorySyncConfig.OptInMode.NONE;
-        ArgumentCaptor<BottomSheetSigninAndHistorySyncConfig> configCaptor =
-                ArgumentCaptor.forClass(BottomSheetSigninAndHistorySyncConfig.class);
-        verify(mLauncher)
-                .createBottomSheetSigninIntentOrShowError(
-                        eq(mActivityTestRule.getActivity()),
-                        eq(mProfile),
-                        configCaptor.capture(),
-                        eq(accessPoint));
-        BottomSheetSigninAndHistorySyncConfig config = configCaptor.getValue();
-        assertEquals(NoAccountSigninMode.BOTTOM_SHEET, config.noAccountSigninMode);
-        assertEquals(
-                WithAccountSigninMode.DEFAULT_ACCOUNT_BOTTOM_SHEET, config.withAccountSigninMode);
-        assertEquals(historyOptInMode, config.historyOptInMode);
-        assertNull(config.selectedCoreAccountId);
+        assertEquals(expectedHistoryOptInMode, config.historyOptInMode);
+
+        if (SigninFeatureMap.isEnabled(SigninFeatures.ENABLE_SEAMLESS_SIGNIN)
+                && accessPoint != SigninAccessPoint.HISTORY_PAGE) {
+            assertEquals(WithAccountSigninMode.SEAMLESS_SIGNIN, config.withAccountSigninMode);
+            assertNotNull(config.selectedCoreAccountId);
+        } else {
+            assertEquals(
+                    WithAccountSigninMode.DEFAULT_ACCOUNT_BOTTOM_SHEET,
+                    config.withAccountSigninMode);
+            assertNull(config.selectedCoreAccountId);
+        }
+
         histogramWatcher.assertExpected();
         impressionHistogramWatcher.assertExpected();
+    }
+
+    @Test
+    @MediumTest
+    @EnableFeatures({
+        "EnableSeamlessSignin"
+                + ":seamless-signin-promo-type/compact"
+                + "/seamless-signin-string-type/continueButton"
+    })
+    @ParameterAnnotations.UseMethodParameter(AccessPointParams.class)
+    public void testLoadingStateIsShownDuringSignIn_compactPromo(
+            @SigninAccessPoint int accessPoint) {
+        testLoadingStateIsShownDuringSignIn(accessPoint, R.id.account_picker_selected_account);
+    }
+
+    @Test
+    @MediumTest
+    @EnableFeatures({
+        "EnableSeamlessSignin"
+                + ":seamless-signin-promo-type/twoButtons"
+                + "/seamless-signin-string-type/continueButton"
+    })
+    @ParameterAnnotations.UseMethodParameter(AccessPointParams.class)
+    public void testLoadingStateIsShownDuringSignIn_twoButtonsPromo(
+            @SigninAccessPoint int accessPoint) {
+        testLoadingStateIsShownDuringSignIn(accessPoint, R.id.signin_promo_secondary_button);
+    }
+
+    private void testLoadingStateIsShownDuringSignIn(
+            @SigninAccessPoint int accessPoint, @IdRes int secondaryCtaId) {
+        if (accessPoint == SigninAccessPoint.HISTORY_PAGE) {
+            // Promo is only shown for signed-in users on the history page and does not support
+            // seamless sign-in.
+            return;
+        }
+
+        mSigninTestRule.addAccount(TestAccounts.ACCOUNT1);
+        setUpSignInPromo(accessPoint);
+        ViewUtils.waitForVisibleView(withId(R.id.signin_promo_primary_button));
+
+        String expectedPrimaryButtonText =
+                mActivityTestRule
+                        .getActivity()
+                        .getString(
+                                R.string.sync_promo_continue_as,
+                                TestAccounts.ACCOUNT1.getGivenName());
+
+        // Before click: primary button and secondary CTA are enabled.
+        onView(withId(R.id.signin_promo_primary_button))
+                .check(matches(allOf(isEnabled(), withText(expectedPrimaryButtonText))));
+        onView(withId(secondaryCtaId)).check(matches(allOf(isDisplayed(), isEnabled())));
+        if (mDelegate.canBeDismissedPermanently()) {
+            onView(withId(R.id.signin_promo_dismiss_button))
+                    .check(matches(allOf(isDisplayed(), isEnabled())));
+        } else {
+            onView(withId(R.id.signin_promo_dismiss_button))
+                    .check(
+                            matches(
+                                    allOf(
+                                            not(isEnabled()),
+                                            withEffectiveVisibility(Visibility.INVISIBLE))));
+        }
+
+        onView(withId(R.id.signin_promo_primary_button)).perform(click());
+
+        // Verify that sign-in flow started.
+        verify(mCoordinator).startSigninFlow(any());
+
+        // 1. Primary button text changes to "Signing in...".
+        onView(withId(R.id.signin_promo_primary_button))
+                .check(matches(withText(R.string.signin_account_picker_bottom_sheet_signin_title)));
+
+        // 2. Primary CTA, secondary CTA, and dismiss button are disabled.
+        onView(withId(R.id.signin_promo_primary_button)).check(matches(not(isEnabled())));
+        onView(withId(secondaryCtaId)).check(matches(not(isEnabled())));
+        // 3. Dismiss button is hidden and disabled during loading state.
+        onView(withId(R.id.signin_promo_dismiss_button))
+                .check(
+                        matches(
+                                allOf(
+                                        not(isEnabled()),
+                                        withEffectiveVisibility(Visibility.INVISIBLE))));
+
+        // 4. Once the background sign-in flow is aborted, the loading state is cleared.
+        ThreadUtils.runOnUiThreadBlocking(
+                () ->
+                        mPromoCoordinator.onFlowComplete(
+                                SigninAndHistorySyncCoordinator.Result.aborted()));
+
+        onView(withId(R.id.signin_promo_primary_button))
+                .check(matches(allOf(isEnabled(), withText(expectedPrimaryButtonText))));
+        onView(withId(secondaryCtaId)).check(matches(allOf(isDisplayed(), isEnabled())));
+        if (mDelegate.canBeDismissedPermanently()) {
+            onView(withId(R.id.signin_promo_dismiss_button))
+                    .check(matches(allOf(isDisplayed(), isEnabled())));
+        } else {
+            onView(withId(R.id.signin_promo_dismiss_button))
+                    .check(
+                            matches(
+                                    allOf(
+                                            not(isEnabled()),
+                                            withEffectiveVisibility(Visibility.INVISIBLE))));
+        }
     }
 
     @Test
@@ -298,18 +520,24 @@ public class SigninPromoCoordinatorTest {
             @SigninAccessPoint int accessPoint, @IdRes int primaryButtonId) {
         signinAndOptOutHistorySyncIfNeeded(accessPoint);
         setUpSignInPromo(accessPoint);
+        ViewUtils.waitForVisibleView(withId(primaryButtonId));
 
         onView(withId(primaryButtonId)).perform(click());
 
         // Extract the config passed to the sign-in flow launcher.
         ArgumentCaptor<BottomSheetSigninAndHistorySyncConfig> configCaptor =
                 ArgumentCaptor.forClass(BottomSheetSigninAndHistorySyncConfig.class);
-        verify(mLauncher)
-                .createBottomSheetSigninIntentOrShowError(
-                        eq(mActivityTestRule.getActivity()),
-                        eq(mProfile),
-                        configCaptor.capture(),
-                        eq(accessPoint));
+        if (SigninFeatureMap.isEnabled(SigninFeatures.ENABLE_SEAMLESS_SIGNIN)) {
+            verify(mCoordinator).startSigninFlow(configCaptor.capture());
+        } else {
+            verify(mLauncher)
+                    .createBottomSheetSigninIntentOrShowError(
+                            eq(mActivityTestRule.getActivity()),
+                            eq(mProfile),
+                            configCaptor.capture(),
+                            eq(accessPoint));
+        }
+
         BottomSheetSigninAndHistorySyncConfig config = configCaptor.getValue();
 
         // Verify bottom sheet strings.
@@ -375,16 +603,67 @@ public class SigninPromoCoordinatorTest {
         var impressionHistogramWatcher =
                 getPromoImpressionHistogramWatcher(
                         SigninAccessPoint.BOOKMARK_MANAGER, /* hasAccounts= */ true);
+        initNativeIfNeeded();
         mSigninTestRule.addAccountThenSignin(TestAccounts.ACCOUNT1);
         disableBookmarksAndReadingListDataTypes();
         setUpSignInPromo(SigninAccessPoint.BOOKMARK_MANAGER);
         ViewUtils.waitForVisibleView(withText(R.string.sync_promo_title_bookmarks));
+        ViewUtils.waitForVisibleView(withId(primaryButtonId));
 
         onView(withId(primaryButtonId)).perform(click());
 
         verify(mOnOpenSettings).run();
         histogramWatcher.assertExpected();
         impressionHistogramWatcher.assertExpected();
+    }
+
+    @Test
+    @MediumTest
+    @EnableFeatures({
+        "EnableSeamlessSignin"
+                + ":seamless-signin-promo-type/compact"
+                + "/seamless-signin-string-type/continueButton"
+    })
+    public void testLoadingStateNotShownForBookmarksSettingsPromo_compactPromo() {
+        testLoadingStateNotShownForBookmarksSettingsPromo();
+    }
+
+    @Test
+    @MediumTest
+    @EnableFeatures({
+        "EnableSeamlessSignin"
+                + ":seamless-signin-promo-type/twoButtons"
+                + "/seamless-signin-string-type/continueButton"
+    })
+    public void testLoadingStateNotShownForBookmarksSettingsPromo_twoButtonsPromo() {
+        testLoadingStateNotShownForBookmarksSettingsPromo();
+    }
+
+    private void testLoadingStateNotShownForBookmarksSettingsPromo() {
+        initNativeIfNeeded();
+        mSigninTestRule.addAccountThenSignin(TestAccounts.ACCOUNT1);
+        disableBookmarksAndReadingListDataTypes();
+        setUpSignInPromo(SigninAccessPoint.BOOKMARK_MANAGER);
+        ViewUtils.waitForVisibleView(withText(R.string.sync_promo_title_bookmarks));
+        ViewUtils.waitForVisibleView(withId(R.id.signin_promo_primary_button));
+
+        // Before click: primary button and dismiss button are enabled.
+        onView(withId(R.id.signin_promo_primary_button))
+                .check(matches(allOf(isEnabled(), withText(R.string.open_settings_button))));
+        onView(withId(R.id.signin_promo_dismiss_button))
+                .check(matches(allOf(isDisplayed(), isEnabled())));
+
+        onView(withId(R.id.signin_promo_primary_button)).perform(click());
+
+        // Verify that sign-in flow is not started.
+        verify(mCoordinator, never()).startSigninFlow(any());
+
+        // Verify primary button text remains "Open settings" and promo buttons remain enabled.
+        onView(withId(R.id.signin_promo_primary_button))
+                .check(matches(allOf(isEnabled(), withText(R.string.open_settings_button))));
+        onView(withId(R.id.signin_promo_dismiss_button))
+                .check(matches(allOf(isDisplayed(), isEnabled())));
+        verify(mOnOpenSettings).run();
     }
 
     @Test
@@ -411,17 +690,13 @@ public class SigninPromoCoordinatorTest {
                 getPromoImpressionHistogramWatcher(accessPoint, /* hasAccounts= */ true);
         mSigninTestRule.addAccount(TestAccounts.ACCOUNT1);
         setUpSignInPromo(accessPoint);
+        ViewUtils.waitForVisibleView(withId(R.id.signin_promo_secondary_button));
 
         onView(withId(R.id.signin_promo_secondary_button)).perform(click());
 
         ArgumentCaptor<BottomSheetSigninAndHistorySyncConfig> configCaptor =
                 ArgumentCaptor.forClass(BottomSheetSigninAndHistorySyncConfig.class);
-        verify(mLauncher)
-                .createBottomSheetSigninIntentOrShowError(
-                        eq(mActivityTestRule.getActivity()),
-                        eq(mProfile),
-                        configCaptor.capture(),
-                        eq(accessPoint));
+        verify(mCoordinator).startSigninFlow(configCaptor.capture());
         BottomSheetSigninAndHistorySyncConfig config = configCaptor.getValue();
         assertEquals(NoAccountSigninMode.BOTTOM_SHEET, config.noAccountSigninMode);
         assertEquals(
@@ -532,6 +807,7 @@ public class SigninPromoCoordinatorTest {
         var histogramWatcher =
                 getPromoImpressionHistogramWatcher(
                         SigninAccessPoint.BOOKMARK_MANAGER, /* hasAccounts= */ true);
+        initNativeIfNeeded();
         mSigninTestRule.addAccountThenSignin(TestAccounts.ACCOUNT1);
         disableBookmarksAndReadingListDataTypes();
 
@@ -548,7 +824,17 @@ public class SigninPromoCoordinatorTest {
     // TODO(crbug.com/468024353): Add coverage for two_buttons promo.
     @ParameterAnnotations.UseMethodParameter(AccessPointParams.class)
     public void testDismissButtonClick_compactPromo(@SigninAccessPoint int accessPoint) {
-        testDismissButtonClick(accessPoint, R.id.signin_promo_dismiss_button);
+        testPermanentDismissal(
+                accessPoint, R.id.signin_promo_dismiss_button, /* dueToUndoneSignin= */ false);
+    }
+
+    @Test
+    @MediumTest
+    @EnableFeatures({"EnableSeamlessSignin" + ":seamless-signin-promo-type/compact"})
+    @ParameterAnnotations.UseMethodParameter(AccessPointParams.class)
+    public void testUndoButtonClick_compactPromo(@SigninAccessPoint int accessPoint) {
+        testPermanentDismissal(
+                accessPoint, R.id.signin_promo_dismiss_button, /* dueToUndoneSignin= */ true);
     }
 
     @Test
@@ -557,19 +843,30 @@ public class SigninPromoCoordinatorTest {
     @DisableFeatures(SigninFeatures.ENABLE_SEAMLESS_SIGNIN)
     @ParameterAnnotations.UseMethodParameter(AccessPointParams.class)
     public void testDismissButtonClick_seamlessSigninDisabled(@SigninAccessPoint int accessPoint) {
-        testDismissButtonClick(accessPoint, R.id.sync_promo_close_button);
+        testPermanentDismissal(
+                accessPoint, R.id.sync_promo_close_button, /* dueToUndoneSignin= */ false);
     }
 
-    private void testDismissButtonClick(
-            @SigninAccessPoint int accessPoint, @IdRes int dismissButtonId) {
+    private void testPermanentDismissal(
+            @SigninAccessPoint int accessPoint,
+            @IdRes int dismissButtonId,
+            boolean dueToUndoneSignin) {
+        String event =
+                dueToUndoneSignin
+                        ? SigninPromoMediator.Event.SIGNIN_UNDONE
+                        : SigninPromoMediator.Event.DISMISSED;
         var histogramWatcher =
                 HistogramWatcher.newBuilder()
                         .expectIntRecord(
-                                "Signin.Promo.ImpressionsUntil.Dismissed."
+                                "Signin.Promo.ImpressionsUntil."
+                                        + event
+                                        + "."
                                         + getAccessPointToHistogramName(accessPoint),
                                 1)
                         .expectIntRecord(
-                                "Signin.SyncPromo.Dismissed.Count."
+                                "Signin.SyncPromo."
+                                        + event
+                                        + ".Count."
                                         + getAccessPointToHistogramName(accessPoint),
                                 1)
                         .build();
@@ -581,13 +878,21 @@ public class SigninPromoCoordinatorTest {
         signinAndOptOutHistorySyncIfNeeded(accessPoint);
         setUpSignInPromo(accessPoint);
 
-        if (accessPoint == SigninAccessPoint.RECENT_TABS) {
-            // Recent tabs doesn't support dismiss button.
+        if (!mDelegate.canBeDismissedPermanently()) {
+            // Eg.: Recent tabs doesn't support dismiss functionality
             onView(withId(dismissButtonId)).check(ViewAssertions.matches(not(isDisplayed())));
             return;
         }
 
-        onView(withId(dismissButtonId)).perform(click());
+        assertTrue(mDelegate.canBeDismissedPermanently());
+        if (dueToUndoneSignin) {
+            // Wait for promo to be shown (for recording impressions), then undo the sign-in flow.
+            onView(withId(dismissButtonId)).check(ViewAssertions.matches(isDisplayed()));
+            ThreadUtils.runOnUiThreadBlocking(() -> mPromoCoordinator.onSigninUndone());
+        } else {
+            // Dismiss the promo via [x] dismiss button.
+            onView(withId(dismissButtonId)).perform(click());
+        }
 
         verify(mOnPromoStateChange).run();
         String preferenceName = getAccessPointDismissPreferenceName(accessPoint);
@@ -628,6 +933,7 @@ public class SigninPromoCoordinatorTest {
     @MediumTest
     @ParameterAnnotations.UseMethodParameter(AccessPointParams.class)
     public void testMaxImpressionReached(@SigninAccessPoint int accessPoint) {
+        initNativeIfNeeded();
         if (accessPoint == SigninAccessPoint.BOOKMARK_MANAGER) {
             String preferenceName =
                     ChromePreferenceKeys.SYNC_PROMO_SHOW_COUNT.createKey(
@@ -677,6 +983,7 @@ public class SigninPromoCoordinatorTest {
     @Test
     @MediumTest
     public void testHistoryPageImpressionDelay_delayNotReached() {
+        initNativeIfNeeded();
         ChromeSharedPreferences.getInstance()
                 .writeLong(
                         ChromePreferenceKeys.SIGNIN_PROMO_HISTORY_PAGE_LAST_SHOWN_TIME,
@@ -694,6 +1001,7 @@ public class SigninPromoCoordinatorTest {
     @Test
     @MediumTest
     public void testHistoryPageImpressionDelay_delayReached() {
+        initNativeIfNeeded();
         ChromeSharedPreferences.getInstance()
                 .writeLong(
                         ChromePreferenceKeys.SIGNIN_PROMO_HISTORY_PAGE_LAST_SHOWN_TIME,
@@ -711,8 +1019,37 @@ public class SigninPromoCoordinatorTest {
 
     @Test
     @MediumTest
+    @EnableFeatures({
+        "EnableSeamlessSignin"
+                + ":seamless-signin-promo-type/compact"
+                + "/seamless-signin-string-type/continueButton"
+    })
+    public void testHistorySyncOptIn_RecentTabs() {
+        signinAndOptOutHistorySyncIfNeeded(SigninAccessPoint.RECENT_TABS);
+        setUpSignInPromo(SigninAccessPoint.RECENT_TABS);
+        ViewUtils.waitForVisibleView(withId(R.id.signin_promo_primary_button));
+
+        onView(withId(R.id.signin_promo_primary_button)).perform(click());
+
+        @HistorySyncConfig.OptInMode
+        ArgumentCaptor<BottomSheetSigninAndHistorySyncConfig> configCaptor =
+                ArgumentCaptor.forClass(BottomSheetSigninAndHistorySyncConfig.class);
+        verify(mCoordinator).startSigninFlow(configCaptor.capture());
+        BottomSheetSigninAndHistorySyncConfig config = configCaptor.getValue();
+        Context context = mActivityTestRule.getActivity();
+        assertEquals(
+                context.getString(R.string.history_sync_recent_tabs_title),
+                config.historySyncConfig.title);
+        assertEquals(
+                context.getString(R.string.history_sync_recent_tabs_subtitle),
+                config.historySyncConfig.subtitle);
+    }
+
+    @Test
+    @MediumTest
     @Feature("RenderTest")
     @ParameterAnnotations.UseMethodParameter(RenderTestParams.class)
+    @DisableFeatures(SigninFeatures.ENABLE_SEAMLESS_SIGNIN)
     public void testRendering_noAccount(
             @SigninAccessPoint int accessPoint, boolean nightModeEnabled) throws Exception {
         if (accessPoint == SigninAccessPoint.HISTORY_PAGE) {
@@ -730,6 +1067,7 @@ public class SigninPromoCoordinatorTest {
     @MediumTest
     @Feature("RenderTest")
     @ParameterAnnotations.UseMethodParameter(RenderTestParams.class)
+    @DisableFeatures(SigninFeatures.ENABLE_SEAMLESS_SIGNIN)
     public void testRendering_withAccount(
             @SigninAccessPoint int accessPoint, boolean nightModeEnabled) throws Exception {
         if (accessPoint == SigninAccessPoint.HISTORY_PAGE) {
@@ -749,6 +1087,7 @@ public class SigninPromoCoordinatorTest {
     @ParameterAnnotations.UseMethodParameter(NightModeTestUtils.NightModeParams.class)
     public void testRendering_withAccount_bookmarksAccountSettingsPromo(boolean nightModeEnabled)
             throws Exception {
+        initNativeIfNeeded();
         mSigninTestRule.addAccountThenSignin(TestAccounts.ACCOUNT1);
         disableBookmarksAndReadingListDataTypes();
         setUpSignInPromo(SigninAccessPoint.BOOKMARK_MANAGER);
@@ -924,6 +1263,7 @@ public class SigninPromoCoordinatorTest {
     @ParameterAnnotations.UseMethodParameter(NightModeTestUtils.NightModeParams.class)
     public void testRendering_seamlessSigninPromo_twoButtons_signedIn_bookmarks(
             boolean nightModeEnabled) throws Exception {
+        initNativeIfNeeded();
         mSigninTestRule.addAccountThenSignin(TestAccounts.ACCOUNT1);
         disableBookmarksAndReadingListDataTypes();
         setUpSignInPromo(SigninAccessPoint.BOOKMARK_MANAGER);
@@ -945,6 +1285,7 @@ public class SigninPromoCoordinatorTest {
     @ParameterAnnotations.UseMethodParameter(NightModeTestUtils.NightModeParams.class)
     public void testRendering_seamlessSigninPromo_compact_signedIn_bookmarks(
             boolean nightModeEnabled) throws Exception {
+        initNativeIfNeeded();
         mSigninTestRule.addAccountThenSignin(TestAccounts.ACCOUNT1);
         disableBookmarksAndReadingListDataTypes();
         setUpSignInPromo(SigninAccessPoint.BOOKMARK_MANAGER);
@@ -966,6 +1307,7 @@ public class SigninPromoCoordinatorTest {
     @ParameterAnnotations.UseMethodParameter(NightModeTestUtils.NightModeParams.class)
     public void testRendering_seamlessSigninPromo_signedInThenSignedOut_bookmarks(
             boolean nightModeEnabled) throws Exception {
+        initNativeIfNeeded();
         mSigninTestRule.addAccountThenSignin(TestAccounts.ACCOUNT1);
         disableBookmarksAndReadingListDataTypes();
         setUpSignInPromo(SigninAccessPoint.BOOKMARK_MANAGER);
@@ -1060,7 +1402,20 @@ public class SigninPromoCoordinatorTest {
                                 SigninAccessPoint.NTP_FEED_TOP_PROMO, nightModeEnabled));
     }
 
+    private void initNativeIfNeeded() {
+        if (!mIsNativeInitialized) {
+            NativeLibraryTestUtils.loadNativeLibraryAndInitBrowserProcess();
+            mIsNativeInitialized = true;
+        }
+    }
+
     private void setUpSignInPromo(@SigninAccessPoint int accessPoint) {
+        initNativeIfNeeded();
+        if (!mIsActivityStarted) {
+            mActivityTestRule.launchActivity(null);
+            mIsActivityStarted = true;
+        }
+
         @LayoutRes int layoutResId = SigninPromoCoordinator.getLayoutResId(accessPoint);
         ThreadUtils.runOnUiThreadBlocking(
                 () -> {
@@ -1076,36 +1431,49 @@ public class SigninPromoCoordinatorTest {
                     activity.setContentView(content);
 
                     mPromoView = promoView.findViewById(R.id.signin_promo_view_container);
-                    mDelegate =
-                            getSigninPromoDelegate(
-                                    accessPoint,
+                    mDelegate = getSigninPromoDelegate(accessPoint, activity);
+                    mPromoCoordinator =
+                            new SigninPromoCoordinator(
+                                    mWindow,
                                     activity,
                                     mProfile,
+                                    mActivityResultTracker,
                                     mLauncher,
-                                    mOnPromoStateChange,
-                                    mOnOpenSettings);
-                    mPromoCoordinator = new SigninPromoCoordinator(activity, mProfile, mDelegate);
+                                    SupplierUtils.of(mBottomSheetController),
+                                    mModalDialogManager,
+                                    mSnackbarManager,
+                                    mDeviceLockActivityLauncher,
+                                    mDelegate);
                     mPromoCoordinator.setView(mPromoView);
                 });
     }
 
-    private static SigninPromoDelegate getSigninPromoDelegate(
-            @SigninAccessPoint int accessPoint,
-            Context context,
-            Profile profile,
-            SigninAndHistorySyncActivityLauncher launcher,
-            Runnable onPromoStateChange,
-            Runnable onOpenSettings) {
+    private SigninPromoDelegate getSigninPromoDelegate(
+            @SigninAccessPoint int accessPoint, Activity activity) {
         return switch (accessPoint) {
-            case SigninAccessPoint.BOOKMARK_MANAGER -> new BookmarkSigninPromoDelegate(
-                    context, profile, launcher, onPromoStateChange, onOpenSettings);
-            case SigninAccessPoint.HISTORY_PAGE -> new HistoryPageSigninPromoDelegate(
-                    context, profile, launcher, onPromoStateChange, /* isCreatedInCct= */ false);
-            case SigninAccessPoint.NTP_FEED_TOP_PROMO -> new NtpSigninPromoDelegate(
-                    context, profile, launcher, onPromoStateChange);
-            case SigninAccessPoint.RECENT_TABS -> new RecentTabsSigninPromoDelegate(
-                    context, profile, launcher, onPromoStateChange);
-            default -> throw new IllegalArgumentException("Invalid sign-in promo access point");
+            case SigninAccessPoint.BOOKMARK_MANAGER ->
+                    new BookmarkSigninPromoDelegate(
+                            activity, mProfile, mLauncher, mOnPromoStateChange, mOnOpenSettings);
+            case SigninAccessPoint.HISTORY_PAGE ->
+                    new HistoryPageSigninPromoDelegate(
+                            activity,
+                            mProfile,
+                            mLauncher,
+                            mOnPromoStateChange,
+                            /* isCreatedInCct= */ false);
+            case SigninAccessPoint.NTP_FEED_TOP_PROMO ->
+                    new NtpSigninPromoDelegate(
+                            activity,
+                            mProfile,
+                            mLauncher,
+                            mOnPromoStateChange,
+                            () -> mIsSetupListActive);
+            case SigninAccessPoint.RECENT_TABS ->
+                    new RecentTabsSigninPromoDelegate(
+                            activity, mProfile, mLauncher, mOnPromoStateChange);
+            default ->
+                    throw new IllegalArgumentException(
+                            "Invalid sign-in promo access point: " + accessPoint);
         };
     }
 
@@ -1115,7 +1483,8 @@ public class SigninPromoCoordinatorTest {
             case SigninAccessPoint.HISTORY_PAGE -> "HistoryPage";
             case SigninAccessPoint.NTP_FEED_TOP_PROMO -> "NtpFeedTopPromo";
             case SigninAccessPoint.RECENT_TABS -> "RecentTabs";
-            default -> throw new IllegalArgumentException("Invalid sign-in promo access point");
+            default -> throw new IllegalArgumentException(
+                    "Invalid sign-in promo access point: " + accessPoint);
         };
     }
 
@@ -1141,7 +1510,8 @@ public class SigninPromoCoordinatorTest {
                     .SigninPromoAccessPointId.NTP;
             case SigninAccessPoint.RECENT_TABS -> SigninPreferencesManager.SigninPromoAccessPointId
                     .RECENT_TABS;
-            default -> throw new IllegalArgumentException("Invalid sign-in promo access point");
+            default -> throw new IllegalArgumentException(
+                    "Invalid sign-in promo access point: " + accessPoint);
         };
     }
 
@@ -1153,7 +1523,8 @@ public class SigninPromoCoordinatorTest {
                     .SIGNIN_PROMO_HISTORY_PAGE_DECLINED;
             case SigninAccessPoint.NTP_FEED_TOP_PROMO -> ChromePreferenceKeys
                     .SIGNIN_PROMO_NTP_PROMO_DISMISSED;
-            default -> throw new IllegalArgumentException("Invalid sign-in promo access point");
+            default -> throw new IllegalArgumentException(
+                    "Invalid sign-in promo access point: " + accessPoint);
         };
     }
 
@@ -1166,7 +1537,8 @@ public class SigninPromoCoordinatorTest {
                     .createKey(SigninPreferencesManager.SigninPromoAccessPointId.HISTORY_PAGE);
             case SigninAccessPoint.NTP_FEED_TOP_PROMO -> ChromePreferenceKeys.SYNC_PROMO_SHOW_COUNT
                     .createKey(SigninPreferencesManager.SigninPromoAccessPointId.NTP);
-            default -> throw new IllegalArgumentException("Invalid sign-in promo access point");
+            default -> throw new IllegalArgumentException(
+                    "Invalid sign-in promo access point: " + accessPoint);
         };
     }
 
@@ -1178,6 +1550,7 @@ public class SigninPromoCoordinatorTest {
     }
 
     private void disableBookmarksAndReadingListDataTypes() {
+        initNativeIfNeeded();
         ThreadUtils.runOnUiThreadBlocking(
                 () -> {
                     SyncService syncService = SyncTestUtil.getSyncServiceForLastUsedProfile();
@@ -1189,6 +1562,7 @@ public class SigninPromoCoordinatorTest {
 
     private void signinAndOptOutHistorySyncIfNeeded(@SigninAccessPoint int accessPoint) {
         if (accessPoint == SigninAccessPoint.HISTORY_PAGE) {
+            initNativeIfNeeded();
             mSigninTestRule.addAccountThenSignin(TestAccounts.ACCOUNT1);
             ThreadUtils.runOnUiThreadBlocking(
                     () -> {

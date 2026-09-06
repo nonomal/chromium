@@ -13,9 +13,9 @@
 #include "base/test/gtest_util.h"
 #include "base/time/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/layer_owner.h"
+#include "ui/compositor/layer_textured.h"
 #include "ui/compositor/property_change_reason.h"
 #include "ui/compositor/test/layer_animator_test_controller.h"
 #include "ui/compositor/test/test_layer_animation_delegate.h"
@@ -31,7 +31,8 @@ namespace {
 
 class TestAnimatibleLayerOwner : public ui::LayerOwner {
  public:
-  TestAnimatibleLayerOwner() : ui::LayerOwner(std::make_unique<ui::Layer>()) {
+  TestAnimatibleLayerOwner()
+      : ui::LayerOwner(std::make_unique<ui::LayerTextured>()) {
     layer()->GetAnimator()->set_disable_timer_for_test(true);
     layer()->GetAnimator()->SetDelegate(&delegate_);
   }
@@ -1087,6 +1088,36 @@ TEST_F(AnimationBuilderTest, AbortHandle) {
     Step(kStepSize);
     EXPECT_FLOAT_EQ(delegate->GetBrightnessForAnimation(), 0.7f);
     EXPECT_FLOAT_EQ(delegate->GetOpacityForAnimation(), 0.7f);
+  }
+
+  // The state change of the previous animation will not affect the
+  // state of the next animation.
+  {
+    delegate->SetBrightnessFromAnimation(
+        1.0f, ui::PropertyChangeReason::NOT_FROM_ANIMATION);
+    delegate->SetOpacityFromAnimation(
+        1.0f, ui::PropertyChangeReason::NOT_FROM_ANIMATION);
+
+    {
+      AnimationBuilder b;
+      abort_handle = b.GetAbortHandle();
+      b.Once().SetDuration(kDuration).SetOpacity(view, 0.4f);
+      b.Once().At(kDuration).SetDuration(kDuration).SetBrightness(view, 0.4f);
+    }
+
+    Step(kDuration);
+    EXPECT_FLOAT_EQ(delegate->GetBrightnessForAnimation(), 1.0f);
+    EXPECT_FLOAT_EQ(delegate->GetOpacityForAnimation(), 0.4f);
+    Step(kStepSize);
+    EXPECT_TRUE(view->layer()->GetAnimator()->is_animating());
+    // Destroy abort handle should stop all animations.
+    abort_handle.reset();
+    EXPECT_FALSE(view->layer()->GetAnimator()->is_animating());
+    EXPECT_FLOAT_EQ(delegate->GetBrightnessForAnimation(), 0.7f);
+    EXPECT_FLOAT_EQ(delegate->GetOpacityForAnimation(), 0.4f);
+    Step(kStepSize);
+    EXPECT_FLOAT_EQ(delegate->GetBrightnessForAnimation(), 0.7f);
+    EXPECT_FLOAT_EQ(delegate->GetOpacityForAnimation(), 0.4f);
   }
 
   // The builder crashes if the handle is destroyed before animation starts.

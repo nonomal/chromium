@@ -5,23 +5,30 @@
 #include "chrome/browser/extensions/chrome_component_extension_resource_manager.h"
 
 #include <map>
-#include <string>
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/containers/span.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/extensions/extension_constants.h"
+#include "chrome/grit/aim_eligibility_extension_resources_map.h"
 #include "chrome/grit/chrome_unscaled_resources.h"
 #include "chrome/grit/component_extension_resources_map.h"
+#include "chrome/grit/contextual_tasks_extension_resources_map.h"
 #include "chrome/grit/theme_resources.h"
+#include "components/contextual_tasks/public/features.h"
+#include "components/omnibox/common/omnibox_features.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/extension_config_map.h"
+#include "extensions/browser/extension_config_map_factory.h"
 #include "extensions/buildflags/buildflags.h"
-#include "extensions/common/constants.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/common/extension_id.h"
 #include "pdf/buildflags.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -43,9 +50,25 @@
 #include "chrome/browser/pdf/pdf_extension_util.h"
 #endif  // BUILDFLAG(ENABLE_PDF)
 
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/indigo/indigo_extension_utils.h"
+#endif  // !BUILDFLAG(IS_ANDROID)
+
 static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
+namespace {
+
+ExtensionConfigProvider* GetConfigProvider(const ExtensionId& extension_id,
+                                           content::BrowserContext* context) {
+  if (!context) {
+    return nullptr;
+  }
+  auto* config_map = ExtensionConfigMapFactory::GetForBrowserContext(context);
+  return config_map ? config_map->GetConfigProvider(extension_id) : nullptr;
+}
+
+}  // namespace
 
 class ChromeComponentExtensionResourceManager::Data {
  public:
@@ -95,6 +118,27 @@ ChromeComponentExtensionResourceManager::Data::Data() {
 
   AddComponentResourceEntries(kComponentExtensionResources);
   AddComponentResourceEntries(kExtraComponentExtensionResources);
+  if (base::FeatureList::IsEnabled(
+          omnibox::kAimEligibilityComponentExtension)) {
+    AddComponentResourceEntries(kAimEligibilityExtensionResources);
+  }
+  if (base::FeatureList::IsEnabled(
+          extensions_features::kApiContextualTasksPrivate)) {
+    AddComponentResourceEntries(kContextualTasksExtensionResources);
+  }
+
+#if !BUILDFLAG(IS_ANDROID)
+  if (base::FeatureList::IsEnabled(features::kIndigo)) {
+    AddComponentResourceEntries(indigo_extension_utils::GetResources());
+    if (ui::ResourceBundle::HasSharedInstance()) {
+      base::DictValue dict = indigo_extension_utils::GetStrings();
+      ui::TemplateReplacements indigo_replacements;
+      ui::TemplateReplacementsFromDictionaryValue(dict, &indigo_replacements);
+      template_replacements_[extension_misc::kIndigoExtensionId] =
+          std::move(indigo_replacements);
+    }
+  }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_CHROMEOS)
   // Add Files app JS modules resources.
@@ -109,7 +153,7 @@ ChromeComponentExtensionResourceManager::Data::Data() {
         base::FilePath("file_manager").AppendASCII(resource.path);
     resource_path = resource_path.NormalizePathSeparators();
 
-    DCHECK(!base::Contains(path_to_resource_id_, resource_path));
+    DCHECK(!path_to_resource_id_.contains(resource_path));
     path_to_resource_id_[resource_path] = resource.id;
   }
 
@@ -136,7 +180,7 @@ ChromeComponentExtensionResourceManager::Data::Data() {
 
   // ResourceBundle is not always initialized in unit tests.
   if (ui::ResourceBundle::HasSharedInstance()) {
-    base::Value::Dict dict = pdf_extension_util::GetStrings(
+    base::DictValue dict = pdf_extension_util::GetStrings(
         pdf_extension_util::PdfViewerContext::kPdfViewer);
 
     ui::TemplateReplacements pdf_viewer_replacements;
@@ -153,7 +197,7 @@ void ChromeComponentExtensionResourceManager::Data::AddComponentResourceEntries(
     base::FilePath resource_path = base::FilePath().AppendASCII(entry.path);
     resource_path = resource_path.NormalizePathSeparators();
 
-    DCHECK(!base::Contains(path_to_resource_id_, resource_path));
+    DCHECK(!path_to_resource_id_.contains(resource_path));
     path_to_resource_id_[resource_path] = entry.id;
   }
 }
@@ -182,8 +226,9 @@ bool ChromeComponentExtensionResourceManager::IsComponentExtensionResource(
 
   LazyInitData();
   auto entry = data_->path_to_resource_id().find(relative_path);
-  if (entry == data_->path_to_resource_id().end())
+  if (entry == data_->path_to_resource_id().end()) {
     return false;
+  }
 
   *resource_id = entry->second;
   return true;
@@ -191,7 +236,8 @@ bool ChromeComponentExtensionResourceManager::IsComponentExtensionResource(
 
 const ui::TemplateReplacements*
 ChromeComponentExtensionResourceManager::GetTemplateReplacementsForExtension(
-    const ExtensionId& extension_id) const {
+    const ExtensionId& extension_id,
+    content::BrowserContext* context) const {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   LazyInitData();
@@ -202,10 +248,16 @@ ChromeComponentExtensionResourceManager::GetTemplateReplacementsForExtension(
     // Disable $i18n{} template JS string replacement during JS code coverage.
     base::FilePath devtools_code_coverage_dir_ =
         command_line->GetSwitchValuePath("devtools-code-coverage");
-    if (!devtools_code_coverage_dir_.empty())
+    if (!devtools_code_coverage_dir_.empty()) {
       return nullptr;
+    }
   }
 #endif
+
+  if (auto* provider = GetConfigProvider(extension_id, context)) {
+    CHECK(context);
+    return provider->GetTemplateReplacements(*context);
+  }
 
   auto it = data_->template_replacements().find(extension_id);
   return it != data_->template_replacements().end() ? &it->second : nullptr;

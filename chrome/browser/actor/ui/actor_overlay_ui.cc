@@ -14,6 +14,7 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/grit/actor_overlay_resources.h"
 #include "chrome/grit/actor_overlay_resources_map.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "ui/webui/webui_util.h"
@@ -22,7 +23,8 @@ namespace actor::ui {
 
 bool ActorOverlayUIConfig::IsWebUIEnabled(
     content::BrowserContext* browser_context) {
-  return features::kGlicActorUiOverlay.Get() &&
+  return base::FeatureList::IsEnabled(features::kGlicActorUi) &&
+         features::kGlicActorUiOverlay.Get() &&
          !browser_context->IsOffTheRecord();
 }
 
@@ -34,10 +36,14 @@ ActorOverlayUI::ActorOverlayUI(content::WebUI* web_ui)
                               IDR_ACTOR_OVERLAY_ACTOR_OVERLAY_HTML);
   source->AddBoolean(
       "isMagicCursorEnabled",
-      base::FeatureList::IsEnabled(features::kGlicActorUiOverlayMagicCursor));
-  source->AddBoolean("isStandaloneBorderGlowEnabled",
-                     features::kGlicActorUiStandaloneBorderGlow.Get());
+      base::FeatureList::IsEnabled(features::kGlicActorUiMagicCursor));
   source->AddResourcePath("magic_cursor.svg", IDR_ACTOR_OVERLAY_MAGIC_CURSOR);
+  source->AddDouble("magicCursorSpeed",
+                    features::kGlicActorUiMagicCursorSpeed.Get());
+  source->AddInteger("magicCursorMinDurationMs",
+                     features::kGlicActorUiMagicCursorMinDuration.Get());
+  source->AddInteger("magicCursorMaxDurationMs",
+                     features::kGlicActorUiMagicCursorMaxDuration.Get());
 }
 
 WEB_UI_CONTROLLER_TYPE_IMPL(ActorOverlayUI)
@@ -101,6 +107,11 @@ void ActorOverlayUI::MoveCursorTo(const gfx::Point& point,
                                   base::OnceClosure callback) {
   DCHECK(handler_);
   handler_->MoveCursorTo(point, std::move(callback));
+}
+
+void ActorOverlayUI::TriggerClickAnimation(base::OnceClosure callback) {
+  DCHECK(handler_);
+  handler_->TriggerClickAnimation(std::move(callback));
 }
 
 }  // namespace actor::ui

@@ -7,7 +7,6 @@
 #include <optional>
 #include <string>
 
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/strings/strcat.h"
@@ -17,10 +16,11 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/optimization_guide/content/mojom/page_text_service.mojom.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
@@ -215,7 +215,7 @@ IN_PROC_BROWSER_TEST_F(PageTextObserverBrowserTest, FirstLayoutAndOnLoad) {
   PageTextObserver::CreateForWebContents(web_contents());
   ASSERT_TRUE(observer());
 
-  // This test can be flaky (crbug.com/1187264), and it always seems to be
+  // This test can be flaky (crbug.com/40754218), and it always seems to be
   // caused by the renderer never finishing the page load and is thus outside
   // the control of this feature. Thorough testing shows that this flake does
   // not repeat itself, so running the test an extra time is sufficient.
@@ -273,7 +273,7 @@ IN_PROC_BROWSER_TEST_F(PageTextObserverBrowserTest, FirstLayoutAndOnLoad) {
       // for text equality is inherently flaky, and this determinism is not a
       // guarantee that we make to callers.
       if (result.event() == mojom::TextDumpEvent::kFirstLayout) {
-        EXPECT_TRUE(base::Contains(*result.contents(), u"hello"));
+        EXPECT_TRUE(result.contents()->contains(u"hello"));
         has_first_layout_event = true;
       }
 

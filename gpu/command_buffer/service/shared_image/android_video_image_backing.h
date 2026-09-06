@@ -13,15 +13,11 @@
 #include "gpu/gpu_gles2_export.h"
 #include "gpu/vulkan/vulkan_ycbcr_info.h"
 
-namespace viz {
-class VulkanContextProvider;
-}  // namespace viz
-
 namespace gpu {
 class DawnContextProvider;
+class VulkanContextProvider;
 struct Mailbox;
 struct VulkanYCbCrInfo;
-class AbstractTextureAndroid;
 class RefCountedLock;
 class StreamTextureSharedImageInterface;
 class SharedContextState;
@@ -33,11 +29,7 @@ class GPU_GLES2_EXPORT AndroidVideoImageBacking : public AndroidImageBacking {
  public:
   static std::unique_ptr<AndroidVideoImageBacking> Create(
       const Mailbox& mailbox,
-      const gfx::Size& size,
-      const gfx::ColorSpace color_space,
-      GrSurfaceOrigin surface_origin,
-      SkAlphaType alpha_type,
-      std::string debug_label,
+      const SharedImageInfo& si_info,
       scoped_refptr<StreamTextureSharedImageInterface> stream_texture_sii,
       scoped_refptr<SharedContextState> context_state,
       scoped_refptr<RefCountedLock> drdc_lock);
@@ -46,7 +38,7 @@ class GPU_GLES2_EXPORT AndroidVideoImageBacking : public AndroidImageBacking {
   // nullopt for other contexts.
   static std::optional<VulkanYCbCrInfo> GetYcbcrInfo(
       TextureOwner* texture_owner,
-      viz::VulkanContextProvider* vulkan_context_provider,
+      VulkanContextProvider* vulkan_context_provider,
       DawnContextProvider* dawn_context_provider);
 
   ~AndroidVideoImageBacking() override;
@@ -64,15 +56,8 @@ class GPU_GLES2_EXPORT AndroidVideoImageBacking : public AndroidImageBacking {
 
  protected:
   AndroidVideoImageBacking(const Mailbox& mailbox,
-                           const gfx::Size& size,
-                           const gfx::ColorSpace color_space,
-                           GrSurfaceOrigin surface_origin,
-                           SkAlphaType alpha_type,
-                           std::string debug_label,
+                           const SharedImageInfo& si_info,
                            bool is_thread_safe);
-
-  std::unique_ptr<AbstractTextureAndroid> GenAbstractTexture(
-      const bool passthrough);
 };
 
 }  // namespace gpu

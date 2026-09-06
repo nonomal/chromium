@@ -43,6 +43,18 @@ suite('CrUrlListItemTest', () => {
     assertTrue(folderIcon.hasAttribute('hidden'));
   });
 
+  test('UsesCustomIconSlotContent', async () => {
+    // Slot a custom icon.
+    const customIcon = document.createElement('div');
+    customIcon.slot = 'customIcon';
+    customIcon.id = 'customIcon';
+    element.appendChild(customIcon);
+    await microtasksFinished();
+    const slottedElement = element.$.customIcon.assignedElements()[0];
+    assertTrue(!!slottedElement);
+    assertEquals('customIcon', slottedElement.id);
+  });
+
   test('TruncatesAndDisplaysCount', async () => {
     const count = element.shadowRoot.querySelector('.count')!;
     element.count = 11;
@@ -51,6 +63,17 @@ suite('CrUrlListItemTest', () => {
     element.count = 2983;
     await element.updateComplete;
     assertEquals('99+', count.textContent);
+  });
+
+  test('DescriptionWithBdi', async () => {
+    element.description = '1.google.com';
+    await element.updateComplete;
+    const descriptionText =
+        element.shadowRoot.querySelector('.description-text')!;
+    assertTrue(!!descriptionText);
+    const bdi = descriptionText.querySelector('bdi')!;
+    assertEquals(
+        'ltr', (bdi.computedStyleMap().get('direction') as CSSUnitValue).value);
   });
 
   test('SetsActiveClass', () => {
@@ -196,16 +219,30 @@ suite('CrUrlListItemTest', () => {
     element.title = 'My title';
     element.description = 'My description';
     await element.updateComplete;
-    assertEquals('My title', element.$.anchor.ariaLabel);
-    assertEquals('My description', element.$.anchor.ariaDescription);
+    assertEquals(null, element.$.anchor.ariaLabel);
+    assertEquals(null, element.$.anchor.ariaDescription);
     assertEquals('My title', element.$.button.ariaLabel);
     assertEquals('My description', element.$.button.ariaDescription);
+
+    element.asAnchor = true;
+    await element.updateComplete;
+    assertEquals('My title', element.$.anchor.ariaLabel);
+    assertEquals('My description', element.$.anchor.ariaDescription);
+    assertEquals(null, element.$.button.ariaLabel);
+    assertEquals(null, element.$.button.ariaDescription);
 
     element.itemAriaLabel = 'My aria label';
     element.itemAriaDescription = 'My aria description';
     await element.updateComplete;
     assertEquals('My aria label', element.$.anchor.ariaLabel);
     assertEquals('My aria description', element.$.anchor.ariaDescription);
+    assertEquals(null, element.$.button.ariaLabel);
+    assertEquals(null, element.$.button.ariaDescription);
+
+    element.asAnchor = false;
+    await element.updateComplete;
+    assertEquals(null, element.$.anchor.ariaLabel);
+    assertEquals(null, element.$.anchor.ariaDescription);
     assertEquals('My aria label', element.$.button.ariaLabel);
     assertEquals('My aria description', element.$.button.ariaDescription);
   });

@@ -6,29 +6,27 @@
 import argparse
 import os
 import sys
+
 """
 Helper script for running jscodeshift codemods over a set of files.
 """
 
 _HERE_PATH = os.path.dirname(__file__)
 _SRC_PATH = os.path.normpath(
-    os.path.join(_HERE_PATH, '..', '..', '..', '..', '..'))
+  os.path.join(_HERE_PATH, '..', '..', '..', '..', '..')
+)
 
 sys.path.append(os.path.join(_SRC_PATH, 'third_party', 'node'))
 import node
+
 """
  Instructions to run this script locally.
- 1) Create a package.json file in the same folder with the following contents.
+ 1) From the root of the repository run the following command
 
-{
-  "dependencies": {
-    "jscodeshift": "17.3.0"
-  }
-}
+    npm install --prefix ui/webui/resources/tools/codemods/ --no-bin-links \
+        --no-fund --ignore-scripts --omit=dev --omit=optional
 
- 2) Run 'npm install' in the same folder.
-
- 3) Invoke the script from the root directory of the repository. For example
+ 2) Invoke the script from the root directory of the repository. For example
 
     python3 ui/webui/resources/tools/codemods/jscodeshift.py \
         --transform ui/webui/resources/tools/codemods/my_transform.js
@@ -48,21 +46,25 @@ def main(argv):
 
   if not os.path.exists(args.transform):
     print(
-        f'Error: jscodeshift.py: Could not file transform file \'args.transform\'',
-        file=sys.stderr)
+      f'Error: jscodeshift.py: Could not file transform file \'args.transform\'',
+      file=sys.stderr,
+    )
     sys.exit(1)
 
   print(f'Migrating {len(args.files)} files...')
 
   # Update TS file.
-  node.RunNode([
+  node.RunNode(
+    [
       os.path.join(_HERE_PATH, 'node_modules/jscodeshift/bin/jscodeshift.js'),
       '--transform=' + args.transform,
       '--extensions=ts',
       '--parser=ts',
       '--no-babel',
       '--fail-on-error',
-  ] + args.files)
+    ]
+    + args.files
+  )
 
   print('DONE')
 

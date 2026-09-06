@@ -15,7 +15,7 @@
 #include "chrome/browser/ash/login/test/logged_in_user_mixin.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/webui/ash/edu_coexistence/edu_coexistence_state_tracker.h"
 #include "chrome/test/base/fake_gaia_mixin.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -77,12 +77,11 @@ class EduCoexistenceLoginHandlerBrowserTest
 
   void SimulateAccessTokenFetched(EduCoexistenceLoginHandler* handler,
                                   bool success = true) {
-    GoogleServiceAuthError::State state =
-        success ? GoogleServiceAuthError::NONE
-                : GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS;
-
     handler->OnOAuthAccessTokensFetched(
-        GoogleServiceAuthError(state),
+        success ? GoogleServiceAuthError::AuthErrorNone()
+                : GoogleServiceAuthError::FromInvalidGaiaCredentialsReason(
+                      GoogleServiceAuthError::InvalidGaiaCredentialsReason::
+                          UNKNOWN),
         signin::AccessTokenInfo("access_token",
                                 base::Time::Now() + base::Minutes(1), ""));
   }
@@ -122,7 +121,7 @@ IN_PROC_BROWSER_TEST_F(EduCoexistenceLoginHandlerBrowserTest,
 
   ExpectEduCoexistenceState(EduCoexistenceStateTracker::FlowResult::kLaunched);
 
-  base::Value::List list_args;
+  base::ListValue list_args;
   list_args.Append(kCallbackId);
   web_ui()->HandleReceivedMessage("initializeEduArgs", list_args);
   SimulateAccessTokenFetched(handler.get());
@@ -145,7 +144,7 @@ IN_PROC_BROWSER_TEST_F(EduCoexistenceLoginHandlerBrowserTest,
                        ErrorCallsFromWebUI) {
   std::unique_ptr<EduCoexistenceLoginHandler> handler = SetUpHandler();
 
-  base::Value::List call_args;
+  base::ListValue call_args;
   call_args.Append("error message 1");
   call_args.Append("error message 2");
   web_ui()->HandleReceivedMessage("error", call_args);
@@ -167,7 +166,7 @@ IN_PROC_BROWSER_TEST_F(EduCoexistenceLoginHandlerBrowserTest,
   // C++ handler.
   EXPECT_EQ(web_ui()->call_data().size(), 0u);
 
-  base::Value::List call_args;
+  base::ListValue call_args;
   call_args.Append("coexistence-data-init");
   web_ui()->HandleReceivedMessage("initializeEduArgs", call_args);
 
@@ -194,11 +193,11 @@ IN_PROC_BROWSER_TEST_F(EduCoexistenceLoginHandlerBrowserTest,
 
   SimulateAccessTokenFetched(handler.get());
 
-  base::Value::List call_args;
+  base::ListValue call_args;
   call_args.Append(FakeGaiaMixin::kFakeUserEmail);
   call_args.Append(kToSVersion);
 
-  base::Value::List list_args;
+  base::ListValue list_args;
   list_args.Append(kConsentLoggedCallback);
   list_args.Append(std::move(call_args));
 

@@ -18,6 +18,8 @@
 #include "chrome/browser/chromeos/reporting/metric_reporting_prefs.h"
 #include "chrome/browser/policy/dm_token_utils.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/ash/components/login/session/session_termination_manager.h"
 #include "chromeos/dbus/missive/missive_client_test_observer.h"
@@ -108,7 +110,7 @@ class WebsiteUsageTelemetrySamplerBrowserTest
     // Advance timer to simulate usage and close tab to prevent further usage
     // tracking.
     test::MockClock::Get().Advance(running_time);
-    browser->tab_strip_model()->CloseAllTabs();
+    browser->GetTabStripModel()->CloseAllTabs();
 
     // Advance timer to ensure app service reports tracked usage to the
     // website usage observer.
@@ -135,7 +137,7 @@ class WebsiteUsageTelemetrySamplerBrowserTest
   }
 
   void SetAllowlistedUrls(const std::vector<std::string>& allowlisted_urls) {
-    base::Value::List allowed_urls;
+    base::ListValue allowed_urls;
     for (const auto& url : allowlisted_urls) {
       allowed_urls.Append(url);
     }
@@ -145,7 +147,7 @@ class WebsiteUsageTelemetrySamplerBrowserTest
 
   void SetAllowlistedTelemetryTypes(
       const std::vector<std::string>& allowlisted_telemetry_types) {
-    base::Value::List allowed_telemetry_types;
+    base::ListValue allowed_telemetry_types;
     for (const auto& url : allowlisted_telemetry_types) {
       allowed_telemetry_types.Append(url);
     }

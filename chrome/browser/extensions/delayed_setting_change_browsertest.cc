@@ -7,7 +7,7 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -27,11 +27,11 @@ class DelayedSettingChangeTest
         "<html><body><div>Just a Chrome Extension</div></body></html>");
 
     extension_dir.WriteManifest(
-        base::Value::Dict()
+        base::DictValue()
             .Set("manifest_version", 3)
             .Set("name", "Test Managed Extension")
             .Set("version", "1")
-            .Set("host_permissions", base::Value::List().Append("file://*/*")));
+            .Set("host_permissions", base::ListValue().Append("file://*/*")));
 
     auto* extension = InstallExtensionWithSourceAndFlags(
         extension_dir.Pack(), 1, location,
@@ -65,7 +65,7 @@ class DelayedSettingChangeTest
             querySelector('extensions-manager').shadowRoot.
             querySelector('extensions-detail-view').shadowRoot.
             querySelector('%s').shadowRoot.
-            querySelector('cr-toggle').ariaPressed;
+            querySelector('cr-toggle').ariaChecked;
     })();)";
 
     return base::StringPrintf(kScriptTemplate, setting.data());

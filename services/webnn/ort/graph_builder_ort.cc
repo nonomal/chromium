@@ -160,10 +160,34 @@ constexpr base::cstring_view kAttrUpper = "upper";
 constexpr base::cstring_view kInserted = "Inserted";
 constexpr base::cstring_view kToEmulate = "ToEmulate";
 constexpr base::cstring_view kUnderscore = "_";
+constexpr std::string_view kNullCharacter("\0", 1);
 
+// Max length in bytes of a name coming from the caller. Backends copy the names
+// of the graph they are given into fixed-size buffers (the OpenVINO NPU plugin
+// uses a Level Zero `char[256]`, the DirectML execution provider a
+// `wchar_t[512]`), so bound the part we do not control to stay well clear of
+// them.
+constexpr size_t kMaxSanitizedNameLength = 200;
+
+std::string SanitizeName(std::string_view name) {
+  std::string sanitized_name(name);
+  base::ReplaceChars(sanitized_name, kNullCharacter, kUnderscore,
+                     &sanitized_name);
+
+  if (sanitized_name.size() > kMaxSanitizedNameLength) {
+    sanitized_name.resize(kMaxSanitizedNameLength);
+  }
+
+  return sanitized_name;
+}
+
+// Builds the ONNX name of an operand by prefixing the caller-supplied name with
+// the unique `id`.
 std::string GetOperandName(std::string_view name, OperandId id) {
-  return base::JoinString({name, base::NumberToString(id.value())},
-                          kUnderscore);
+  // ORT CreateValueInfo API rejects name starting with null character:
+  // https://github.com/microsoft/onnxruntime/blob/7b5a93ef5f71ca58a1b6e4ae81b250e767756c68/onnxruntime/core/session/model_editor_c_api.cc#L29
+  return base::JoinString(
+      {base::NumberToString(id.value()), SanitizeName(name)}, kUnderscore);
 }
 
 // Maps a DataType to a `ONNXTensorElementDataType`. Other `TensorTypeMap`
@@ -235,7 +259,7 @@ int64_t CalculateOutputPaddingSize(int64_t input_size,
                                    int64_t pad_end,
                                    int64_t output_size) {
   const auto output_padding =
-      base::MakeCheckedNum(output_size) - stride * (input_size - 1) -
+      base::CheckedNumeric(output_size) - stride * (input_size - 1) -
       ((filter_size - 1) * dilation + 1) + pad_begin + pad_end;
   // `output_padding` is validated by
   // `ValidateAndCalculateConvTranspose2dOutputSizes()`. Because Conv2d mojo
@@ -243,6 +267,29 @@ int64_t CalculateOutputPaddingSize(int64_t input_size,
   // re-compute it by using other attributes.
   CHECK(output_padding.IsValid());
   return output_padding.ValueOrDie();
+}
+
+// Calculate the ending padding needed for a pooling spatial dimension whose
+// WebNN output size was rounded up (roundingType: "ceil"). Emitting
+// `ceil_mode=1` without enlarging the ending padding may cause: the
+// ceil-rounded output size requires the last window to sample input positions
+// past the (padded) input bounds, i.e. the window overhangs the input tensor.
+// Instead we enlarge the ending padding so those overhanging positions become
+// explicit padding and the descriptor is self-consistent, then emit
+// `ceil_mode=0`. This mirrors CalculatePaddingEndForCeilRoundingType() in the
+// TFLite backend.
+int64_t CalculatePoolPaddingEndForCeilRounding(int64_t output_size,
+                                               int64_t stride,
+                                               int64_t filter_size,
+                                               int64_t dilation,
+                                               int64_t input_size,
+                                               int64_t padding_begin) {
+  const auto effective_filter_size =
+      (base::CheckedNumeric(filter_size) - 1) * dilation + 1;
+  const auto padding_end = (base::CheckedNumeric(output_size) - 1) * stride +
+                           effective_filter_size - input_size - padding_begin;
+  CHECK(padding_end.IsValid());
+  return std::max<int64_t>(padding_end.ValueOrDie(), 0);
 }
 
 void CheckReduceInputSupported(const DataTypeLimits& data_type_limits,
@@ -316,13 +363,13 @@ const std::vector<base::cstring_view> GetRecurrentNetworkActivations(
   for (const auto& activation : activations) {
     switch (activation) {
       case mojom::RecurrentNetworkActivation::kRelu:
-        activation_list.push_back("relu");
+        activation_list.push_back("Relu");
         break;
       case mojom::RecurrentNetworkActivation::kSigmoid:
-        activation_list.push_back("sigmoid");
+        activation_list.push_back("Sigmoid");
         break;
       case mojom::RecurrentNetworkActivation::kTanh:
-        activation_list.push_back("tanh");
+        activation_list.push_back("Tanh");
         break;
       default:
         NOTREACHED() << "Unsupported recurrent network activation function.";
@@ -367,7 +414,8 @@ GraphBuilderOrt::GraphBuilderOrt(
     ContextProperties context_properties,
     base::flat_map<OperandId, std::unique_ptr<WebNNConstantOperand>>
         constant_operands)
-    : graph_info_(graph_info),
+    : next_operand_id_(graph_info.operands.size()),
+      graph_info_(graph_info),
       constant_operands_(std::move(constant_operands)),
       context_properties_(std::move(context_properties)) {}
 
@@ -384,22 +432,18 @@ std::string GraphBuilderOrt::GetOperandNameById(OperandId operand_id) const {
 }
 
 std::string GraphBuilderOrt::GenerateNodeName(std::string_view label) {
-  return base::JoinString({label, base::NumberToString(next_operation_id_++)},
-                          kUnderscore);
+  return base::JoinString(
+      {base::NumberToString(next_operation_id_++), SanitizeName(label)},
+      kUnderscore);
 }
 
 std::string GraphBuilderOrt::GenerateEmulatedOpLabel(
     base::cstring_view op_type,
     std::string_view original_label,
     std::string_view additional_tag) {
-  if (additional_tag.empty()) {
-    return base::JoinString({kInserted, op_type, kToEmulate, original_label},
-                            kUnderscore);
-  } else {
-    return base::JoinString(
-        {kInserted, op_type, additional_tag, kToEmulate, original_label},
-        kUnderscore);
-  }
+  return base::JoinString({kInserted, op_type, additional_tag, kToEmulate,
+                           SanitizeName(original_label)},
+                          kUnderscore);
 }
 
 std::string GraphBuilderOrt::GenerateOperandName() {
@@ -755,6 +799,18 @@ std::string GraphBuilderOrt::CreateTransposeNode(
   return output;
 }
 
+void GraphBuilderOrt::EmulateWithIdentityNode(base::cstring_view label,
+                                              base::cstring_view input,
+                                              base::cstring_view output) {
+  const std::string node_name = GenerateNodeName(base::JoinString(
+      {kInserted, kOpTypeIdentity, kToEmulate, label}, kUnderscore));
+
+  std::array<const char*, 1> inputs = {input.c_str()};
+  std::array<const char*, 1> outputs = {output.c_str()};
+
+  model_editor_.AddNode(kOpTypeIdentity, node_name, inputs, outputs);
+}
+
 std::string GraphBuilderOrt::ClampIndices(base::cstring_view indices,
                                           OperandDataType data_type,
                                           uint32_t dim_size) {
@@ -902,13 +958,12 @@ void GraphBuilderOrt::AddArgMinMaxOperation(
 void GraphBuilderOrt::AddBatchNormalizationOperation(
     const mojom::BatchNormalization& batch_normalization) {
   const std::string node_name = GenerateNodeName(batch_normalization.label);
-  const std::string input =
-      GetOperandNameById(batch_normalization.input_operand_id);
+  std::string input = GetOperandNameById(batch_normalization.input_operand_id);
   const std::string mean =
       GetOperandNameById(batch_normalization.mean_operand_id);
   const std::string variance =
       GetOperandNameById(batch_normalization.variance_operand_id);
-  const std::string output =
+  std::string output =
       GetOperandNameById(batch_normalization.output_operand_id);
 
   const DataTypeLimits& data_type_limits = context_properties_.data_type_limits;
@@ -929,10 +984,24 @@ void GraphBuilderOrt::AddBatchNormalizationOperation(
   // addition it also accepts single dimension input of size N in which case C
   // is assumed to be 1.
   // https://onnx.ai/onnx/operators/onnx__BatchNormalization.html#inputs
+  //
+  // WebNN BatchNormalization supports 1D input of shape [C], but ONNX requires
+  // at least 2D input. To handle this, we reshape [C] to [1, C] before passing
+  // to ONNX, then reshape the output back to [C].
+  bool needs_reshape_for_1d = input_shape.size() == 1;
   uint32_t input_channels = 1;
-  if (input_shape.size() > 1) {
+
+  if (needs_reshape_for_1d) {
+    // Reshape 1D [C] -> 2D [1, C] for ONNX BatchNorm.
+
+    input_channels = input_shape[0];
+    input =
+        CreateReshapeNode(input, {1, static_cast<uint32_t>(input_channels)});
+  } else if (input_shape.size() > 1) {
+    // For multi-dimensional inputs, channel is at index 1 (NCHW layout).
     input_channels = input_shape[1];
   }
+
   std::vector<uint32_t> scale_and_bias_shape = {input_channels};
 
   // ONNX BatchNormalization requires 5 inputs: input, scale, bias, mean and
@@ -954,14 +1023,26 @@ void GraphBuilderOrt::AddBatchNormalizationOperation(
     bias = CreateZeroInitializer(input_data_type, scale_and_bias_shape);
   }
 
+  // If we reshaped input from 1D to 2D, we need to reshape output back to 1D.
+  std::string batchnorm_output = output;
+  if (needs_reshape_for_1d) {
+    batchnorm_output = GenerateOperandName();
+  }
+
   std::array<const char*, 5> inputs = {input.c_str(), scale.c_str(),
                                        bias.c_str(), mean.c_str(),
                                        variance.c_str()};
-  std::array<const char*, 1> outputs = {output.c_str()};
+  std::array<const char*, 1> outputs = {batchnorm_output.c_str()};
   std::array<ScopedOrtOpAttr, 1> attributes = {
       model_editor_.CreateAttribute(kAttrEpsilon, batch_normalization.epsilon)};
   model_editor_.AddNode(kOpTypeBatchNormalization, node_name, inputs, outputs,
                         attributes);
+
+  // Reshape output back from 2D [1, C] -> 1D [C] for 1D inputs.
+  if (needs_reshape_for_1d) {
+    InsertReshapeNode(batchnorm_output, output,
+                      {static_cast<uint32_t>(input_channels)});
+  }
 }
 
 void GraphBuilderOrt::AddCastOperation(const mojom::ElementWiseUnary& cast) {
@@ -1242,15 +1323,27 @@ void GraphBuilderOrt::AddLogicalBinaryOperation(
       logical_binary.kind == mojom::ElementWiseBinary::Kind::kLogicalXor) {
     CHECK_EQ(GetOperand(logical_binary.lhs_operand_id).descriptor.data_type(),
              OperandDataType::kUint8);
-    lhs = CreateCastNode(lhs, ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL);
+    auto lhs_it = operand_to_bool_name_.find(logical_binary.lhs_operand_id);
+    if (lhs_it != operand_to_bool_name_.end()) {
+      lhs = lhs_it->second;
+    } else {
+      lhs = CreateCastNode(lhs, ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL);
+    }
 
     CHECK_EQ(GetOperand(logical_binary.rhs_operand_id).descriptor.data_type(),
              OperandDataType::kUint8);
-    rhs = CreateCastNode(rhs, ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL);
+    auto rhs_it = operand_to_bool_name_.find(logical_binary.rhs_operand_id);
+    if (rhs_it != operand_to_bool_name_.end()) {
+      rhs = rhs_it->second;
+    } else {
+      rhs = CreateCastNode(rhs, ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL);
+    }
   }
   std::array<const char*, 2> inputs = {lhs.c_str(), rhs.c_str()};
 
   const std::string bool_output = GenerateOperandName();
+  operand_to_bool_name_[logical_binary.output_operand_id] = bool_output;
+
   std::array<const char*, 1> outputs = {bool_output.c_str()};
   model_editor_.AddNode(op_type, node_name, inputs, outputs);
 
@@ -1276,10 +1369,16 @@ void GraphBuilderOrt::AddLogicalUnaryOperation(
   if (op_type == kOpTypeLogicalNot) {
     CHECK_EQ(GetOperand(logical_unary.input_operand_id).descriptor.data_type(),
              OperandDataType::kUint8);
-    input = CreateCastNode(input, ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL);
+    auto input_it = operand_to_bool_name_.find(logical_unary.input_operand_id);
+    if (input_it != operand_to_bool_name_.end()) {
+      input = input_it->second;
+    } else {
+      input = CreateCastNode(input, ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL);
+    }
   }
 
   const std::string bool_output = GenerateOperandName();
+  operand_to_bool_name_[logical_unary.output_operand_id] = bool_output;
 
   std::array<const char*, 1> inputs = {input.c_str()};
   std::array<const char*, 1> outputs = {bool_output.c_str()};
@@ -1326,6 +1425,7 @@ void GraphBuilderOrt::AddLogicalNotEqualOperation(
       GetOperand(output_operand_id).descriptor.data_type();
   std::string output = GetOperandNameById(output_operand_id);
   CHECK_EQ(output_data_type, OperandDataType::kUint8);
+  operand_to_bool_name_[not_equal.output_operand_id] = not_output;
   InsertCastNode(not_output, output, WebnnToOnnxDataType(output_data_type));
 }
 
@@ -1532,13 +1632,27 @@ void GraphBuilderOrt::AddClampOperation(const mojom::Clamp& clamp) {
 }
 
 void GraphBuilderOrt::AddExpandOperation(const mojom::Expand& expand) {
-  const std::string node_name = GenerateNodeName(expand.label);
   const std::string input = GetOperandNameById(expand.input_operand_id);
   const std::string output = GetOperandNameById(expand.output_operand_id);
 
+  const OperandDescriptor& input_descriptor =
+      GetOperand(expand.input_operand_id).descriptor;
   CHECK(context_properties_.data_type_limits.expand_input.Supports(
-      GetOperand(expand.input_operand_id).descriptor));
+      input_descriptor));
 
+  const OperandDescriptor& output_descriptor =
+      GetOperand(expand.output_operand_id).descriptor;
+
+  // Workaround: expanding a scalar to another scalar is supposed to be a no-op,
+  // here we map it to an Identity node to avoid the mishandling of some ORT
+  // EPs.
+  // TODO(crbug.com/500385615): Remove the workaround when the issue is fixed.
+  if (input_descriptor.Rank() == 0 && output_descriptor.Rank() == 0) {
+    EmulateWithIdentityNode(expand.label, input, output);
+    return;
+  }
+
+  const std::string node_name = GenerateNodeName(expand.label);
   const std::vector<uint32_t>& output_shape =
       GetOperand(expand.output_operand_id).descriptor.shape();
 
@@ -2534,9 +2648,7 @@ void GraphBuilderOrt::AddPool2dOperation(const mojom::Pool2d& pool2d) {
       base::checked_cast<int64_t>(pool2d.padding->beginning->width),
       base::checked_cast<int64_t>(pool2d.padding->ending->height),
       base::checked_cast<int64_t>(pool2d.padding->ending->width)};
-  attributes.push_back(model_editor_.CreateAttribute(kAttrPads, pads));
 
-  // Calculate the ceil_mode.
   const OperandDescriptor& input_descriptor =
       GetOperand(pool2d.input_operand_id).descriptor;
   const std::vector<uint32_t>& input_shape = input_descriptor.shape();
@@ -2545,15 +2657,40 @@ void GraphBuilderOrt::AddPool2dOperation(const mojom::Pool2d& pool2d) {
 
   CHECK_EQ(context_properties_.input_operand_layout, InputOperandLayout::kNchw);
   uint32_t input_height = input_shape[2];
+  uint32_t input_width = input_shape[3];
   uint32_t output_height = output_shape[2];
+  uint32_t output_width = output_shape[3];
   const auto float_output_height = CalculateConv2dOutputSize(
       input_height, pool2d.window_dimensions->height,
       pool2d.padding->beginning->height, pool2d.padding->ending->height,
       pool2d.strides->height, pool2d.dilations->height, pool2d.label);
   CHECK(float_output_height.has_value());
+  const auto float_output_width = CalculateConv2dOutputSize(
+      input_width, pool2d.window_dimensions->width,
+      pool2d.padding->beginning->width, pool2d.padding->ending->width,
+      pool2d.strides->width, pool2d.dilations->width, pool2d.label);
+  CHECK(float_output_width.has_value());
 
-  int64_t ceil_mode = float_output_height.value() < output_height ? 1 : 0;
-  attributes.push_back(model_editor_.CreateAttribute(kAttrCeilMode, ceil_mode));
+  // When a spatial dimension's WebNN output size was rounded up (ceil), enlarge
+  // the ending padding so the emitted descriptor stays self-consistent, then
+  // emit ceil_mode=0. See CalculatePoolPaddingEndForCeilRounding() for why we
+  // do not rely on ONNX's ceil_mode.
+  if (float_output_height.value() < output_height) {
+    pads[2] =
+        std::max(pads[2], CalculatePoolPaddingEndForCeilRounding(
+                              output_height, pool2d.strides->height,
+                              pool2d.window_dimensions->height,
+                              pool2d.dilations->height, input_height, pads[0]));
+  }
+  if (float_output_width.value() < output_width) {
+    pads[3] =
+        std::max(pads[3], CalculatePoolPaddingEndForCeilRounding(
+                              output_width, pool2d.strides->width,
+                              pool2d.window_dimensions->width,
+                              pool2d.dilations->width, input_width, pads[1]));
+  }
+  attributes.push_back(model_editor_.CreateAttribute(kAttrPads, pads));
+  attributes.push_back(model_editor_.CreateAttribute(kAttrCeilMode, 0));
 
   const DataTypeLimits& data_type_limits = context_properties_.data_type_limits;
   base::cstring_view op_type;
@@ -2671,21 +2808,15 @@ void GraphBuilderOrt::AddResample2dOperation(
   CHECK(context_properties_.data_type_limits.resample2d_input.Supports(
       input_descriptor));
 
-  std::string scales;
-  std::string sizes;
-  if (resample2d.scales) {
-    // Each element of scales applies to a dimension of the input.
-    CHECK_EQ(input_descriptor.Rank(), 4u);
-    std::array<float, 4> scales_data = {1.f, 1.f, 1.f, 1.f};
-    CHECK_EQ(resample2d.axes.size(), 2u);
-    CHECK_EQ(resample2d.scales->size(), 2u);
-    scales_data.at(resample2d.axes[0]) = resample2d.scales->at(0);
-    scales_data.at(resample2d.axes[1]) = resample2d.scales->at(1);
-    scales = Create1DInitializer<float>(scales_data);
-  } else {
-    sizes = CreateInt64InitializerForUint32Array(
-        GetOperand(resample2d.output_operand_id).descriptor.shape());
-  }
+  // Always emit `sizes` (never `scales`) so the backend uses exactly the
+  // double-precision output shape WebNN already validated in
+  // graph_validation_utils.cc:CalculateResample2dOutputSize(). Emitting
+  // `scales` instead lets the backend recompute the output dim in float32,
+  // which diverges from WebNN's dim for input dims > 2^24 and desynchronizes
+  // the clamp bounds baked into downstream indexing ops (Gather family) from
+  // the tensor the backend actually allocates.
+  const std::string sizes = CreateInt64InitializerForUint32Array(
+      GetOperand(resample2d.output_operand_id).descriptor.shape());
 
   std::string mode;
   switch (resample2d.mode) {
@@ -2697,7 +2828,7 @@ void GraphBuilderOrt::AddResample2dOperation(
       break;
   }
 
-  AddResizeNode(node_name, input, scales, sizes, mode, output);
+  AddResizeNode(node_name, input, /*scales=*/"", sizes, mode, output);
 }
 
 void GraphBuilderOrt::AddReshapeOperation(const mojom::Reshape& reshape) {
@@ -2715,12 +2846,22 @@ void GraphBuilderOrt::AddReshapeOperation(const mojom::Reshape& reshape) {
 }
 
 void GraphBuilderOrt::AddReverseOperation(const mojom::Reverse& reverse) {
-  const std::string node_name = GenerateNodeName(reverse.label);
   const std::string input = GetOperandNameById(reverse.input_operand_id);
   const std::string output = GetOperandNameById(reverse.output_operand_id);
 
   CHECK(context_properties_.data_type_limits.reverse_input.Supports(
       GetOperand(reverse.input_operand_id).descriptor));
+
+  // Workaround: explicitly empty axes for a reverse operation should result in
+  // a no-op per spec. But we map this to an Identity node to prevent ORT
+  // EPs from mishandling empty arrays.
+  // TODO(crbug.com/500385615): Remove the workaround when the issue is fixed.
+  if (reverse.axes.empty()) {
+    EmulateWithIdentityNode(reverse.label, input, output);
+    return;
+  }
+
+  const std::string node_name = GenerateNodeName(reverse.label);
 
   // Axes can be empty, which means no dimensions are reversed.
   base::FixedArray<int64_t> axes(reverse.axes.begin(), reverse.axes.end());
@@ -2980,24 +3121,20 @@ void GraphBuilderOrt::AddTileOperation(const mojom::Tile& tile) {
   CHECK(context_properties_.data_type_limits.tile_input.Supports(
       input_descriptor));
 
-  std::vector<const char*> inputs = {input.c_str()};
-  std::array<const char*, 1> outputs = {output.c_str()};
-
-  // Emulate the tile operation with identity operation for unsupported scalar
-  // input.
-  // TODO(crbug.com/433414906): Remove the workaround for unsupported scalar
-  // input when the ORT tile operation issue is fixed.
-  // https://github.com/microsoft/onnxruntime/issues/11523
+  // Workaround: emulate the tile operation with identity operation for
+  // unsupported scalar input.
+  // TODO(crbug.com/500385615): Remove the workaround when the issue is fixed.
   if (input_descriptor.Rank() == 0) {
-    const std::string node_name = GenerateNodeName(base::JoinString(
-        {kInserted, kOpTypeIdentity, kToEmulate, tile.label}, kUnderscore));
-    model_editor_.AddNode(kOpTypeIdentity, node_name, inputs, outputs);
+    EmulateWithIdentityNode(tile.label, input, output);
     return;
   }
 
   const std::string repeats =
       CreateInt64InitializerForUint32Array(tile.repetitions);
-  inputs.push_back(repeats.c_str());
+
+  std::array<const char*, 2> inputs = {input.c_str(), repeats.c_str()};
+  std::array<const char*, 1> outputs = {output.c_str()};
+
   const std::string node_name = GenerateNodeName(tile.label);
   model_editor_.AddNode(kOpTypeTile, node_name, inputs, outputs);
 }
@@ -3057,7 +3194,12 @@ void GraphBuilderOrt::AddWhereOperation(const mojom::Where& where) {
 
   // ONNX where operation only supports bool condition input.
   CHECK_EQ(condition_descriptor.data_type(), OperandDataType::kUint8);
-  condition = CreateCastNode(condition, ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL);
+  auto condition_it = operand_to_bool_name_.find(where.condition_operand_id);
+  if (condition_it != operand_to_bool_name_.end()) {
+    condition = condition_it->second;
+  } else {
+    condition = CreateCastNode(condition, ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL);
+  }
 
   std::array<const char*, 3> inputs = {condition.c_str(), true_value.c_str(),
                                        false_value.c_str()};

@@ -21,6 +21,7 @@
 #include "components/password_manager/core/browser/password_form_cache_impl.h"
 #include "components/password_manager/core/browser/password_form_manager.h"
 #include "components/password_manager/core/browser/password_save_manager_impl.h"
+#include "components/password_manager/core/browser/password_string.h"
 #include "components/password_manager/core/browser/stub_form_saver.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
 #include "components/password_manager/core/browser/stub_password_manager_driver.h"
@@ -298,7 +299,6 @@ TEST_F(UndoPasswordChangeControllerTest, FullFlowMultipleCredentials) {
 }
 
 TEST_F(UndoPasswordChangeControllerTest, OnLoginPotentiallyFailedFlagOn) {
-  base::test::ScopedFeatureList feature_list(features::kShowRecoveryPassword);
   best_match_form_.SetPasswordBackupNote(kBackupPassword);
   auto form_manager = CreateFormManager(best_match_form_);
   base::RunLoop run_loop;
@@ -315,26 +315,8 @@ TEST_F(UndoPasswordChangeControllerTest, OnLoginPotentiallyFailedFlagOn) {
             PasswordRecoveryState::kShowProactiveRecovery);
 }
 
-TEST_F(UndoPasswordChangeControllerTest, OnLoginPotentiallyFailedFlagOff) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(features::kShowRecoveryPassword);
-  best_match_form_.SetPasswordBackupNote(kBackupPassword);
-  auto form_manager = CreateFormManager(best_match_form_);
-
-  controller_.OnLoginPotentiallyFailed(&driver_, failed_login_form_);
-  EXPECT_CALL(driver_, TriggerPasswordRecoverySuggestions(
-                           failed_login_form_.password_element_renderer_id))
-      .Times(0);
-  static_cast<PasswordFormManagerObserver*>(&controller_)
-      ->OnPasswordFormParsed(form_manager.get());
-
-  EXPECT_EQ(controller_.GetState(kUsername),
-            PasswordRecoveryState::kRegularFlow);
-}
-
 TEST_F(UndoPasswordChangeControllerTest,
        OnLoginPotentiallyFailed_UnfocusablePassword) {
-  base::test::ScopedFeatureList feature_list(features::kShowRecoveryPassword);
   best_match_form_.SetPasswordBackupNote(kBackupPassword);
   auto form_manager = CreateFormManager(best_match_form_);
   test_api(failed_login_form_.form_data)
@@ -348,7 +330,6 @@ TEST_F(UndoPasswordChangeControllerTest,
 
 TEST_F(UndoPasswordChangeControllerTest,
        OnLoginPotentiallyFailedNoBackupIgnored) {
-  base::test::ScopedFeatureList feature_list(features::kShowRecoveryPassword);
   auto form_manager = CreateFormManager(best_match_form_);
 
   controller_.OnLoginPotentiallyFailed(&driver_, failed_login_form_);
@@ -364,8 +345,8 @@ TEST_F(UndoPasswordChangeControllerTest,
 
 TEST_F(UndoPasswordChangeControllerTest,
        OnLoginPotentiallyFailed_BackupUsed_Ignored) {
-  base::test::ScopedFeatureList feature_list(features::kShowRecoveryPassword);
-  failed_login_form_.password_value = kBackupPassword;
+  failed_login_form_.password_value =
+      PasswordString(std::u16string(kBackupPassword));
   best_match_form_.SetPasswordBackupNote(kBackupPassword);
   auto form_manager = CreateFormManager(best_match_form_);
 
@@ -382,7 +363,6 @@ TEST_F(UndoPasswordChangeControllerTest,
 
 TEST_F(UndoPasswordChangeControllerTest,
        FindLoginWithProactiveRecoveryStateMatch) {
-  base::test::ScopedFeatureList feature_list(features::kShowRecoveryPassword);
   best_match_form_.SetPasswordBackupNote(kBackupPassword);
   auto form_manager = CreateFormManager(best_match_form_);
   const autofill::PasswordAndMetadata match = GetPasswordAndMetadata();
@@ -405,8 +385,27 @@ TEST_F(UndoPasswordChangeControllerTest,
 }
 
 TEST_F(UndoPasswordChangeControllerTest,
+       OnLoginPotentiallyFailed_GroupedAffiliation_RecoveryTriggered) {
+  best_match_form_.SetPasswordBackupNote(kBackupPassword);
+  best_match_form_.match_type =
+      password_manager::PasswordForm::MatchType::kGrouped;
+  auto form_manager = CreateFormManager(best_match_form_);
+  base::RunLoop run_loop;
+
+  controller_.OnLoginPotentiallyFailed(&driver_, failed_login_form_);
+  EXPECT_CALL(driver_, TriggerPasswordRecoverySuggestions(
+                           failed_login_form_.password_element_renderer_id))
+      .WillOnce(RunOnceClosure(run_loop.QuitClosure()));
+  static_cast<PasswordFormManagerObserver*>(&controller_)
+      ->OnPasswordFormParsed(form_manager.get());
+  run_loop.Run();
+
+  EXPECT_EQ(controller_.GetState(kUsername),
+            PasswordRecoveryState::kShowProactiveRecovery);
+}
+
+TEST_F(UndoPasswordChangeControllerTest,
        FindLoginWithProactiveRecoveryStateNoMatch) {
-  base::test::ScopedFeatureList feature_list(features::kShowRecoveryPassword);
   best_match_form_.SetPasswordBackupNote(kBackupPassword);
   auto form_manager = CreateFormManager(best_match_form_);
   autofill::PasswordFormFillData fill_data;
@@ -427,7 +426,6 @@ TEST_F(UndoPasswordChangeControllerTest,
 }
 
 TEST_F(UndoPasswordChangeControllerTest, OnSuggestionsHidden) {
-  base::test::ScopedFeatureList feature_list(features::kShowRecoveryPassword);
   best_match_form_.SetPasswordBackupNote(kBackupPassword);
   auto form_manager = CreateFormManager(best_match_form_);
   base::RunLoop run_loop;

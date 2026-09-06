@@ -4,7 +4,9 @@
 
 #include "ui/ozone/platform/x11/x11_window_manager.h"
 
-#include "base/containers/contains.h"
+#include <algorithm>
+
+#include "ui/base/x/x11_pointer_grab.h"
 #include "ui/ozone/platform/x11/x11_window.h"
 
 namespace ui {
@@ -67,7 +69,7 @@ void X11WindowManager::AddWindow(X11Window* window) {
   DCHECK(window);
   auto widget = window->GetWidget();
   DCHECK_NE(gfx::kNullAcceleratedWidget, widget);
-  DCHECK(!base::Contains(windows_, widget));
+  DCHECK(!windows_.contains(widget));
   windows_.emplace(widget, window);
 }
 
@@ -89,6 +91,18 @@ void X11WindowManager::RemoveWindow(X11Window* window) {
 X11Window* X11WindowManager::GetWindow(gfx::AcceleratedWidget widget) const {
   auto it = windows_.find(widget);
   return it != windows_.end() ? it->second : nullptr;
+}
+
+bool X11WindowManager::IsTrackingPointer() const {
+  return ui::HasActivePointerGrab() ||
+         std::ranges::any_of(windows_, [](const auto& pair) {
+           return pair.second->has_pointer();
+         });
+}
+
+bool X11WindowManager::HasWindowPendingMap() const {
+  return std::ranges::any_of(
+      windows_, [](const auto& pair) { return pair.second->IsMapPending(); });
 }
 
 void X11WindowManager::MouseOnWindow(X11Window* window) {

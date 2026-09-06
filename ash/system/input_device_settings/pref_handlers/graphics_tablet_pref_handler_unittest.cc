@@ -6,7 +6,6 @@
 
 #include "ash/constants/ash_features.h"
 #include "ash/public/cpp/accelerator_actions.h"
-#include "ash/public/mojom/input_device_settings.mojom-shared.h"
 #include "ash/public/mojom/input_device_settings.mojom.h"
 #include "ash/system/input_device_settings/input_device_settings_pref_names.h"
 #include "ash/system/input_device_settings/input_device_settings_utils.h"
@@ -54,8 +53,6 @@ class GraphicsTabletPrefHandlerTest : public AshTestBase {
 
   // testing::Test:
   void SetUp() override {
-    scoped_feature_list_.InitWithFeatures({features::kPeripheralCustomization},
-                                          {});
     AshTestBase::SetUp();
     InitializePrefService();
     pref_handler_ = std::make_unique<GraphicsTabletPrefHandlerImpl>();
@@ -412,13 +409,13 @@ TEST_F(GraphicsTabletPrefHandlerTest, InitializeSettings) {
   tablet_button_remappings.push_back(button_remapping1.Clone());
   tablet_button_remappings.push_back(button_remapping2.Clone());
   pen_button_remappings.push_back(button_remapping1.Clone());
-  base::Value::Dict updated_graphics_tablet1_tablet_button_remappings_dict;
+  base::DictValue updated_graphics_tablet1_tablet_button_remappings_dict;
   updated_graphics_tablet1_tablet_button_remappings_dict.Set(
       kGraphicsTabletKey1,
       ConvertButtonRemappingArrayToList(
           tablet_button_remappings,
           mojom::CustomizationRestriction::kAllowCustomizations));
-  base::Value::Dict updated_graphics_tablet1_pen_button_remappings_dict;
+  base::DictValue updated_graphics_tablet1_pen_button_remappings_dict;
   updated_graphics_tablet1_pen_button_remappings_dict.Set(
       kGraphicsTabletKey1,
       ConvertButtonRemappingArrayToList(

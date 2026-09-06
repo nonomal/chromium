@@ -33,6 +33,7 @@ class CookieSpecifics;
 class CrossUserSharingPublicKey;
 class DebugEventInfo;
 class DebugInfo;
+class DesktopToMobilePromoMessage;
 class DeviceDetails;
 class DeviceInfoSpecifics;
 class DictionarySpecifics;
@@ -42,6 +43,7 @@ class EntitySpecifics;
 class EwalletDetails;
 class ExtensionSettingSpecifics;
 class ExtensionSpecifics;
+class GeminiThreadSpecifics;
 class HistoryDeleteDirectiveSpecifics;
 class HistorySpecifics;
 class IncomingPasswordSharingInvitationSpecifics;
@@ -56,8 +58,6 @@ class PasswordSpecifics;
 class PasswordSpecificsData;
 class PaymentInstrument;
 class PaymentsCustomerData;
-class PlusAddressSettingSpecifics;
-class PlusAddressSpecifics;
 class PowerBookmarkSpecifics;
 class PreferenceSpecifics;
 class PrinterPPDReference;
@@ -65,6 +65,7 @@ class PrinterSpecifics;
 class PrintersAuthorizationServerSpecifics;
 class PriorityPreferenceSpecifics;
 class ProductComparisonSpecifics;
+class PushNotificationMessage;
 class ReadingListSpecifics;
 class SavedTabGroupSpecifics;
 class SearchEngineSpecifics;
@@ -79,6 +80,8 @@ class SharingMessageSpecifics;
 class SyncCycleCompletedEventInfo;
 class SyncEntity;
 class TabNavigation;
+class ThemeAndroidSpecifics;
+class ThemeIosSpecifics;
 class ThemeSpecifics;
 class TimeRangeDirective;
 class TypedUrlSpecifics;
@@ -162,6 +165,10 @@ base::Value DebugEventInfoToValue(const sync_pb::DebugEventInfo& proto);
 
 base::Value DebugInfoToValue(const sync_pb::DebugInfo& proto);
 
+base::Value DesktopToMobilePromoMessageToValue(
+    const sync_pb::DesktopToMobilePromoMessage&
+        desktop_to_mobile_promo_message);
+
 base::Value DeviceDetailsToValue(const sync_pb::DeviceDetails& device_details);
 
 base::Value DeviceInfoSpecificsToValue(
@@ -184,6 +191,9 @@ base::Value ExtensionSettingSpecificsToValue(
 
 base::Value ExtensionSpecificsToValue(
     const sync_pb::ExtensionSpecifics& extension_specifics);
+
+base::Value GeminiThreadSpecificsToValue(
+    const sync_pb::GeminiThreadSpecifics& gemini_specifics);
 
 base::Value HistoryDeleteDirectiveSpecificsToValue(
     const sync_pb::HistoryDeleteDirectiveSpecifics&
@@ -228,12 +238,6 @@ base::Value PaymentInstrumentToValue(
 base::Value PaymentsCustomerDataToValue(
     const sync_pb::PaymentsCustomerData& payments_customer_data);
 
-base::Value PlusAddressSettingSpecificsToValue(
-    const sync_pb::PlusAddressSettingSpecifics& plus_address_setting_specifics);
-
-base::Value PlusAddressSpecificsToValue(
-    const sync_pb::PlusAddressSpecifics& plus_address_specifics);
-
 base::Value PowerBookmarkSpecificsToValue(
     const sync_pb::PowerBookmarkSpecifics& power_bookmark_specifics);
 
@@ -255,6 +259,9 @@ base::Value PriorityPreferenceSpecificsToValue(
 
 base::Value ProductComparisonSpecificsToValue(
     const sync_pb::ProductComparisonSpecifics& product_comparison_specifics);
+
+base::Value PushNotificationMessageToValue(
+    const sync_pb::PushNotificationMessage& push_notification_message);
 
 base::Value CrossUserSharingPublicKeyToValue(
     const sync_pb::CrossUserSharingPublicKey& proto);
@@ -293,6 +300,12 @@ base::Value SyncCycleCompletedEventInfoToValue(
     const sync_pb::SyncCycleCompletedEventInfo& proto);
 
 base::Value TabNavigationToValue(const sync_pb::TabNavigation& tab_navigation);
+
+base::Value ThemeAndroidSpecificsToValue(
+    const sync_pb::ThemeAndroidSpecifics& theme_android_specifics);
+
+base::Value ThemeIosSpecificsToValue(
+    const sync_pb::ThemeIosSpecifics& theme_ios_specifics);
 
 base::Value ThemeSpecificsToValue(
     const sync_pb::ThemeSpecifics& theme_specifics);

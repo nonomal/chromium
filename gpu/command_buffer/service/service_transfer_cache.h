@@ -30,7 +30,6 @@
 #include "third_party/skia/include/core/SkYUVAInfo.h"
 
 class GrDirectContext;
-class SkImage;
 
 namespace gpu {
 
@@ -75,25 +74,13 @@ class GPU_GLES2_EXPORT ServiceTransferCache
   cc::ServiceTransferCacheEntry* GetEntry(const EntryKey& key);
   void DeleteAllEntriesForDecoder(int decoder_id);
 
-  // Creates an image transfer cache entry using |plane_images| (refer to
-  // ServiceImageTransferCacheEntry::BuildFromHardwareDecodedImage() for
-  // details). |decoder_id| and |entry_id| are used for creating the
-  // ServiceTransferCache::EntryKey (assuming cc::TransferCacheEntryType:kImage
-  // for the type). Returns true if the entry could be created and inserted;
-  // false otherwise.
-  bool CreateLockedHardwareDecodedImageEntry(
-      int decoder_id,
-      uint32_t entry_id,
-      ServiceDiscardableHandle handle,
-      GrDirectContext* context,
-      std::vector<sk_sp<SkImage>> plane_images,
-      SkYUVAInfo::PlaneConfig plane_config,
-      SkYUVAInfo::Subsampling subsampling,
-      SkYUVColorSpace yuv_color_space,
-      size_t buffer_byte_size,
-      bool needs_mips);
-
-  void PurgeMemory(base::MemoryPressureLevel memory_pressure_level);
+  // Memory coordinator interface:
+  // Triggers immediate eviction of transfer cache entries down to
+  // `memory_limit`.
+  void OnReleaseMemory(int memory_limit);
+  // Updates the target cache size limit non-destructively without forcing
+  // immediate eviction.
+  void OnUpdateMemoryLimit(int memory_limit);
 
   // base::trace_event::MemoryDumpProvider implementation.
   bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
@@ -101,6 +88,7 @@ class GPU_GLES2_EXPORT ServiceTransferCache
 
   // Test-only functions:
   void SetCacheSizeLimitForTesting(size_t cache_size_limit) {
+    max_cache_size_limit_ = cache_size_limit;
     cache_size_limit_ = cache_size_limit;
     EnforceLimits();
   }
@@ -164,6 +152,11 @@ class GPU_GLES2_EXPORT ServiceTransferCache
   size_t total_image_size_ = 0;
   // Number of |entries_| of TransferCacheEntryType::kImage.
   int total_image_count_ = 0;
+
+  // The baseline limit above which the cache will start evicting resources.
+  // Constant during normal execution, modified only by
+  // SetCacheSizeLimitForTesting().
+  size_t max_cache_size_limit_;
 
   // The limit above which the cache will start evicting resources.
   size_t cache_size_limit_;

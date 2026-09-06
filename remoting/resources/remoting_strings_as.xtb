@@ -28,7 +28,6 @@
 <translation id="2329392777730037872">ক্লায়েণ্টৰ ডিভাইচটোত <ph name="URL" /> খুলিব পৰা নগ’ল।</translation>
 <translation id="2359808026110333948">অব্যাহত ৰাখক</translation>
 <translation id="2366718077645204424">হ‘ষ্টৰ সৈতে সংযোগ কৰিব পৰা নগ‘ল। এইটো সম্ভৱতঃ আপুনি ব্যৱহাৰ কৰি থকা নেটৱৰ্কটোৰ কনফিগাৰেশ্বনৰ কাৰণে হৈছে।</translation>
-<translation id="242591256144136845">Copyright 2025 Google LLC. সকলো চৰ্ত সংৰক্ষিত।</translation>
 <translation id="2504109125669302160"><ph name="PRODUCT_NAME" />ক সাধ্য সুবিধাসমূহৰ অনুমতি দিয়ক</translation>
 <translation id="2509394361235492552"><ph name="HOSTNAME" />ৰ সৈতে সংযোজিত</translation>
 <translation id="2540992418118313681">আপুনি এই কম্পিউটাৰটো আন ব্যৱহাৰকাৰীয়ে ব্যৱহাৰ কৰিবলৈ বা চাবলৈ শ্বেয়াৰ কৰিবনে?</translation>
@@ -47,7 +46,9 @@
 <translation id="3150823315463303127">হ’ষ্টে নীতিটো পঢ়িব নোৱাৰিলে।</translation>
 <translation id="3171922709365450819">এই ডিভাইচটো এই ক্লায়েণ্টটোৱে সমৰ্থন নকৰে কাৰণ সেইটোৰ বাবে তৃতীয় পক্ষৰ বিশ্বাসযোগ্যতাৰ প্ৰমাণীকৰণৰ আৱশ্যক।</translation>
 <translation id="3197730452537982411">ৰিম’ট ডেস্কটপ</translation>
+<translation id="3236334139428307578">Copyright 2026 The Chromium Authors. সকলো চৰ্ত সংৰক্ষিত।</translation>
 <translation id="324272851072175193">এই নির্দেশনাসমূহ ইমেইলত পঠিয়াওক</translation>
+<translation id="3254626532848657899">তললৈ নিয়ক</translation>
 <translation id="3305934114213025800"><ph name="PRODUCT_NAME" />এ সলনি কৰিব বিচাৰিছে৷</translation>
 <translation id="3339299787263251426">ইণ্টাৰনেট ব্যৱহাৰ কৰি আপোনাৰ কম্পিউটাৰটো সুৰক্ষিতভাৱে এক্সেছ কৰক</translation>
 <translation id="3385242214819933234">হ’ষ্টৰ গৰাকী অমান্য।</translation>
@@ -111,6 +112,7 @@
 <translation id="5823554426827907568"><ph name="CLIENT_USERNAME" />এ আপোনাৰ স্ক্ৰীনখন চাবলৈ আৰু আপোনাৰ কীব’ৰ্ড আৰু মাউছ নিয়ন্ত্ৰণ কৰিবলৈ এক্সেছৰ অনুৰোধ কৰিছে। যদি এই অনুৰোধটো আপোনাৰ বাবে অনাকাংক্ষিত, ''<ph name="IDS_SHARE_CONFIRM_DIALOG_DECLINE" />''ত টিপক। অন্যথা, সাজু হ’লে সংযোগটোক অনুমতি দিবলৈ ''<ph name="IDS_SHARE_CONFIRM_DIALOG_CONFIRM" />'' বাছনি কৰক।</translation>
 <translation id="5823658491130719298">আপুনি ৰিম'টৰ যোগে এক্সেছ কৰিব খোজা কম্পিউটাৰটোত Chrome খোলক আৰু <ph name="INSTALLATION_LINK" /> চাওক</translation>
 <translation id="5841343754884244200">প্ৰদৰ্শনৰ বিকল্পসমূহ</translation>
+<translation id="5965133372831030509">Copyright 2026 Google LLC. সকলো চৰ্ত সংৰক্ষিত।</translation>
 <translation id="6033507038939587647">কীব’র্ড বিকল্পসমূহ</translation>
 <translation id="6040143037577758943">বন্ধ কৰক</translation>
 <translation id="6062854958530969723">হ’ষ্ট ইনষ্টলেশ্বন কৰিব পৰা নগ’ল।</translation>
@@ -138,7 +140,6 @@
 <translation id="7067321367069083429">স্ক্ৰীণখনে টাচ্চ স্ক্ৰীনৰ দৰে আচৰণ কৰে</translation>
 <translation id="7116737094673640201">Chrome ৰিম’ট ডেস্কটপলৈ স্বাগতম</translation>
 <translation id="7144878232160441200">পুনৰ চেষ্টা কৰক</translation>
-<translation id="7298392173540380852">Copyright 2021 The Chromium Authors. সকলো চৰ্ত সংৰক্ষিত।</translation>
 <translation id="7312846573060934304">হ’ষ্ট অফলাইন আছে।</translation>
 <translation id="7319983568955948908">শ্বেয়াৰ কৰা বন্ধ কৰক</translation>
 <translation id="7359298090707901886">স্থানীয় মেচিনটোত URL খুলিবলৈ বাছনি কৰা ব্ৰাউজাৰটো ব্যৱহাৰ কৰিব নোৱাৰি।</translation>
@@ -166,6 +167,7 @@
 <translation id="8073845705237259513">Chrome ৰিম’ট ডেস্কটপ ব্যৱহাৰ কৰিবলৈ আপুনি নিজৰ ডিভাইচত Google একাউণ্ট যোগ কৰিব লাগিব।</translation>
 <translation id="809687642899217504">মোৰ কম্পিউটাৰ</translation>
 <translation id="8116630183974937060">নেটৱৰ্কৰ কোনো আসোঁৱাহ হৈছে। অনুগ্ৰহ কৰি আপোনাৰ ডিভাইচটো অনলাইন আছেনে নাই পৰীক্ষা কৰি আকৌ চেষ্টা কৰক।</translation>
+<translation id="8249310407154411074">শীৰ্ষলৈ নিয়ক</translation>
 <translation id="8295077433896346116">আপুনি <ph name="PRODUCT_NAME" /> ব্যৱহাৰ কৰিবলৈ 'সাধ্য সুবিধা'ৰ অনুমতি প্ৰদান কৰিব লাগিব যাতে দূৰত থকা মেচিনটোৰ পৰা এই Macটোত ইনপুট ভৰাব পৰা যায়।
 
 এই অনুমতি দিবলৈ, তলত থকা '<ph name="BUTTON_NAME" />'ত ক্লিক কৰক। খোল খোৱা 'সাধ্য সুবিধা'ৰ অগ্ৰাধিকাৰসমূহৰ ক্ষেত্ৰখনত, '<ph name="SERVICE_SCRIPT_NAME" />'ৰ কাষত থকা বাকচটোত টিক মাৰ্ক দিয়ক।

@@ -10,9 +10,9 @@
 
 #include "media/base/audio_converter.h"
 
+#include <algorithm>
 #include <memory>
 
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
@@ -53,29 +53,41 @@ AudioConverter::AudioConverter(const AudioParameters& input_params,
   }
 
   // Only resample if necessary since it's expensive.
+  constexpr int kMinRequestSize =
+      static_cast<int>(SincResampler::kMinRequestSize);
+  const bool resampler_needs_fifo =
+      input_params.frames_per_buffer() < kMinRequestSize;
   if (input_params.sample_rate() != output_params.sample_rate()) {
     DVLOG(1) << "Resampling from " << input_params.sample_rate() << " to "
              << output_params.sample_rate();
-    const int request_size = disable_fifo ? SincResampler::kDefaultRequestSize
-                                          : input_params.frames_per_buffer();
+    int resampler_request_size = input_params.frames_per_buffer();
+    if (disable_fifo) {
+      resampler_request_size = SincResampler::kDefaultRequestSize;
+    } else if (resampler_needs_fifo) {
+      // Round up to the smallest multiple that satisfies `kMinRequestSize`.
+      const int chunks = (kMinRequestSize + resampler_request_size - 1) /
+                         resampler_request_size;
+      resampler_request_size = chunks * resampler_request_size;
+    }
+
     resampler_ = std::make_unique<MultiChannelResampler>(
         downmix_early_ ? output_params.channels() : input_params.channels(),
-        io_sample_rate_ratio_, request_size,
+        io_sample_rate_ratio_, resampler_request_size,
         base::BindRepeating(&AudioConverter::ProvideInput,
                             base::Unretained(this)));
   }
 
-  // The resampler can be configured to work with a specific request size, so a
-  // FIFO is not necessary when resampling.
-  if (disable_fifo || resampler_)
+  if (disable_fifo) {
     return;
+  }
 
-  // Since the output device may want a different buffer size than the caller
-  // asked for, we need to use a FIFO to ensure that both sides read in chunk
-  // sizes they're configured for.
-  if (input_params.frames_per_buffer() != output_params.frames_per_buffer()) {
-    DVLOG(1) << "Rebuffering from " << input_params.frames_per_buffer()
-             << " to " << output_params.frames_per_buffer();
+  // The FIFO is needed if the input buffer size doesn't match the consumer
+  // (either the resampler request size or the output device buffer size).
+  const bool need_fifo = resampler_ ? resampler_needs_fifo
+                                    : (input_params.frames_per_buffer() !=
+                                       output_params.frames_per_buffer());
+
+  if (need_fifo) {
     chunk_size_ = input_params.frames_per_buffer();
     audio_fifo_ = std::make_unique<AudioPullFifo>(
         downmix_early_ ? output_params.channels() : input_params.channels(),
@@ -88,12 +100,12 @@ AudioConverter::AudioConverter(const AudioParameters& input_params,
 AudioConverter::~AudioConverter() = default;
 
 void AudioConverter::AddInput(InputCallback* input) {
-  DCHECK(!base::Contains(transform_inputs_, input));
+  DCHECK(!std::ranges::contains(transform_inputs_, input));
   transform_inputs_.push_back(input);
 }
 
 void AudioConverter::RemoveInput(InputCallback* input) {
-  DCHECK(base::Contains(transform_inputs_, input));
+  DCHECK(std::ranges::contains(transform_inputs_, input));
   transform_inputs_.remove(input);
 
   if (transform_inputs_.empty())

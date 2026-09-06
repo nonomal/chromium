@@ -8,7 +8,6 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/values.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/signin/signin_error_ui.h"
@@ -24,10 +23,9 @@ const char kSigninErrorLearnMoreUrl[] =
 
 class TestingSigninErrorHandler : public SigninErrorHandler {
  public:
-  TestingSigninErrorHandler(Browser* browser,
-                            bool is_system_profile,
+  TestingSigninErrorHandler(BrowserWindowInterface* browser,
                             content::WebUI* web_ui)
-      : SigninErrorHandler(browser, is_system_profile) {
+      : SigninErrorHandler(browser) {
     set_web_ui(web_ui);
   }
 
@@ -63,10 +61,10 @@ class SigninErrorHandlerTest : public InProcessBrowserTest {
 
   void SetUpOnMainThread() override {
     InProcessBrowserTest::SetUpOnMainThread();
-    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(),
-                                             GURL(chrome::kChromeUINewTabURL)));
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(
+        browser(), chrome::ChromeUINewTabURLAsGURL()));
     web_ui()->set_web_contents(
-        browser()->tab_strip_model()->GetActiveWebContents());
+        browser()->GetTabStripModel()->GetActiveWebContents());
     signin_error_ui_ = std::make_unique<SigninErrorUI>(web_ui());
   }
 
@@ -78,18 +76,10 @@ class SigninErrorHandlerTest : public InProcessBrowserTest {
 
   void CreateHandlerInBrowser() {
     DCHECK(!handler_);
-    auto handler = std::make_unique<TestingSigninErrorHandler>(
-        browser(), false /* is_system_profile */, web_ui());
+    auto handler =
+        std::make_unique<TestingSigninErrorHandler>(browser(), web_ui());
     handler_ = handler.get();
     signin_error_ui_ = std::make_unique<SigninErrorUI>(web_ui());
-    web_ui()->AddMessageHandler(std::move(handler));
-  }
-
-  void CreateHandlerInProfilePicker() {
-    DCHECK(!handler_);
-    auto handler = std::make_unique<TestingSigninErrorHandler>(
-        nullptr /* browser */, true /* is_system_profile */, web_ui());
-    handler_ = handler.get();
     web_ui()->AddMessageHandler(std::move(handler));
   }
 
@@ -105,14 +95,14 @@ class SigninErrorHandlerTest : public InProcessBrowserTest {
 
 IN_PROC_BROWSER_TEST_F(SigninErrorHandlerTest, InBrowserHandleLearnMore) {
   // Before the test, there is only one new tab opened.
-  TabStripModel* tab_strip_model = browser()->tab_strip_model();
+  TabStripModel* tab_strip_model = browser()->GetTabStripModel();
   EXPECT_EQ(1, tab_strip_model->count());
-  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
+  EXPECT_EQ(chrome::ChromeUINewTabURLAsGURL(),
             tab_strip_model->GetActiveWebContents()->GetVisibleURL());
 
   // Open learn more.
   CreateHandlerInBrowser();
-  base::Value::List args;
+  base::ListValue args;
   handler()->HandleLearnMore(args);
 
   // Dialog should be closed now.
@@ -127,17 +117,17 @@ IN_PROC_BROWSER_TEST_F(SigninErrorHandlerTest, InBrowserHandleLearnMore) {
 IN_PROC_BROWSER_TEST_F(SigninErrorHandlerTest,
                        InBrowserHandleLearnMoreAfterBrowserRemoved) {
   // Before the test, there is only one new tab opened.
-  TabStripModel* tab_strip_model = browser()->tab_strip_model();
+  TabStripModel* tab_strip_model = browser()->GetTabStripModel();
   EXPECT_EQ(1, tab_strip_model->count());
-  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
+  EXPECT_EQ(chrome::ChromeUINewTabURLAsGURL(),
             tab_strip_model->GetActiveWebContents()->GetVisibleURL());
 
   // Inform the handler that the browser was removed.
   CreateHandlerInBrowser();
-  handler()->OnBrowserRemoved(browser());
+  handler()->OnBrowserClosed(browser());
 
   // Open learn more.
-  base::Value::List args;
+  base::ListValue args;
   handler()->HandleLearnMore(args);
 
   // Dialog is not closed if the browser was removed.
@@ -145,13 +135,13 @@ IN_PROC_BROWSER_TEST_F(SigninErrorHandlerTest,
 
   // Verify that the learn more URL was not opened as the browser was removed.
   EXPECT_EQ(1, tab_strip_model->count());
-  EXPECT_EQ(GURL(chrome::kChromeUINewTabURL),
+  EXPECT_EQ(chrome::ChromeUINewTabURLAsGURL(),
             tab_strip_model->GetActiveWebContents()->GetVisibleURL());
 }
 
 IN_PROC_BROWSER_TEST_F(SigninErrorHandlerTest, InBrowserTestConfirm) {
   CreateHandlerInBrowser();
-  base::Value::List args;
+  base::ListValue args;
   handler()->HandleConfirm(args);
 
   // Confirm simply closes the dialog.

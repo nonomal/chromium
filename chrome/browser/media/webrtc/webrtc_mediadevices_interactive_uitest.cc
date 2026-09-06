@@ -2,8 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
+
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/json/json_reader.h"
 #include "base/strings/string_util.h"
 #include "base/test/bind.h"
@@ -16,8 +17,8 @@
 #include "chrome/browser/media/webrtc/webrtc_browsertest_base.h"
 #include "chrome/browser/media/webrtc/webrtc_browsertest_common.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -41,6 +42,7 @@
 #include "media/audio/audio_manager.h"
 #include "media/base/media_switches.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "ui/base/page_transition_types.h"
 
 #if BUILDFLAG(IS_MAC)
 #include <CoreGraphics/CoreGraphics.h>
@@ -103,7 +105,7 @@ class WebRtcMediaDevicesInteractiveUITest : public WebRtcTestBase {
     bool found_video_input = false;
 
     for (const auto& value : parsed_json.GetList()) {
-      const base::Value::Dict* dict = value.GetIfDict();
+      const base::DictValue* dict = value.GetIfDict();
       ASSERT_TRUE(dict);
       MediaDeviceInfo device;
       ASSERT_TRUE(dict->FindString("deviceId"));
@@ -147,8 +149,8 @@ class WebRtcMediaDevicesInteractiveUITest : public WebRtcTestBase {
       const std::vector<MediaDeviceInfo>& devices,
       const std::vector<MediaDeviceInfo>& devices2) {
     for (auto& device : devices) {
-      bool found = base::Contains(devices2, device.device_id,
-                                  &MediaDeviceInfo::device_id);
+      bool found = std::ranges::contains(devices2, device.device_id,
+                                         &MediaDeviceInfo::device_id);
       if (device.device_id == media::AudioDeviceDescription::kDefaultDeviceId ||
           device.device_id ==
               media::AudioDeviceDescription::kCommunicationsDeviceId) {
@@ -157,8 +159,8 @@ class WebRtcMediaDevicesInteractiveUITest : public WebRtcTestBase {
         EXPECT_FALSE(found);
       }
 
-      EXPECT_FALSE(base::Contains(devices2, device.group_id,
-                                  &MediaDeviceInfo::group_id));
+      EXPECT_FALSE(std::ranges::contains(devices2, device.group_id,
+                                         &MediaDeviceInfo::group_id));
     }
   }
 
@@ -175,7 +177,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
   GURL url(embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   content::WebContents* tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
 
   std::vector<MediaDeviceInfo> devices;
   EnumerateDevices(tab, &devices);
@@ -194,7 +196,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
   GURL url(embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   content::WebContents* tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
 
   EXPECT_TRUE(GetUserMediaAndAccept(tab));
 
@@ -225,15 +227,15 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
                                      ui::PAGE_TRANSITION_LINK, true));
 
   content::WebContents* focused_tab =
-      browser()->tab_strip_model()->GetWebContentsAt(1);
+      browser()->GetTabStripModel()->GetWebContentsAt(1);
   content::WebContents* unfocused_tab =
-      browser()->tab_strip_model()->GetWebContentsAt(0);
+      browser()->GetTabStripModel()->GetWebContentsAt(0);
   EXPECT_TRUE(GetUserMediaAndAccept(focused_tab));
   GetUserMediaReturnsFalseIfWaitIsTooLong(unfocused_tab,
                                           kAudioVideoCallConstraints);
 }
 
-// Flakes on Linux TSan Tests; crbug.com/1396123.
+// Flakes on Linux TSan Tests; crbug.com/40249329.
 // Flakes on Mac. crbug.com/430093040.
 #if (BUILDFLAG(IS_LINUX) && defined(THREAD_SANITIZER)) || BUILDFLAG(IS_MAC)
 #define MAYBE_GetUserMediaTabRegainsFocus DISABLED_GetUserMediaTabRegainsFocus
@@ -248,10 +250,11 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
   ASSERT_TRUE(AddTabAtIndexToBrowser(browser(), 1, url,
                                      ui::PAGE_TRANSITION_LINK, true));
 
-  content::WebContents* tab = browser()->tab_strip_model()->GetWebContentsAt(0);
+  content::WebContents* tab =
+      browser()->GetTabStripModel()->GetWebContentsAt(0);
   GetUserMediaReturnsFalseIfWaitIsTooLong(tab, kAudioVideoCallConstraints);
   // |tab| gains focus.
-  browser()->tab_strip_model()->ActivateTabAt(0);
+  browser()->GetTabStripModel()->ActivateTabAt(0);
   EXPECT_TRUE(GetUserMediaWithSpecificConstraintsAndAcceptIfPrompted(
       tab, kAudioVideoCallConstraints));
 }
@@ -262,7 +265,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
   GURL url(embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   content::WebContents* tab1 =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
   EXPECT_TRUE(GetUserMediaAndAccept(tab1));
   std::vector<MediaDeviceInfo> devices;
   EnumerateDevices(tab1, &devices);
@@ -270,7 +273,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
   chrome::AddTabAt(browser(), GURL(url::kAboutBlankURL), -1, true);
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   content::WebContents* tab2 =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
   EXPECT_TRUE(GetUserMediaWithSpecificConstraintsAndAcceptIfPrompted(
       tab2, kAudioVideoCallConstraints));
   std::vector<MediaDeviceInfo> devices2;
@@ -279,11 +282,11 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
   EXPECT_NE(tab1, tab2);
   EXPECT_EQ(devices.size(), devices2.size());
   for (auto& device : devices) {
-    EXPECT_TRUE(base::Contains(devices2, device.device_id,
-                               &MediaDeviceInfo::device_id));
+    EXPECT_TRUE(std::ranges::contains(devices2, device.device_id,
+                                      &MediaDeviceInfo::device_id));
 
-    EXPECT_FALSE(
-        base::Contains(devices2, device.group_id, &MediaDeviceInfo::group_id));
+    EXPECT_FALSE(std::ranges::contains(devices2, device.group_id,
+                                       &MediaDeviceInfo::group_id));
   }
 }
 
@@ -293,14 +296,14 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
   GURL url(embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   content::WebContents* tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
 
   EXPECT_TRUE(GetUserMediaAndAccept(tab));
 
   std::vector<MediaDeviceInfo> devices;
   EnumerateDevices(tab, &devices);
 
-  auto* remover = browser()->profile()->GetBrowsingDataRemover();
+  auto* remover = browser()->GetProfile()->GetBrowsingDataRemover();
   content::BrowsingDataRemoverCompletionObserver completion_observer(remover);
   remover->RemoveAndReply(
       base::Time(), base::Time::Max(),
@@ -321,10 +324,10 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
   ASSERT_TRUE(embedded_test_server()->Start());
   GURL url(embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
-  CookieSettingsFactory::GetForProfile(browser()->profile())
+  CookieSettingsFactory::GetForProfile(browser()->GetProfile())
       ->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
   content::WebContents* tab1 =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
 
   EXPECT_TRUE(GetUserMediaAndAccept(tab1));
 
@@ -334,7 +337,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
   chrome::AddTabAt(browser(), GURL(url::kAboutBlankURL), -1, true);
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   content::WebContents* tab2 =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
   EXPECT_TRUE(GetUserMediaWithSpecificConstraintsAndAcceptIfPrompted(
       tab2, kAudioVideoCallConstraints));
   std::vector<MediaDeviceInfo> devices2;
@@ -350,17 +353,17 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
   ASSERT_TRUE(embedded_test_server()->Start());
   GURL url(embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
-  CookieSettingsFactory::GetForProfile(browser()->profile())
+  CookieSettingsFactory::GetForProfile(browser()->GetProfile())
       ->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
   content::WebContents* tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
 
   EXPECT_TRUE(GetUserMediaAndAccept(tab));
   std::vector<MediaDeviceInfo> devices;
   EnumerateDevices(tab, &devices);
 
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
-  tab = browser()->tab_strip_model()->GetActiveWebContents();
+  tab = browser()->GetTabStripModel()->GetActiveWebContents();
 
   EXPECT_TRUE(GetUserMediaWithSpecificConstraintsAndAcceptIfPrompted(
       tab, kAudioVideoCallConstraints));
@@ -394,7 +397,7 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage)));
   content::WebContents* tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
 
   EXPECT_TRUE(GetUserMediaAndAccept(tab));
   std::vector<MediaDeviceInfo> devices;
@@ -417,15 +420,16 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
   ASSERT_TRUE(embedded_test_server()->Start());
   GURL url(embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
-  CookieSettingsFactory::GetForProfile(browser()->profile())
+  CookieSettingsFactory::GetForProfile(browser()->GetProfile())
       ->SetDefaultCookieSetting(CONTENT_SETTING_SESSION_ONLY);
   content::WebContents* tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
   std::vector<MediaDeviceInfo> devices;
   EnumerateDevices(tab, &devices);
 
   media_device_salt::MediaDeviceSaltService* salt_service =
-      MediaDeviceSaltServiceFactory::GetForBrowserContext(browser()->profile());
+      MediaDeviceSaltServiceFactory::GetForBrowserContext(
+          browser()->GetProfile());
   base::test::TestFuture<std::vector<blink::StorageKey>> keys_future;
   salt_service->GetAllStorageKeys(keys_future.GetCallback());
   EXPECT_FALSE(keys_future.Get().empty());
@@ -434,7 +438,8 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
 IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
                        SaltsDeletedForSessionOnlyCookies) {
   media_device_salt::MediaDeviceSaltService* salt_service =
-      MediaDeviceSaltServiceFactory::GetForBrowserContext(browser()->profile());
+      MediaDeviceSaltServiceFactory::GetForBrowserContext(
+          browser()->GetProfile());
   base::test::TestFuture<std::vector<blink::StorageKey>> keys_future;
   salt_service->GetAllStorageKeys(keys_future.GetCallback());
   EXPECT_TRUE(keys_future.Get().empty());
@@ -445,15 +450,16 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesInteractiveUITest,
   ASSERT_TRUE(embedded_test_server()->Start());
   GURL url(embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
-  CookieSettingsFactory::GetForProfile(browser()->profile())
+  CookieSettingsFactory::GetForProfile(browser()->GetProfile())
       ->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
   content::WebContents* tab =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
   std::vector<MediaDeviceInfo> devices;
   EnumerateDevices(tab, &devices);
 
   media_device_salt::MediaDeviceSaltService* salt_service =
-      MediaDeviceSaltServiceFactory::GetForBrowserContext(browser()->profile());
+      MediaDeviceSaltServiceFactory::GetForBrowserContext(
+          browser()->GetProfile());
   base::test::TestFuture<std::vector<blink::StorageKey>> keys_future;
   salt_service->GetAllStorageKeys(keys_future.GetCallback());
   EXPECT_TRUE(keys_future.Get().empty());
@@ -473,7 +479,7 @@ class WebRtcMediaDevicesPrerenderingBrowserTest
   }
 
   content::WebContents* web_contents() {
-    return browser()->tab_strip_model()->GetActiveWebContents();
+    return browser()->GetTabStripModel()->GetActiveWebContents();
   }
 
  private:
@@ -495,13 +501,13 @@ IN_PROC_BROWSER_TEST_F(WebRtcMediaDevicesPrerenderingBrowserTest,
 
   // Loads a page in the prerender.
   auto prerender_url = embedded_test_server()->GetURL(kMainWebrtcTestHtmlPage);
-  content::FrameTreeNodeId host_id =
+  content::PrerenderHostId host_id =
       prerender_helper()->AddPrerender(prerender_url);
   content::test::PrerenderHostObserver host_observer(*web_contents(), host_id);
   content::RenderFrameHost* prerender_rfh =
       prerender_helper()->GetPrerenderedMainFrameHost(host_id);
 
-  CookieSettingsFactory::GetForProfile(browser()->profile())
+  CookieSettingsFactory::GetForProfile(browser()->GetProfile())
       ->SetDefaultCookieSetting(CONTENT_SETTING_BLOCK);
 
   base::RunLoop run_loop;

@@ -11,8 +11,6 @@
 #include <vector>
 
 #include "base/auto_reset.h"
-#include "base/containers/contains.h"
-#include "base/feature_list.h"
 #include "base/memory/raw_ptr.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/observer_list.h"
@@ -33,13 +31,6 @@
 namespace views {
 
 namespace {
-
-// When enabled, a call to gfx::Animation::ShouldRenderRichAnimation() is
-// avoided when not needed. Behind a feature to assess impact
-// (go/chrome-performance-work-should-be-finched).
-// TODO(crbug.com/40897031): Clean up when experiment is complete.
-BASE_FEATURE(kAvoidUnnecessaryShouldRenderRichAnimation,
-             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Returns the ChildLayout data for the child view in the proposed layout, or
 // nullptr if not found.
@@ -475,9 +466,7 @@ gfx::Size AnimatingLayoutManager::GetPreferredSize(const View* host) const {
   // (go/jank-from-should-render-rich-animation-jun2025). Avoid calling it when
   // `bounds_animation_mode_` is `kUseHostBounds`, since it won't affect the
   // outcome.
-  if (base::FeatureList::IsEnabled(
-          kAvoidUnnecessaryShouldRenderRichAnimation) &&
-      bounds_animation_mode_ == BoundsAnimationMode::kUseHostBounds) {
+  if (bounds_animation_mode_ == BoundsAnimationMode::kUseHostBounds) {
     return target_layout_manager()->GetPreferredSize(host);
   }
 
@@ -489,9 +478,7 @@ gfx::Size AnimatingLayoutManager::GetPreferredSize(const View* host) const {
 
   switch (bounds_animation_mode_) {
     case BoundsAnimationMode::kUseHostBounds: {
-      CHECK(!base::FeatureList::IsEnabled(
-          kAvoidUnnecessaryShouldRenderRichAnimation));
-      return target_layout_manager()->GetPreferredSize(host);
+      NOTREACHED();
     }
     case BoundsAnimationMode::kAnimateMainAxis: {
       // Animating only main axis, so cross axis is preferred size.
@@ -596,7 +583,7 @@ AnimatingLayoutManager::GetChildViewsInPaintOrder(const View* host) const {
 
   // Add the result of the views.
   for (View* child : host->children()) {
-    if (!base::Contains(fading, child)) {
+    if (!fading.contains(child)) {
       result.push_back(child);
     }
   }
@@ -1056,7 +1043,7 @@ void AnimatingLayoutManager::CalculateFadeInfos() {
   for (View* child : host_view()->children()) {
     const auto& index = child_to_info[child];
     if (index.start_visible && index.target_visible &&
-        !base::Contains(previously_fading, child)) {
+        !previously_fading.contains(child)) {
       start_leading_edges.emplace(index.start_bounds.origin_main(), child);
       target_leading_edges.emplace(index.target_bounds.origin_main(), child);
     }
@@ -1127,7 +1114,7 @@ void AnimatingLayoutManager::CalculateFadeInfos() {
                                       prev_info.target_bounds.max_main());
       }
       fade_infos_.push_back(fade_info);
-    } else if (base::Contains(previously_fading, child)) {
+    } else if (previously_fading.contains(child)) {
       // Capture the fact that this view was fading as part of an animation that
       // was interrupted. (It is therefore technically still fading.) This
       // status goes away when the animation ends.

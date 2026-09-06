@@ -27,7 +27,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.robolectric.Shadows.shadowOf;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -50,27 +49,28 @@ import org.mockito.Mockito;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
-import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationState;
 import org.chromium.base.Callback;
 import org.chromium.base.Promise;
-import org.chromium.base.supplier.ObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.NonNullObservableSupplier;
+import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.base.test.util.UserActionTester;
+import org.chromium.chrome.browser.actor.ui.ActorUiTabController;
 import org.chromium.chrome.browser.browser_controls.BottomControlsStacker;
 import org.chromium.chrome.browser.device.DeviceConditions;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.fullscreen.FullscreenOptions;
+import org.chromium.chrome.browser.glic.GlicEnabling;
 import org.chromium.chrome.browser.layouts.LayoutManager;
 import org.chromium.chrome.browser.layouts.LayoutStateProvider;
 import org.chromium.chrome.browser.layouts.LayoutStateProvider.LayoutStateObserver;
@@ -108,7 +108,9 @@ import org.chromium.chrome.modules.readaloud.ReadAloudPlaybackHooks;
 import org.chromium.chrome.modules.readaloud.contentjs.Extractor;
 import org.chromium.chrome.modules.readaloud.contentjs.Highlighter;
 import org.chromium.chrome.test.util.browser.tabmodel.MockTabModelSelector;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetContent;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetObserver;
 import org.chromium.components.feature_engagement.Tracker;
 import org.chromium.components.prefs.PrefService;
 import org.chromium.components.search_engines.TemplateUrl;
@@ -131,18 +133,13 @@ import java.util.Locale;
 
 /** Unit tests for {@link ReadAloudController}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
-@EnableFeatures({ChromeFeatureList.READALOUD, ChromeFeatureList.READALOUD_PLAYBACK})
 @DisableFeatures({
-    ChromeFeatureList.READALOUD_IN_MULTI_WINDOW,
-    ChromeFeatureList.READALOUD_BACKGROUND_PLAYBACK,
-    ChromeFeatureList.READALOUD_TAP_TO_SEEK,
     ChromeFeatureList.READALOUD_AUDIO_OVERVIEWS,
+    ChromeFeatureList.GLIC,
+    ReadAloudFeatures.READ_ALOUD_NATIVE
 })
 public class ReadAloudControllerUnitTest {
     private static final GURL sTestGURL = JUnitTestGURLs.EXAMPLE_URL;
-    private static final GURL sTestRedirectGURL = JUnitTestGURLs.URL_1_WITH_PATH;
-    private static final Locale EN_US = new Locale("en", "US");
     private static final Locale FR_FR = new Locale("fr", "FR");
 
     private static final ReadAloudController.ReadabilityInfo ALL_SUPPORTED =
@@ -180,8 +177,8 @@ public class ReadAloudControllerUnitTest {
     private Locale mDefaultLocale;
 
     private FakeTranslateBridgeJni mFakeTranslateBridge;
-    private ObservableSupplierImpl<Profile> mProfileSupplier;
-    private ObservableSupplierImpl<LayoutManager> mLayoutManagerSupplier;
+    private NonNullObservableSupplier<Profile> mProfileSupplier;
+    private NonNullObservableSupplier<LayoutManager> mLayoutManagerSupplier;
     @Mock private Profile mMockProfile;
     @Mock private Profile mMockIncognitoProfile;
     @Mock private ReadAloudReadabilityHooks mHooksImpl;
@@ -195,8 +192,10 @@ public class ReadAloudControllerUnitTest {
     @Mock private LayoutManager mLayoutManager;
     @Mock private ReadAloudPrefs.Natives mReadAloudPrefsNatives;
     @Mock private ReadAloudFeatures.Natives mReadAloudFeaturesNatives;
+    @Mock private ReadAloudNativeBridge.Natives mNativeBridgeNatives;
     @Mock private UserPrefsJni mUserPrefsNatives;
     @Mock private PrefService mPrefService;
+    @Mock private ActorUiTabController mActorUiTabController;
     @Mock private TemplateUrlService mTemplateUrlService;
     @Mock private ActivityWindowAndroid mActivityWindowAndroid;
     @Mock private ActivityLifecycleDispatcher mActivityLifecycleDispatcher;
@@ -209,6 +208,8 @@ public class ReadAloudControllerUnitTest {
     @Captor ArgumentCaptor<PlaybackListener> mPlaybackListenerCaptor;
     @Captor ArgumentCaptor<LayoutStateObserver> mLayoutStateObserver;
     @Captor ArgumentCaptor<FullscreenManager.Observer> mFullscreenObserver;
+    @Captor ArgumentCaptor<BottomSheetObserver> mBottomSheetObserverCaptor;
+    @Captor ArgumentCaptor<Callback<Boolean>> mGlicCallbackCaptor;
 
     @Mock private Playback mPlayback;
     @Mock private Playback.Metadata mMetadata;
@@ -255,12 +256,10 @@ public class ReadAloudControllerUnitTest {
         mDefaultLocale = Locale.getDefault();
 
         mLayoutStateProviderSupplier.set(mLayoutStateProvider);
-        mProfileSupplier = new ObservableSupplierImpl<>();
-        mProfileSupplier.set(mMockProfile);
+        mProfileSupplier = ObservableSuppliers.createNonNull(mMockProfile);
         doReturn(true).when(mMockProfile).isNativeInitialized();
 
-        mLayoutManagerSupplier = new ObservableSupplierImpl<>();
-        mLayoutManagerSupplier.set(mLayoutManager);
+        mLayoutManagerSupplier = ObservableSuppliers.createNonNull(mLayoutManager);
         mActivity = Robolectric.buildActivity(AppCompatActivity.class).setup().get();
         mActivity.setTheme(R.style.Theme_BrowserUI_DayNight);
 
@@ -274,6 +273,7 @@ public class ReadAloudControllerUnitTest {
         TranslateBridgeJni.setInstanceForTesting(mFakeTranslateBridge);
         ReadAloudPrefsJni.setInstanceForTesting(mReadAloudPrefsNatives);
         ReadAloudFeaturesJni.setInstanceForTesting(mReadAloudFeaturesNatives);
+        ReadAloudNativeBridgeJni.setInstanceForTesting(mNativeBridgeNatives);
         UserPrefsJni.setInstanceForTesting(mUserPrefsNatives);
         doReturn(mPrefService).when(mUserPrefsNatives).get(any());
         when(mPrefService.hasPrefPath("readaloud.playback_mode")).thenReturn(true);
@@ -316,13 +316,16 @@ public class ReadAloudControllerUnitTest {
         mTab = mTabModelSelector.getCurrentTab();
         mTab.setGurlOverrideForTesting(sTestGURL);
         mTab.setWebContentsOverrideForTesting(mWebContents);
+        mTab.getUserDataHost().setUserData(ActorUiTabController.class, mActorUiTabController);
 
         TapToSeekSelectionManager.setSmartSelectionClient(mSelectionClient);
         TapToSeekSelectionManager.setSelectionPopupController(mSelectionPopupController);
 
+        GlicEnabling.setEnabledForTesting(false);
         mController = createController();
         verify(mLayoutStateProvider).addObserver(mLayoutStateObserver.capture());
         verify(mFullscreenManager).addObserver(mFullscreenObserver.capture());
+        verify(mBottomSheetController).addObserver(mBottomSheetObserverCaptor.capture());
         when(mMetadata.languageCode()).thenReturn("en");
         when(mMetadata.playbackMode()).thenReturn(PlaybackMode.CLASSIC);
         when(mPlayback.getMetadata()).thenReturn(mMetadata);
@@ -333,7 +336,7 @@ public class ReadAloudControllerUnitTest {
         mExtractorPromise = new Promise<>();
         when(mExtractor.getDateModified(any())).thenReturn(mExtractorPromise);
         mExtractorPromise.fulfill(1234567123456L);
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
     }
 
     void initPlaybackHooks() {
@@ -366,8 +369,9 @@ public class ReadAloudControllerUnitTest {
                         mActivityWindowAndroid,
                         mActivityLifecycleDispatcher,
                         mLayoutStateProviderSupplier,
-                        mFullscreenManager);
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+                        mFullscreenManager,
+                        /* sideUiStateProviderSupplier= */ null);
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
         return controller;
     }
 
@@ -385,19 +389,19 @@ public class ReadAloudControllerUnitTest {
     @Test
     public void testHideShowPlayer_tabSwitcher() {
         requestAndStartPlayback();
-        mLayoutStateObserver.getValue().onStartedShowing(LayoutType.TAB_SWITCHER);
+        mLayoutStateObserver.getValue().onStartedShowing(LayoutType.HUB);
         verify(mPlayerCoordinator).hidePlayers();
 
-        mLayoutStateObserver.getValue().onFinishedHiding(LayoutType.TAB_SWITCHER);
+        mLayoutStateObserver.getValue().onFinishedHiding(LayoutType.HUB);
         verify(mPlayerCoordinator).restorePlayers();
     }
 
     @Test
     public void testDontHidePlayerWithNoPlayback_tabSwitcherUi() {
-        mLayoutStateObserver.getValue().onStartedShowing(LayoutType.TAB_SWITCHER);
+        mLayoutStateObserver.getValue().onStartedShowing(LayoutType.HUB);
         verify(mPlayerCoordinator, never()).hidePlayers();
 
-        mLayoutStateObserver.getValue().onFinishedHiding(LayoutType.TAB_SWITCHER);
+        mLayoutStateObserver.getValue().onFinishedHiding(LayoutType.HUB);
         verify(mPlayerCoordinator, never()).restorePlayers();
     }
 
@@ -414,6 +418,41 @@ public class ReadAloudControllerUnitTest {
     }
 
     @Test
+    public void testHidePlayer_BottomSheet() {
+        requestAndStartPlayback();
+        var data = Mockito.mock(PlaybackListener.PlaybackData.class);
+        doReturn(PlaybackListener.State.PLAYING).when(data).state();
+        mController.onPlaybackDataChanged(data);
+
+        BottomSheetContent content = Mockito.mock(BottomSheetContent.class);
+        doReturn(true).when(content).actsAsBrowserControls();
+
+        mBottomSheetObserverCaptor.getValue().onSheetContentChanged(content);
+
+        verify(mPlayback).pause();
+        verify(mPlayerCoordinator).hidePlayers();
+
+        mBottomSheetObserverCaptor.getValue().onSheetContentChanged(null);
+        verify(mPlayerCoordinator).restorePlayers();
+    }
+
+    @Test
+    public void testDontHidePlayer_BottomSheet() {
+        requestAndStartPlayback();
+        var data = Mockito.mock(PlaybackListener.PlaybackData.class);
+        doReturn(PlaybackListener.State.PLAYING).when(data).state();
+        mController.onPlaybackDataChanged(data);
+
+        BottomSheetContent content = Mockito.mock(BottomSheetContent.class);
+        doReturn(false).when(content).actsAsBrowserControls();
+
+        mBottomSheetObserverCaptor.getValue().onSheetContentChanged(content);
+
+        verify(mPlayback, never()).pause();
+        verify(mPlayerCoordinator, never()).hidePlayers();
+    }
+
+    @Test
     public void testIsAvailable() {
         // test set up: non incognito profile + MSBB Accepted + policy pref returns true
         assertTrue(mController.isAvailable());
@@ -421,6 +460,32 @@ public class ReadAloudControllerUnitTest {
         // test returns false when policy pref is false
         when(mPrefService.getBoolean("readaloud.listen_to_this_page_enabled")).thenReturn(false);
         assertFalse(mController.isAvailable());
+    }
+
+    @Test
+    @EnableFeatures(ReadAloudFeatures.READ_ALOUD_NATIVE)
+    public void testReadAloudNativeEnabled() {
+        assertTrue(ReadAloudFeatures.isNativeEnabled());
+    }
+
+    @Test
+    @DisableFeatures(ReadAloudFeatures.READ_ALOUD_NATIVE)
+    public void testReadAloudNativeDisabled() {
+        assertFalse(ReadAloudFeatures.isNativeEnabled());
+    }
+
+    @Test
+    @EnableFeatures(ReadAloudFeatures.READ_ALOUD_NATIVE)
+    public void testCreatePlayback_nativeEnabled_createsNativePlayback() {
+        when(mNativeBridgeNatives.init(any(), any())).thenReturn(12345L);
+        mController.onProfileAvailable(mMockProfile);
+
+        mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
+        resolvePromises();
+
+        // Verify Java playback hooks are bypassed when native playback is active.
+        verify(mPlaybackHooks, never()).createPlayback(any(), any());
+        verify(mNativeBridgeNatives).play(eq(12345L), eq(mWebContents));
     }
 
     @Test
@@ -433,25 +498,6 @@ public class ReadAloudControllerUnitTest {
     public void testIsAvailable_noMSBB() {
         UnifiedConsentServiceBridge.setUrlKeyedAnonymizedDataCollectionEnabled(false);
         assertFalse(mController.isAvailable());
-    }
-
-    @Test
-    public void testIsAvailable_inMultiWindow() {
-        shadowOf(mActivity).setInMultiWindowMode(true);
-        assertFalse(mController.isAvailable());
-
-        shadowOf(mActivity).setInMultiWindowMode(false);
-        assertTrue(mController.isAvailable());
-    }
-
-    @Test
-    @EnableFeatures({ChromeFeatureList.READALOUD_IN_MULTI_WINDOW})
-    public void testIsAvailable_inMultiWindow_flag() {
-        shadowOf(mActivity).setInMultiWindowMode(true);
-        assertTrue(mController.isAvailable());
-
-        shadowOf(mActivity).setInMultiWindowMode(false);
-        assertTrue(mController.isAvailable());
     }
 
     @Test
@@ -599,6 +645,7 @@ public class ReadAloudControllerUnitTest {
     }
 
     @Test
+    @DisableFeatures(ChromeFeatureList.TAB_CLOSURE_METHOD_REFACTOR)
     public void testClosingTab() {
         // Close a tab before any playback starts - tests null checks
         mController.getTabModelTabObserverforTests().willCloseTab(mTab);
@@ -625,6 +672,37 @@ public class ReadAloudControllerUnitTest {
     }
 
     @Test
+    @EnableFeatures(ChromeFeatureList.TAB_CLOSURE_METHOD_REFACTOR)
+    public void testClosingTab_WillCloseTabs() {
+        // Close a tab before any playback starts - tests null checks
+        mController.getTabModelTabObserverforTests()
+                .willCloseTabs(List.of(mTab), /* isAllTabs= */ false, /* allowUndo= */ false);
+
+        verify(mPlayerCoordinator, never()).dismissPlayers();
+        verify(mPlayback, never()).release();
+
+        // now start playing a tab
+        requestAndStartPlayback();
+
+        // close some other tab, playback should keep going
+        MockTab newTab = mTabModelSelector.addMockTab();
+        newTab.setGurlOverrideForTesting(new GURL("https://en.wikipedia.org/wiki/Alphabet_Inc."));
+        mController.getTabModelTabObserverforTests()
+                .willCloseTabs(List.of(newTab), /* isAllTabs= */ false, /* allowUndo= */ false);
+
+        verify(mPlayerCoordinator, never()).dismissPlayers();
+        verify(mPlayback, never()).release();
+
+        // now close the playing tab
+        mController.getTabModelTabObserverforTests()
+                .willCloseTabs(List.of(mTab), /* isAllTabs= */ false, /* allowUndo= */ false);
+
+        verify(mPlayerCoordinator).dismissPlayers();
+        verify(mPlayback).release();
+    }
+
+    @Test
+    @DisableFeatures(ChromeFeatureList.TAB_CLOSURE_METHOD_REFACTOR)
     public void testClosingTab_errorUiDismissed() {
         // start a playback with an error
         mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
@@ -636,6 +714,25 @@ public class ReadAloudControllerUnitTest {
 
         // Close this tab
         mController.getTabModelTabObserverforTests().willCloseTab(mTab);
+
+        // No playback but error UI should get dismissed
+        verify(mPlayerCoordinator).dismissPlayers();
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.TAB_CLOSURE_METHOD_REFACTOR)
+    public void testClosingTab_errorUiDismissed_WillCloseTabs() {
+        // start a playback with an error
+        mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
+        resolvePromises();
+        verify(mPlaybackHooks, times(1))
+                .createPlayback(Mockito.any(), mPlaybackCallbackCaptor.capture());
+        mPlaybackCallbackCaptor.getValue().onFailure(new Exception("Very bad error"));
+        resolvePromises();
+
+        // Close this tab
+        mController.getTabModelTabObserverforTests()
+                .willCloseTabs(List.of(mTab), /* isAllTabs= */ false, /* allowUndo= */ false);
 
         // No playback but error UI should get dismissed
         verify(mPlayerCoordinator).dismissPlayers();
@@ -720,6 +817,49 @@ public class ReadAloudControllerUnitTest {
                                 new ReadAloudReadabilityHooks.ReadabilityResult(true, false)));
         UnifiedConsentServiceBridge.setUrlKeyedAnonymizedDataCollectionEnabled(false);
         assertFalse(mController.isReadable(mTab));
+    }
+
+    @Test
+    @EnableFeatures(ReadAloudFeatures.READ_ALOUD_NATIVE)
+    public void testCheckReadability_nativeEnabled() {
+        when(mNativeBridgeNatives.init(any(), any())).thenReturn(12345L);
+        mController.onProfileAvailable(mMockProfile);
+
+        mController.maybeCheckReadability(mTab);
+
+        verify(mNativeBridgeNatives).checkReadability(eq(12345L), eq(sTestGURL));
+        verify(mHooksImpl, never())
+                .isPageReadable(
+                        anyString(),
+                        any(ReadAloudReadabilityHooks.ReadabilityPerModeCallback.class));
+    }
+
+    @Test
+    @EnableFeatures(ReadAloudFeatures.READ_ALOUD_NATIVE)
+    public void testOnReadabilityResult_nativeEnabled() {
+        when(mNativeBridgeNatives.init(any(), any())).thenReturn(12345L);
+        mController.onProfileAvailable(mMockProfile);
+
+        assertFalse(mController.isReadable(mTab));
+
+        mController.onReadabilityResult(sTestGURL, true);
+
+        assertTrue(mController.isReadable(mTab));
+        assertEquals(PlaybackMode.CLASSIC, mController.getModeToPlay(mTab));
+    }
+
+    @Test
+    @EnableFeatures(ReadAloudFeatures.READ_ALOUD_NATIVE)
+    public void testIsAllowed_nativeEnabled() {
+        UnifiedConsentServiceBridge.setUrlKeyedAnonymizedDataCollectionEnabled(false);
+        assertTrue(ReadAloudFeatures.isAllowed(mMockProfile));
+
+        when(mMockProfile.isOffTheRecord()).thenReturn(true);
+        assertFalse(ReadAloudFeatures.isAllowed(mMockProfile));
+
+        when(mMockProfile.isOffTheRecord()).thenReturn(false);
+        when(mPrefService.getBoolean(Pref.LISTEN_TO_THIS_PAGE_ENABLED)).thenReturn(false);
+        assertFalse(ReadAloudFeatures.isAllowed(mMockProfile));
     }
 
     @Test
@@ -1006,6 +1146,74 @@ public class ReadAloudControllerUnitTest {
     }
 
     @Test
+    public void testPlayTab_WithGlicActive_Confirm() {
+        GlicEnabling.setEnabledForTesting(true);
+        when(mActorUiTabController.isActorActive()).thenReturn(true);
+        when(mActorUiTabController.showTaskAbortConfirmationDialog(any()))
+                .thenAnswer(
+                        invocation -> {
+                            Callback<Boolean> callback = invocation.getArgument(0);
+                            callback.onResult(true);
+                            return true;
+                        });
+
+        mFakeTranslateBridge.setCurrentLanguage("en");
+        mTab.setGurlOverrideForTesting(new GURL("https://en.wikipedia.org/wiki/Google"));
+
+        mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
+        resolvePromises();
+
+        verify(mActorUiTabController).showTaskAbortConfirmationDialog(any());
+        verify(mPlaybackHooks).createPlayback(any(), any());
+    }
+
+    @Test
+    public void testPlayTab_WithGlicActive_Cancel() {
+        GlicEnabling.setEnabledForTesting(true);
+        when(mActorUiTabController.isActorActive()).thenReturn(true);
+        when(mActorUiTabController.showTaskAbortConfirmationDialog(any())).thenReturn(true);
+
+        mFakeTranslateBridge.setCurrentLanguage("en");
+        mTab.setGurlOverrideForTesting(new GURL("https://en.wikipedia.org/wiki/Google"));
+
+        mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
+        resolvePromises();
+
+        verify(mActorUiTabController).showTaskAbortConfirmationDialog(any());
+        verify(mPlaybackHooks, never()).createPlayback(any(), any());
+    }
+
+    @Test
+    public void testPlayTab_WithGlicActive_Confirm_AfterDestroy() {
+        GlicEnabling.setEnabledForTesting(true);
+        // Setup: Mock active Glic task and capture dialogue confirm callback
+        when(mActorUiTabController.isActorActive()).thenReturn(true);
+        when(mActorUiTabController.showTaskAbortConfirmationDialog(mGlicCallbackCaptor.capture()))
+                .thenReturn(true);
+
+        mFakeTranslateBridge.setCurrentLanguage("en");
+        mTab.setGurlOverrideForTesting(new GURL("https://en.wikipedia.org/wiki/Google"));
+
+        // Action 1: Call playTab to show the prompt and capture the callback
+        mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
+        resolvePromises();
+
+        // Action 2: Destroy the controller simulating background tab closing
+        mController.destroy();
+
+        // Action 3: Trigger the captured callback simulating clicking Confirm on stale prompt
+        // dialog
+        mGlicCallbackCaptor.getValue().onResult(true);
+        resolvePromises();
+
+        // Verification: Assert showTaskAbortConfirmationDialog was called,
+        // but verify createPlayback was NEVER called (proving the cancelable wrapper blocked
+        // execution successfully after destroy).
+        verify(mActorUiTabController).showTaskAbortConfirmationDialog(any());
+        verify(mPlaybackHooks, never()).createPlayback(any(), any());
+    }
+
+    @Test
     public void testSendPositiveFeedback() {
         requestAndStartPlayback();
 
@@ -1046,43 +1254,6 @@ public class ReadAloudControllerUnitTest {
 
         verify(mPlayerCoordinator, never())
                 .playbackReady(eq(mPlayback), eq(PlaybackListener.State.PLAYING));
-    }
-
-    @Test
-    public void testPlayTab_inMultiWindow() {
-        mFakeTranslateBridge.setCurrentLanguage("en");
-        mTab.setGurlOverrideForTesting(new GURL("https://en.wikipedia.org/wiki/Google"));
-        mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
-        resolvePromises();
-
-        verify(mPlaybackHooks)
-                .createPlayback(mPlaybackArgsCaptor.capture(), mPlaybackCallbackCaptor.capture());
-        assertEquals(null, mPlaybackArgsCaptor.getValue().getLanguage());
-
-        shadowOf(mActivity).setInMultiWindowMode(true);
-        onPlaybackSuccess(mPlayback);
-
-        verify(mPlayerCoordinator).playbackFailed();
-    }
-
-    @Test
-    @EnableFeatures({ChromeFeatureList.READALOUD_IN_MULTI_WINDOW})
-    public void testPlayTab_inMultiWindow_flag() {
-        mFakeTranslateBridge.setCurrentLanguage("en");
-        mTab.setGurlOverrideForTesting(new GURL("https://en.wikipedia.org/wiki/Google"));
-        mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
-        resolvePromises();
-
-        verify(mPlaybackHooks)
-                .createPlayback(mPlaybackArgsCaptor.capture(), mPlaybackCallbackCaptor.capture());
-        assertEquals(null, mPlaybackArgsCaptor.getValue().getLanguage());
-
-        shadowOf(mActivity).setInMultiWindowMode(true);
-        onPlaybackSuccess(mPlayback);
-
-        verify(mPlayerCoordinator, times(1))
-                .playbackReady(eq(mPlayback), eq(PlaybackListener.State.PLAYING));
-        verify(mPlayerCoordinator).addObserver(mController);
     }
 
     @Test
@@ -1230,6 +1401,7 @@ public class ReadAloudControllerUnitTest {
 
     @Test
     @EnableFeatures({ChromeFeatureList.READALOUD_AUDIO_OVERVIEWS})
+    @SuppressWarnings("unchecked") // Mockito.reset varargs of generic Callback type.
     public void testPlaybackModeSelectionEnabledUpdated() {
         mFakeTranslateBridge.setIsPageTranslated(false);
         mFakeTranslateBridge.setCurrentLanguage("en");
@@ -1255,9 +1427,9 @@ public class ReadAloudControllerUnitTest {
                                 PlaybackMode.OVERVIEW,
                                 new ReadAloudReadabilityHooks.ReadabilityResult(true, false)));
 
-        ObservableSupplier<PlaybackModeSelectionEnablementStatus> observable =
+        NonNullObservableSupplier<PlaybackModeSelectionEnablementStatus> observable =
                 mController.getPlaybackModeSelectionEnabled();
-        observable.addObserver(mPlaybackModeSelectionEnabledCallback);
+        observable.addSyncObserverAndPostIfNonNull(mPlaybackModeSelectionEnabledCallback);
 
         mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
         resolvePromises();
@@ -1280,6 +1452,7 @@ public class ReadAloudControllerUnitTest {
 
     @Test
     @DisableFeatures({ChromeFeatureList.READALOUD_AUDIO_OVERVIEWS})
+    @SuppressWarnings("unchecked") // Mockito.reset varargs of generic Callback type.
     public void testPlaybackModeSelectionEnabledUpdated_disabledThroughFlag() {
         mFakeTranslateBridge.setIsPageTranslated(false);
         mFakeTranslateBridge.setCurrentLanguage("en");
@@ -1303,9 +1476,9 @@ public class ReadAloudControllerUnitTest {
                                 PlaybackMode.OVERVIEW,
                                 new ReadAloudReadabilityHooks.ReadabilityResult(true, false)));
 
-        ObservableSupplier<PlaybackModeSelectionEnablementStatus> observable =
+        NonNullObservableSupplier<PlaybackModeSelectionEnablementStatus> observable =
                 mController.getPlaybackModeSelectionEnabled();
-        observable.addObserver(mPlaybackModeSelectionEnabledCallback);
+        observable.addSyncObserverAndPostIfNonNull(mPlaybackModeSelectionEnabledCallback);
 
         mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
         resolvePromises();
@@ -1333,6 +1506,7 @@ public class ReadAloudControllerUnitTest {
 
     @Test
     @EnableFeatures({ChromeFeatureList.READALOUD_AUDIO_OVERVIEWS})
+    @SuppressWarnings("unchecked") // Mockito.reset varargs of generic Callback type.
     public void testPlaybackModeSelectionEnabledUpdated_disabledThroughLanguage() {
         mFakeTranslateBridge.setIsPageTranslated(false);
         mFakeTranslateBridge.setCurrentLanguage("fr");
@@ -1356,9 +1530,9 @@ public class ReadAloudControllerUnitTest {
                                 PlaybackMode.OVERVIEW,
                                 new ReadAloudReadabilityHooks.ReadabilityResult(true, false)));
 
-        ObservableSupplier<PlaybackModeSelectionEnablementStatus> observable =
+        NonNullObservableSupplier<PlaybackModeSelectionEnablementStatus> observable =
                 mController.getPlaybackModeSelectionEnabled();
-        observable.addObserver(mPlaybackModeSelectionEnabledCallback);
+        observable.addSyncObserverAndPostIfNonNull(mPlaybackModeSelectionEnabledCallback);
 
         mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
         resolvePromises();
@@ -1387,6 +1561,7 @@ public class ReadAloudControllerUnitTest {
 
     @Test
     @EnableFeatures({ChromeFeatureList.READALOUD_AUDIO_OVERVIEWS})
+    @SuppressWarnings("unchecked") // Mockito.reset varargs of generic Callback type.
     public void testPlaybackModeSelectionEnabledUpdated_disabledThroughFallbackToClassic() {
         mFakeTranslateBridge.setIsPageTranslated(false);
         mFakeTranslateBridge.setCurrentLanguage("en");
@@ -1413,9 +1588,9 @@ public class ReadAloudControllerUnitTest {
                                 PlaybackMode.OVERVIEW,
                                 new ReadAloudReadabilityHooks.ReadabilityResult(true, false)));
 
-        ObservableSupplier<PlaybackModeSelectionEnablementStatus> observable =
+        NonNullObservableSupplier<PlaybackModeSelectionEnablementStatus> observable =
                 mController.getPlaybackModeSelectionEnabled();
-        observable.addObserver(mPlaybackModeSelectionEnabledCallback);
+        observable.addSyncObserverAndPostIfNonNull(mPlaybackModeSelectionEnabledCallback);
 
         mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
         resolvePromises();
@@ -1444,6 +1619,7 @@ public class ReadAloudControllerUnitTest {
 
     @Test
     @EnableFeatures({ChromeFeatureList.READALOUD_AUDIO_OVERVIEWS})
+    @SuppressWarnings("unchecked") // Mockito.reset varargs of generic Callback type.
     public void testPlaybackModeSelectionEnabledUpdated_disabledThroughFallbackToOverview() {
         mFakeTranslateBridge.setIsPageTranslated(false);
         mFakeTranslateBridge.setCurrentLanguage("en");
@@ -1470,9 +1646,9 @@ public class ReadAloudControllerUnitTest {
                                 PlaybackMode.OVERVIEW,
                                 new ReadAloudReadabilityHooks.ReadabilityResult(true, false)));
 
-        ObservableSupplier<PlaybackModeSelectionEnablementStatus> observable =
+        NonNullObservableSupplier<PlaybackModeSelectionEnablementStatus> observable =
                 mController.getPlaybackModeSelectionEnabled();
-        observable.addObserver(mPlaybackModeSelectionEnabledCallback);
+        observable.addSyncObserverAndPostIfNonNull(mPlaybackModeSelectionEnabledCallback);
 
         mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
         resolvePromises();
@@ -1501,6 +1677,7 @@ public class ReadAloudControllerUnitTest {
 
     @Test
     @EnableFeatures({ChromeFeatureList.READALOUD_AUDIO_OVERVIEWS})
+    @SuppressWarnings("unchecked") // Mockito.reset varargs of generic Callback type.
     public void testPlaybackModeSelectionEnabledUpdated_disabledThroughClassicUnsupported() {
         mFakeTranslateBridge.setIsPageTranslated(false);
         mFakeTranslateBridge.setCurrentLanguage("en");
@@ -1524,9 +1701,9 @@ public class ReadAloudControllerUnitTest {
                                 PlaybackMode.OVERVIEW,
                                 new ReadAloudReadabilityHooks.ReadabilityResult(true, false)));
 
-        ObservableSupplier<PlaybackModeSelectionEnablementStatus> observable =
+        NonNullObservableSupplier<PlaybackModeSelectionEnablementStatus> observable =
                 mController.getPlaybackModeSelectionEnabled();
-        observable.addObserver(mPlaybackModeSelectionEnabledCallback);
+        observable.addSyncObserverAndPostIfNonNull(mPlaybackModeSelectionEnabledCallback);
 
         mController.playTab(mTab, ReadAloudController.Entrypoint.MAGIC_TOOLBAR);
         resolvePromises();
@@ -2733,7 +2910,6 @@ public class ReadAloudControllerUnitTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.READALOUD_BACKGROUND_PLAYBACK)
     public void testBackgroundPlaybackContinuesWhenActivityPaused() {
         // Play tab.
         requestAndStartPlayback();
@@ -2760,45 +2936,9 @@ public class ReadAloudControllerUnitTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.READALOUD_BACKGROUND_PLAYBACK)
     public void testBackgroundPlayback_doesntCrashWhenNoPlayer() throws NullPointerException {
         setIsScreenOnAndUnlocked(false);
         mController.onApplicationStateChange(ApplicationState.HAS_STOPPED_ACTIVITIES);
-    }
-
-    @Test
-    public void testPlaybackStopsAndStateSavedWhenAppBackgrounded_screenOn() {
-        // Play tab.
-        requestAndStartPlayback();
-        // set progress
-        var data = Mockito.mock(PlaybackData.class);
-
-        doReturn(2).when(data).paragraphIndex();
-        doReturn(1000000L).when(data).positionInParagraphNanos();
-        mController.onPlaybackDataChanged(data);
-
-        // App is backgrounded with the screen on. Make sure playback stops.
-        setIsScreenOnAndUnlocked(true);
-        mController.onApplicationStateChange(ApplicationState.HAS_STOPPED_ACTIVITIES);
-        verify(mPlayback).release();
-        reset(mPlayback);
-        when(mPlayback.getMetadata()).thenReturn(mMetadata);
-
-        // Activity goes back in foreground. Restore progress.
-        mController.onActivityStateChange(mActivity, ActivityState.RESUMED);
-        verify(mPlaybackHooks, times(2)).createPlayback(any(), mPlaybackCallbackCaptor.capture());
-        onPlaybackSuccess(mPlayback);
-        verify(mPlayback).seekToParagraph(2, 1000000L);
-        verify(mPlayback, never()).play();
-
-        // once saved state is restored, it's cleared and no further interactions with playback
-        // should happen.
-        resetPlaybackMocks();
-
-        mController.onApplicationStateChange(ApplicationState.HAS_PAUSED_ACTIVITIES);
-        mController.onApplicationStateChange(ApplicationState.HAS_RUNNING_ACTIVITIES);
-        verifyNoInteractions(mPlaybackHooks);
-        verifyNoInteractions(mPlayback);
     }
 
     @Test
@@ -2818,33 +2958,6 @@ public class ReadAloudControllerUnitTest {
         verify(mPlayback, never()).release();
     }
 
-    @Test
-    public void testPlaybackWhenAppStops_userHint() {
-        // Play tab.
-        requestAndStartPlayback();
-        // set progress
-        var data = Mockito.mock(PlaybackData.class);
-
-        doReturn(2).when(data).paragraphIndex();
-        doReturn(1000000L).when(data).positionInParagraphNanos();
-        mController.onPlaybackDataChanged(data);
-
-        // App is backgrounded. Screen is off but there is user hint present - stop playback
-        mController.onUserLeaveHint();
-        setIsScreenOnAndUnlocked(false);
-        mController.onApplicationStateChange(ApplicationState.HAS_STOPPED_ACTIVITIES);
-
-        verify(mPlayback).release();
-        resetPlaybackMocks();
-
-        // App goes back in foreground. Restore progress.
-        mController.onActivityStateChange(mActivity, ActivityState.RESUMED);
-        verify(mPlaybackHooks).createPlayback(any(), mPlaybackCallbackCaptor.capture());
-        onPlaybackSuccess(mPlayback);
-        verify(mPlayback).seekToParagraph(2, 1000000L);
-        verify(mPlayback, never()).play();
-    }
-
     private void setIsScreenOnAndUnlocked(boolean isScreenOnAndUnlocked) {
         DeviceConditions deviceConditions =
                 new DeviceConditions(
@@ -2858,36 +2971,6 @@ public class ReadAloudControllerUnitTest {
     }
 
     @Test
-    public void testPlaybackResumesWhenActivityResumes() {
-        // Play tab.
-        requestAndStartPlayback();
-        // set progress
-        var data = Mockito.mock(PlaybackData.class);
-
-        doReturn(2).when(data).paragraphIndex();
-        doReturn(1000000L).when(data).positionInParagraphNanos();
-        mController.onPlaybackDataChanged(data);
-
-        // App is backgrounded with the screen on. Make sure playback stops.
-        setIsScreenOnAndUnlocked(true);
-        mController.onApplicationStateChange(ApplicationState.HAS_STOPPED_ACTIVITIES);
-        verify(mPlayback).release();
-        resetPlaybackMocks();
-
-        // App returns to foreground, but activity hasn't resumed yet.
-        mController.onApplicationStateChange(ApplicationState.HAS_RUNNING_ACTIVITIES);
-        verify(mPlaybackHooks, never()).createPlayback(any(), any());
-
-        // Activity goes back in foreground. Restore progress.
-        mController.onActivityStateChange(mActivity, ActivityState.RESUMED);
-        verify(mPlaybackHooks).createPlayback(any(), mPlaybackCallbackCaptor.capture());
-        onPlaybackSuccess(mPlayback);
-        verify(mPlayback).seekToParagraph(2, 1000000L);
-        verify(mPlayback, never()).play();
-    }
-
-    @Test
-    @EnableFeatures(ChromeFeatureList.READALOUD_BACKGROUND_PLAYBACK)
     public void testPlaybackResumesWhenActivityResumes_backgroundPlaybackEnabled() {
         // Play tab.
         requestAndStartPlayback();
@@ -3126,6 +3209,66 @@ public class ReadAloudControllerUnitTest {
     }
 
     @Test
+    public void testMaybeShowPlayer_suppressedByFullscreen() {
+        requestAndStartPlayback();
+
+        FullscreenOptions fo = new FullscreenOptions(true, true, INVALID_DISPLAY);
+        mFullscreenObserver.getValue().onEnterFullscreen(mTab, fo);
+
+        reset(mPlayerCoordinator);
+        mController.maybeShowPlayer();
+        verify(mPlayerCoordinator, never()).restorePlayers();
+
+        mFullscreenObserver.getValue().onExitFullscreen(mTab);
+        verify(mPlayerCoordinator).restorePlayers();
+    }
+
+    @Test
+    public void testMaybeShowPlayer_suppressedByTabSwitcher() {
+        requestAndStartPlayback();
+
+        mLayoutStateObserver.getValue().onStartedShowing(LayoutType.HUB);
+
+        reset(mPlayerCoordinator);
+        mController.maybeShowPlayer();
+        verify(mPlayerCoordinator, never()).restorePlayers();
+
+        mLayoutStateObserver.getValue().onFinishedHiding(LayoutType.HUB);
+        verify(mPlayerCoordinator).restorePlayers();
+    }
+
+    @Test
+    public void testMaybeShowPlayer_suppressedByBottomSheet() {
+        requestAndStartPlayback();
+
+        BottomSheetContent content = Mockito.mock(BottomSheetContent.class);
+        doReturn(true).when(content).actsAsBrowserControls();
+
+        mBottomSheetObserverCaptor.getValue().onSheetContentChanged(content);
+
+        reset(mPlayerCoordinator);
+        mController.maybeShowPlayer();
+        verify(mPlayerCoordinator, never()).restorePlayers();
+
+        mBottomSheetObserverCaptor.getValue().onSheetContentChanged(null);
+        verify(mPlayerCoordinator).restorePlayers();
+    }
+
+    @Test
+    public void testMaybeShowPlayer_suppressedByKeyboard() {
+        requestAndStartPlayback();
+
+        mController.onKeyboardInsetChanged(100);
+
+        reset(mPlayerCoordinator);
+        mController.maybeShowPlayer();
+        verify(mPlayerCoordinator, never()).restorePlayers();
+
+        mController.onKeyboardInsetChanged(0);
+        verify(mPlayerCoordinator).restorePlayers();
+    }
+
+    @Test
     public void testMaybeHideMiniPlayer() {
         // no playback, request is a no op
         mController.maybeHidePlayer();
@@ -3166,7 +3309,6 @@ public class ReadAloudControllerUnitTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.READALOUD_BACKGROUND_PLAYBACK)
     public void testCrossActivityPlayback_stopBackgroundPlayback() {
         // Play in Chrome, then play in CCT. Chrome playback should stop only when CCT plays.
 
@@ -3204,7 +3346,6 @@ public class ReadAloudControllerUnitTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.READALOUD_BACKGROUND_PLAYBACK)
     public void testCrossActivityPlayback_canRestoreIfSameTab() {
         // Play in Chrome, play in CCT, then request playback for original tab in Chrome. Playback
         // should be restored.
@@ -3309,7 +3450,6 @@ public class ReadAloudControllerUnitTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.READALOUD_BACKGROUND_PLAYBACK)
     public void testCrossActivityPlayback_doNotRestoreIfDifferentTab() {
         // Play in Chrome, play in CCT, then request playback for a different tab in Chrome. A new
         // playback should start and the old one should not be restored.
@@ -3375,7 +3515,7 @@ public class ReadAloudControllerUnitTest {
         reset(mHooksImpl);
         doReturn(false).when(mMockProfile).isNativeInitialized();
         mController = createController();
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
 
         // Check readability.
         mController.maybeCheckReadability(mTab);
@@ -3512,7 +3652,6 @@ public class ReadAloudControllerUnitTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.READALOUD_TAP_TO_SEEK)
     public void testTapToSeek() {
         // play tab
         requestAndStartPlayback();
@@ -3559,7 +3698,6 @@ public class ReadAloudControllerUnitTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.READALOUD_TAP_TO_SEEK)
     public void testTapToSeek_differentTab() {
         // play tab
         requestAndStartPlayback();
@@ -3580,7 +3718,7 @@ public class ReadAloudControllerUnitTest {
         GURL gurl = new GURL("https://en.wikipedia.org/wiki/Alphabet_Inc.");
         when(mTab.getUrl()).thenReturn(gurl);
         mController.getTabModelTabObserverforTests().didFirstVisuallyNonEmptyPaint(mTab);
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
         verify(mHooksImpl)
                 .isPageReadable(
                         eq(gurl.getPossiblyInvalidSpec()),
@@ -3782,6 +3920,6 @@ public class ReadAloudControllerUnitTest {
     }
 
     private static void resolvePromises() {
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
     }
 }

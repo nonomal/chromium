@@ -9,8 +9,6 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mockito;
-import org.robolectric.annotation.Config;
-import org.robolectric.annotation.LooperMode;
 import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.Callback;
@@ -22,8 +20,6 @@ import java.lang.ref.WeakReference;
 
 /** Unit tests for {@link ComposedBrowserControlsVisibilityDelegate}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
-@LooperMode(LooperMode.Mode.PAUSED)
 public class ComposedBrowserControlsVisibilityDelegateTest {
     private ComposedBrowserControlsVisibilityDelegate mComposedDelegate;
     private BrowserControlsVisibilityDelegate mDelegate1;
@@ -114,9 +110,11 @@ public class ComposedBrowserControlsVisibilityDelegateTest {
     }
 
     @Test
+    @SuppressWarnings(
+            "unchecked") // mock(Callback.class) + Mockito.reset varargs Callback<Integer>[].
     public void testObserver() {
         Callback<Integer> callback = Mockito.mock(Callback.class);
-        mComposedDelegate.addObserver(callback);
+        mComposedDelegate.addSyncObserverAndPostIfNonNull(callback);
         ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
         Mockito.verify(callback).onResult(BrowserControlsState.BOTH);
         Mockito.reset(callback);
@@ -156,10 +154,10 @@ public class ComposedBrowserControlsVisibilityDelegateTest {
 
     @Test
     public void testDelegateLeak() {
-        WeakReference delegate = new WeakReference(mDelegate1);
+        WeakReference<BrowserControlsVisibilityDelegate> delegate = new WeakReference<>(mDelegate1);
 
         Callback<Integer> callback = (value) -> {};
-        mComposedDelegate.addObserver(callback);
+        mComposedDelegate.addSyncObserverAndPostIfNonNull(callback);
         Assert.assertTrue(mComposedDelegate.hasObservers());
 
         mComposedDelegate.removeObserver(callback);

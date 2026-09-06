@@ -4,30 +4,15 @@
 
 #include "components/password_manager/core/browser/features/password_manager_features_util.h"
 
-#include <optional>
-
-#include "base/feature_list.h"
-#include "base/notreached.h"
-#include "base/values.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
-#include "components/password_manager/core/browser/features/password_features.h"
-#include "components/password_manager/core/browser/password_form.h"
-#include "components/password_manager/core/common/password_manager_pref_names.h"
-#include "components/prefs/pref_service.h"
-#include "components/prefs/scoped_user_pref_update.h"
-#include "components/signin/public/base/signin_pref_names.h"
-#include "components/signin/public/base/signin_switches.h"
-#include "components/sync/base/features.h"
-#include "components/sync/base/pref_names.h"
+#include "components/sync/base/user_selectable_type.h"
 #include "components/sync/service/sync_service.h"
 #include "components/sync/service/sync_user_settings.h"
 
 namespace password_manager::features_util {
 
-namespace {
-
-bool IsUserEligibleForAccountStorage(const syncer::SyncService* sync_service) {
+bool IsAccountStorageActive(const syncer::SyncService* sync_service) {
   if (!sync_service) {
     return false;
   }
@@ -78,15 +63,8 @@ bool IsUserEligibleForAccountStorage(const syncer::SyncService* sync_service) {
     return false;
   }
 
-  return true;
-}
-
-}  // namespace
-
-bool IsAccountStorageEnabled(const syncer::SyncService* sync_service) {
-  return IsUserEligibleForAccountStorage(sync_service) &&
-         sync_service->GetUserSettings()->GetSelectedTypes().Has(
-             syncer::UserSelectableType::kPasswords);
+  return sync_service->GetUserSettings()->GetSelectedTypes().Has(
+      syncer::UserSelectableType::kPasswords);
 }
 
 PasswordAccountStorageUserState ComputePasswordAccountStorageUserState(
@@ -108,7 +86,7 @@ PasswordAccountStorageUserState ComputePasswordAccountStorageUserState(
     return PasswordAccountStorageUserState::kSignedOutUser;
   }
 
-  if (IsAccountStorageEnabled(sync_service)) {
+  if (IsAccountStorageActive(sync_service)) {
     return PasswordAccountStorageUserState::kSignedInAccountStoreUser;
   }
 
@@ -129,37 +107,5 @@ PasswordAccountStorageUsageLevel ComputePasswordAccountStorageUsageLevel(
       return UsageLevel::kSyncing;
   }
 }
-
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-bool ShouldShowAccountStorageSettingToggle(
-    const syncer::SyncService* sync_service) {
-  // TODO(crbug.com/303613699): Merge IsUserEligibleForAccountStorage() and
-  // IsAccountStorageEnabled() after kReplaceSyncPromosWithSignInPromos is
-  // launched and cleaned-up.
-  return IsUserEligibleForAccountStorage(sync_service) &&
-         !base::FeatureList::IsEnabled(
-             syncer::kReplaceSyncPromosWithSignInPromos);
-}
-
-void MigrateDefaultProfileStorePref(PrefService* pref_service) {
-  ScopedDictPrefUpdate new_pref_update(
-      pref_service, syncer::prefs::internal::kSelectedTypesPerAccount);
-  for (auto [serialized_gaia_id_hash, settings] : pref_service->GetDict(
-           prefs::kObsoleteAccountStoragePerAccountSettings)) {
-    // `settings` should be a dict but check to avoid a possible startup crash.
-    if (!settings.is_dict()) {
-      continue;
-    }
-    if (settings.GetDict().FindInt(kObsoleteAccountStorageDefaultStoreKey) ==
-        static_cast<int>(PasswordForm::Store::kProfileStore)) {
-      // kObsoleteAccountStoragePerAccountSettings' serialization for the gaia
-      // id hash was indeed base64, the same as used by sync. Tests verify it.
-      new_pref_update->EnsureDict(serialized_gaia_id_hash)
-          ->Set(syncer::prefs::internal::kSyncPasswords, false);
-    }
-  }
-  pref_service->ClearPref(prefs::kObsoleteAccountStoragePerAccountSettings);
-}
-#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 
 }  // namespace password_manager::features_util

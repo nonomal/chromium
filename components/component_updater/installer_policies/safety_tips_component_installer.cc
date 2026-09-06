@@ -4,8 +4,11 @@
 
 #include "components/component_updater/installer_policies/safety_tips_component_installer.h"
 
+#include <cstdint>
 #include <memory>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
@@ -67,7 +70,7 @@ bool SafetyTipsComponentInstallerPolicy::RequiresNetworkEncryption() const {
 
 update_client::CrxInstaller::Result
 SafetyTipsComponentInstallerPolicy::OnCustomInstall(
-    const base::Value::Dict& /* manifest */,
+    const base::DictValue& /* manifest */,
     const base::FilePath& /* install_dir */) {
   return update_client::CrxInstaller::Result(0);  // Nothing custom here.
 }
@@ -82,7 +85,7 @@ base::FilePath SafetyTipsComponentInstallerPolicy::GetInstalledPath(
 void SafetyTipsComponentInstallerPolicy::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
-    base::Value::Dict /* manifest */) {
+    base::DictValue /* manifest */) {
   DVLOG(1) << "Component ready, version " << version.GetString() << " in "
            << install_dir.value();
 
@@ -102,7 +105,7 @@ void SafetyTipsComponentInstallerPolicy::ComponentReady(
 
 // Called during startup and installation before ComponentReady().
 bool SafetyTipsComponentInstallerPolicy::VerifyInstallation(
-    const base::Value::Dict& /* manifest */,
+    const base::DictValue& /* manifest */,
     const base::FilePath& install_dir) const {
   // No need to actually validate the proto here, since we'll do the checking
   // in PopulateFromDynamicUpdate().
@@ -116,8 +119,7 @@ base::FilePath SafetyTipsComponentInstallerPolicy::GetRelativeInstallDir()
 
 void SafetyTipsComponentInstallerPolicy::GetHash(
     std::vector<uint8_t>* hash) const {
-  hash->assign(std::begin(kSafetyTipsPublicKeySHA256),
-               std::end(kSafetyTipsPublicKeySHA256));
+  hash->assign_range(kSafetyTipsPublicKeySHA256);
 }
 
 std::string SafetyTipsComponentInstallerPolicy::GetName() const {

@@ -6,11 +6,11 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <functional>
 #include <optional>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
@@ -34,7 +34,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
-#include "content/public/browser/session_storage_namespace.h"
+#include "content/public/browser/session_storage_namespace_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "net/http/http_response_headers.h"
@@ -47,7 +47,7 @@
 using content::BrowserThread;
 using content::OpenURLParams;
 using content::RenderFrameHost;
-using content::SessionStorageNamespace;
+using content::SessionStorageNamespaceHandle;
 using content::WebContents;
 
 namespace prerender {
@@ -182,7 +182,6 @@ NoStatePrefetchContents::NoStatePrefetchContents(
       DCHECK(!initiator_origin_.has_value());
       break;
 
-    case ORIGIN_GWS_PRERENDER:
     case ORIGIN_LINK_REL_PRERENDER_SAMEDOMAIN:
     case ORIGIN_LINK_REL_PRERENDER_CROSSDOMAIN:
     case ORIGIN_LINK_REL_NEXT:
@@ -260,7 +259,7 @@ void NoStatePrefetchContents::SetPreloadingFailureReason(FinalStatus status) {
 
 void NoStatePrefetchContents::StartPrerendering(
     const gfx::Rect& bounds,
-    SessionStorageNamespace* session_storage_namespace,
+    SessionStorageNamespaceHandle* session_storage_namespace,
     base::WeakPtr<content::PreloadingAttempt> attempt) {
   DCHECK(browser_context_);
   DCHECK(!bounds.IsEmpty());
@@ -281,7 +280,7 @@ void NoStatePrefetchContents::StartPrerendering(
   SetPreloadingTriggeringOutcome(
       attempt_.get(), content::PreloadingTriggeringOutcome::kRunning);
 
-  no_state_prefetch_contents_ = CreateWebContents(session_storage_namespace);
+  no_state_prefetch_contents_ = CreateWebContents();
   no_state_prefetch_contents_->SetOwnerLocationForDebug(FROM_HERE);
   content::WebContentsObserver::Observe(no_state_prefetch_contents_.get());
   delegate_->OnNoStatePrefetchContentsCreated(
@@ -349,14 +348,11 @@ void NoStatePrefetchContents::RemoveObserver(Observer* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
-std::unique_ptr<WebContents> NoStatePrefetchContents::CreateWebContents(
-    SessionStorageNamespace* session_storage_namespace) {
-  // TODO(ajwong): Remove the temporary map once prerendering is aware of
-  // multiple session storage namespaces per tab.
-  return WebContents::CreateWithSessionStorage(
-      WebContents::CreateParams(browser_context_),
-      CreateMapWithDefaultSessionStorageNamespace(browser_context_,
-                                                  session_storage_namespace));
+std::unique_ptr<WebContents> NoStatePrefetchContents::CreateWebContents() {
+  // The hidden WebContents is never swapped in, so it gets its own session
+  // storage namespace rather than sharing the launcher tab's namespace. The
+  // launcher's namespace id is recorded separately for matching.
+  return WebContents::Create(WebContents::CreateParams(browser_context_));
 }
 
 void NoStatePrefetchContents::NotifyPrefetchStart() {
@@ -408,14 +404,14 @@ bool NoStatePrefetchContents::AddAliasURL(const GURL& url) {
 
 bool NoStatePrefetchContents::Matches(
     const GURL& url,
-    SessionStorageNamespace* session_storage_namespace) const {
+    SessionStorageNamespaceHandle* session_storage_namespace) const {
   // TODO(davidben): Remove any consumers that pass in a NULL
   // session_storage_namespace and only test with matches.
   if (session_storage_namespace &&
       session_storage_namespace_id_ != session_storage_namespace->id()) {
     return false;
   }
-  return base::Contains(alias_urls_, url);
+  return std::ranges::contains(alias_urls_, url);
 }
 
 void NoStatePrefetchContents::PrimaryMainFrameRenderProcessGone(
@@ -599,11 +595,11 @@ RenderFrameHost* NoStatePrefetchContents::GetPrimaryMainFrame() {
              : nullptr;
 }
 
-std::optional<base::Value::Dict> NoStatePrefetchContents::GetAsDict() const {
+std::optional<base::DictValue> NoStatePrefetchContents::GetAsDict() const {
   if (!no_state_prefetch_contents_) {
     return std::nullopt;
   }
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("url", prefetch_url_.spec());
   base::TimeTicks current_time = base::TimeTicks::Now();
   base::TimeDelta duration = current_time - load_start_time_;

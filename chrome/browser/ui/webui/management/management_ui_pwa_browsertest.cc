@@ -9,7 +9,8 @@
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profile_resetter/resettable_settings_snapshot.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/web_applications/web_app_browsertest_base.h"
 #include "chrome/browser/ui/webui/management/management_ui.h"
 #include "chrome/browser/ui/webui/management/management_ui_handler.h"
@@ -36,8 +37,7 @@ class ManagementUIPWATest : public web_app::WebAppBrowserTestBase {
  public:
   ManagementUIPWATest() {
     scoped_feature_list_.InitWithFeatures(
-        {features::kDesktopPWAsRunOnOsLogin,
-         // This has the side effect of delaying the first refresh after
+        {// This has the side effect of delaying the first refresh after
          // starting the test, since it's posted with a BEST_EFFORT task.
          // Because it's user-visible, chrome://management should show installed
          // apps immediately despite this delay.
@@ -55,8 +55,8 @@ IN_PROC_BROWSER_TEST_F(ManagementUIPWATest, RunOnOsLoginApplicationsReported) {
   // Set up policy values and install PWAs
   profile()->GetPrefs()->SetList(
       prefs::kWebAppSettings,
-      base::Value::List().Append(
-          base::Value::Dict()
+      base::ListValue().Append(
+          base::DictValue()
               .Set(web_app::kManifestId, kTestApp)
               .Set(web_app::kRunOnOsLogin, web_app::kRunWindowed)));
 
@@ -73,7 +73,7 @@ IN_PROC_BROWSER_TEST_F(ManagementUIPWATest, RunOnOsLoginApplicationsReported) {
       "    JSON.stringify(result));";
 
   content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
   std::string actual_json =
       content::EvalJs(contents, javascript).ExtractString();
 
@@ -86,13 +86,13 @@ IN_PROC_BROWSER_TEST_F(ManagementUIPWATest, RunOnOsLoginApplicationsReported) {
                                    ->registrar_unsafe()
                                    .GetAppShortName(app_id);
 
-  base::Value::List expected_value;
-  base::Value::Dict app_info;
+  base::ListValue expected_value;
+  base::DictValue app_info;
   app_info.Set("name", app_name);
   GURL icon = apps::AppIconSource::GetIconURL(
       app_id, extension_misc::EXTENSION_ICON_SMALLISH);
   app_info.Set("icon", icon.spec());
-  base::Value::List permission_messages;
+  base::ListValue permission_messages;
   permission_messages.Append(
       l10n_util::GetStringUTF16(IDS_MANAGEMENT_APPLICATIONS_RUN_ON_OS_LOGIN));
   app_info.Set("permissions", std::move(permission_messages));
@@ -100,7 +100,7 @@ IN_PROC_BROWSER_TEST_F(ManagementUIPWATest, RunOnOsLoginApplicationsReported) {
 
   EXPECT_EQ(actual_value.value(), expected_value);
 
-  base::Value::List& values = actual_value->GetList();
+  base::ListValue& values = actual_value->GetList();
   base::Value& actual_app = values[0];
 
   ASSERT_EQ(*actual_app.GetDict().FindString("name"), app_name);

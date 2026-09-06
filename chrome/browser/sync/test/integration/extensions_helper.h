@@ -34,8 +34,8 @@ namespace extensions_helper {
 // extension ID of the new extension.
 std::string InstallExtension(Profile* profile, int index);
 
-// Installs the extension for the given index to all profiles (including the
-// verifier), and returns the extension ID of the new extension.
+// Installs the extension for the given index to all profiles, and returns the
+// extension ID of the new extension.
 std::string InstallExtensionForAllProfiles(int index);
 
 // Uninstalls the extension for the given index from |profile|. Assumes that
@@ -71,6 +71,9 @@ bool IsIncognitoEnabled(Profile* profile, int index);
 // Runs the message loop until all profiles have same extensions. Returns false
 // on timeout.
 bool AwaitAllProfilesHaveSameExtensions();
+
+// Returns the extension ID of the extension with the given `index`.
+extensions::ExtensionId GetExtensionId(int index);
 
 }  // namespace extensions_helper
 

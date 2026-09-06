@@ -4,30 +4,32 @@
 
 #import "ios/chrome/browser/find_in_page/model/find_tab_helper.h"
 
+#import "base/check.h"
 #import "ios/chrome/browser/find_in_page/model/find_in_page_controller.h"
 #import "ios/chrome/browser/find_in_page/model/find_in_page_model.h"
+#import "ios/chrome/browser/fullscreen/public/scoped_force_fullscreen.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_controller.h"
+#import "ios/chrome/browser/shared/public/commands/fullscreen_commands.h"
+#import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/web/public/navigation/navigation_context.h"
 
 FindTabHelper::FindTabHelper(web::WebState* web_state) {
   DCHECK(web_state);
+  CHECK(web_state->IsRealized());
   observation_.Observe(web_state);
-
-  if (web_state->IsRealized()) {
-    CreateFindInPageController(web_state);
-  }
+  controller_ = [[FindInPageController alloc] initWithWebState:web_state];
 }
 
 FindTabHelper::~FindTabHelper() {
-  // If there is a controller then it needs to be detached from `web_state`
-  // before the call to `-dealloc`.
-  [controller_ detachFromWebState];
-  controller_ = nil;
+  CHECK(!controller_);
 }
 
 void FindTabHelper::DismissFindNavigator() {
   // Same as `StopFinding()` except the UI is not marked as inactive so it can
   // be set back up if needed later.
+  if (IsFullscreenRefactoringEnabled()) {
+    scoped_force_fullscreen_.reset();
+  }
   [controller_ disableFindInPage];
 }
 
@@ -42,9 +44,14 @@ void FindTabHelper::SetFullscreenController(
   controller_.fullscreenController = fullscreen_controller;
 }
 
-void FindTabHelper::CreateFindInPageController(web::WebState* web_state) {
-  DCHECK(!controller_);
-  controller_ = [[FindInPageController alloc] initWithWebState:web_state];
+void FindTabHelper::SetFullscreenHandler(
+    id<FullscreenCommands> fullscreen_handler) {
+  if (!fullscreen_handler) {
+    // If the tab helper is being disconnected from the browser then stop the
+    // find session.
+    StopFinding();
+  }
+  fullscreen_handler_ = fullscreen_handler;
 }
 
 void FindTabHelper::SetResponseDelegate(
@@ -94,6 +101,14 @@ bool FindTabHelper::IsFindUIActive() const {
 
 void FindTabHelper::SetFindUIActive(bool active) {
   controller_.findInPageModel.enabled = active;
+  if (IsFullscreenRefactoringEnabled()) {
+    if (active) {
+      scoped_force_fullscreen_ = std::make_unique<ScopedForceFullscreen>(
+          fullscreen_handler_, ForceFullscreenFeature::kFindInPage);
+    } else {
+      scoped_force_fullscreen_.reset();
+    }
+  }
 }
 
 void FindTabHelper::PersistSearchTerm() {
@@ -104,12 +119,10 @@ void FindTabHelper::RestoreSearchTerm() {
   [controller_ restoreSearchTerm];
 }
 
-void FindTabHelper::WebStateRealized(web::WebState* web_state) {
-  CreateFindInPageController(web_state);
-}
-
 void FindTabHelper::WebStateDestroyed(web::WebState* web_state) {
   observation_.Reset();
+  scoped_force_fullscreen_.reset();
+  fullscreen_handler_ = nil;
 
   [controller_ detachFromWebState];
   controller_ = nil;

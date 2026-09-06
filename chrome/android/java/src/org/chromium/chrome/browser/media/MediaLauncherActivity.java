@@ -19,6 +19,7 @@ import org.chromium.base.Log;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 
 import java.util.Locale;
 
@@ -34,7 +35,8 @@ public class MediaLauncherActivity extends Activity {
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        Intent input = assumeNonNull(IntentUtils.sanitizeIntent(getIntent()));
+        boolean unparcelFds = ChromeFeatureList.sUnparcelIntentFileDescriptors.isEnabled();
+        Intent input = assumeNonNull(IntentUtils.sanitizeIntent(getIntent(), unparcelFds));
         Uri contentUri = input.getData();
         String mimeType = getMIMEType(contentUri);
 
@@ -83,6 +85,10 @@ public class MediaLauncherActivity extends Activity {
         // With a content URI, we can just query the ContentResolver.
         if (uriScheme.equals(ContentResolver.SCHEME_CONTENT)) {
             return getContentResolver().getType(uri);
+        }
+
+        if (!uriScheme.equals(ContentResolver.SCHEME_FILE)) {
+            return null;
         }
 
         // Otherwise, use the file extension.

@@ -57,7 +57,7 @@ class WebUIDataSource {
 
   CONTENT_EXPORT static void Update(BrowserContext* browser_context,
                                     const std::string& source_name,
-                                    const base::Value::Dict& update);
+                                    const base::DictValue& update);
 
   // Adds a string keyed to its name to our dictionary.
   virtual void AddString(std::string_view name, std::u16string_view value) = 0;
@@ -76,7 +76,7 @@ class WebUIDataSource {
 
   // Add strings from `localized_strings` to our dictionary.
   virtual void AddLocalizedStrings(
-      const base::Value::Dict& localized_strings) = 0;
+      const base::DictValue& localized_strings) = 0;
 
   // Adds a boolean keyed to its name to our dictionary.
   virtual void AddBoolean(std::string_view name, bool value) = 0;
@@ -96,8 +96,8 @@ class WebUIDataSource {
   // Adds a mapping between a path name and a resource to return.
   virtual void AddResourcePath(std::string_view path, int resource_id) = 0;
 
-  // Calls AddResourcePath() in a for-loop for |paths|. Reduces code size vs.
-  // reimplementing the same for-loop.
+  // Adds mappings for `paths` in order. If a path occurs more than once, the
+  // last resource ID wins.
   virtual void AddResourcePaths(
       base::span<const webui::ResourcePath> paths) = 0;
 

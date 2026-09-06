@@ -18,7 +18,7 @@ MessagingDelegate::IsNativeMessagingHostAllowed(
   return PolicyPermission::DISALLOW;
 }
 
-std::optional<base::Value::Dict> MessagingDelegate::MaybeGetTabInfo(
+std::optional<base::DictValue> MessagingDelegate::MaybeGetTabInfo(
     content::WebContents* web_contents) {
   NOTIMPLEMENTED();
   return std::nullopt;
@@ -39,6 +39,7 @@ std::unique_ptr<MessagePort> MessagingDelegate::CreateReceiverForNativeApp(
     const PortId& receiver_port_id,
     const std::string& native_app_name,
     bool allow_user_level,
+    const SigningCertificates& android_certificates,
     std::string* error_out) {
   NOTIMPLEMENTED();
   return nullptr;

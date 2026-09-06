@@ -4,6 +4,11 @@
 
 #include "chrome/browser/component_updater/screen_ai_component_installer.h"
 
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
@@ -54,7 +59,7 @@ bool ScreenAIComponentInstallerPolicy::RequiresNetworkEncryption() const {
 
 update_client::CrxInstaller::Result
 ScreenAIComponentInstallerPolicy::OnCustomInstall(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) {
   return update_client::CrxInstaller::Result(update_client::InstallError::NONE);
 }
@@ -64,7 +69,7 @@ void ScreenAIComponentInstallerPolicy::OnCustomUninstall() {}
 void ScreenAIComponentInstallerPolicy::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
-    base::Value::Dict manifest) {
+    base::DictValue manifest) {
   VLOG(1) << "Screen AI Component ready, version " << version.GetString()
           << " in " << install_dir.value();
 
@@ -73,7 +78,7 @@ void ScreenAIComponentInstallerPolicy::ComponentReady(
 }
 
 bool ScreenAIComponentInstallerPolicy::VerifyInstallation(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) const {
   VLOG(1) << "Verifying Screen AI component in " << install_dir.value();
 
@@ -99,8 +104,7 @@ std::string ScreenAIComponentInstallerPolicy::GetOmahaId() {
 
 void ScreenAIComponentInstallerPolicy::GetHash(
     std::vector<uint8_t>* hash) const {
-  hash->assign(std::begin(kScreenAIPublicKeySHA256),
-               std::end(kScreenAIPublicKeySHA256));
+  hash->assign_range(kScreenAIPublicKeySHA256);
 }
 
 std::string ScreenAIComponentInstallerPolicy::GetName() const {

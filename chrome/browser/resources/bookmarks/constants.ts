@@ -13,6 +13,7 @@ export enum DropPosition {
   BELOW = 4,
 }
 
+// LINT.IfChange(Command)
 /**
  * Commands which can be handled by the CommandManager. This enum is also used
  * for metrics and should be kept in sync with BookmarkManagerCommand in
@@ -50,9 +51,12 @@ export enum Command {
 
   OPEN_NEW_GROUP = 24,
 
+  OPEN_ISOLATED = 25,
+
   // Append new values to the end of the enum.
-  MAX_VALUE = 25,
+  MAX_VALUE = 26,
 }
+// LINT.ThenChange(//tools/metrics/histograms/metadata/bookmarks/enums.xml:BookmarkManagerCommand)
 
 /**
  * Where the menu was opened from. Values must never be renumbered or reused.
@@ -87,7 +91,8 @@ export const ROOT_NODE_ID: string = '0';
 export const ACCOUNT_HEADING_NODE_ID: string = 'account_heading';
 export const LOCAL_HEADING_NODE_ID: string = 'local_heading';
 
-export const BOOKMARKS_BAR_ID: string = '1';
-
 export const OPEN_CONFIRMATION_LIMIT: number = 15;
 
+// Maximum allowed length for a bookmark URL and title.
+// Limit to 500KB to match Chrome address bar (Omnibox) behavior.
+export const MAX_BOOKMARK_INPUT_LENGTH: number = 500 * 1024;

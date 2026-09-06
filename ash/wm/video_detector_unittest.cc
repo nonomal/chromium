@@ -22,6 +22,7 @@
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/compositor/layer_solid_color.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace ash {
@@ -73,6 +74,8 @@ class VideoDetectorTest : public AshTestBase {
 
   void TearDown() override {
     detector_->RemoveObserver(observer_.get());
+    detector_ = nullptr;
+    observer_.reset();
     AshTestBase::TearDown();
   }
 
@@ -86,7 +89,7 @@ class VideoDetectorTest : public AshTestBase {
         .Build();
   }
 
-  raw_ptr<VideoDetector, DanglingUntriaged> detector_;  // not owned
+  raw_ptr<VideoDetector> detector_;  // not owned
   std::unique_ptr<TestObserver> observer_;
 };
 

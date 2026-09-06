@@ -34,6 +34,10 @@ struct MinMaxSizesFloatInput {
   explicit MinMaxSizesFloatInput() = default;
   LayoutUnit float_left_inline_size;
   LayoutUnit float_right_inline_size;
+
+  // Available inline size. This is referred only when shrink-to-fit mode is
+  // enabled.
+  LayoutUnit constrained_inline_size = LayoutUnit::Max();
 };
 
 // Represents the input to a layout algorithm for a given node. The layout
@@ -88,9 +92,6 @@ class CORE_EXPORT LayoutInputNode {
   bool IsFlexibleBox() const { return IsBlock() && box_->IsFlexibleBox(); }
   bool IsGrid() const { return IsBlock() && box_->IsLayoutGrid(); }
   bool IsGridLanes() const { return IsBlock() && box_->IsLayoutGridLanes(); }
-  bool ShouldBeConsideredAsReplaced() const {
-    return box_->ShouldBeConsideredAsReplaced();
-  }
   bool IsListItem() const { return IsBlock() && box_->IsLayoutListItem(); }
   // Returns the list marker if |this.IsListItem()| with an outside list marker.
   // Otherwise |nullptr|.
@@ -109,6 +110,9 @@ class CORE_EXPORT LayoutInputNode {
   bool IsInitialLetterBox() const { return box_->IsInitialLetterBox(); }
   bool IsMedia() const { return box_->IsMedia(); }
   bool IsCanvas() const { return box_->IsCanvas(); }
+  bool IsImageReplacement() const { return box_->IsLayoutImageReplacement(); }
+
+  bool IsSemiReplaced() const { return IsBlock() && box_->IsSemiReplaced(); }
 
   // Return true if this is the legend child of a fieldset that gets special
   // treatment (i.e. placed over the block-start border).
@@ -221,6 +225,7 @@ class CORE_EXPORT LayoutInputNode {
   LayoutBox* GetLayoutBox() const { return box_.Get(); }
 
   const ComputedStyle& Style() const { return box_->StyleRef(); }
+  const ComputedStyle& FirstLineStyle() const;
 
   bool ShouldApplySizeContainment() const {
     return box_->ShouldApplySizeContainment();

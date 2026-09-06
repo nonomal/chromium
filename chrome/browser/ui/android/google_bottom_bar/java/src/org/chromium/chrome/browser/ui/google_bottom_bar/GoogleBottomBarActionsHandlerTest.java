@@ -52,6 +52,7 @@ import org.robolectric.shadows.ShadowLog;
 import org.robolectric.shadows.ShadowPackageManager;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.chrome.browser.lens.LensController;
 import org.chromium.chrome.browser.lens.LensEntryPoint;
@@ -69,11 +70,9 @@ import java.lang.ref.WeakReference;
 import java.util.Set;
 import java.util.function.Supplier;
 
-/** Unit tests for {@link BottomBarConfig}. */
+/** Unit tests for {@link GoogleBottomBarActionsHandler}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(
-        manifest = Config.NONE,
-        shadows = {ShadowLog.class})
+@Config(shadows = {ShadowLog.class})
 public class GoogleBottomBarActionsHandlerTest {
     private static final String TEST_URI = "https://www.test.com/";
 
@@ -153,6 +152,7 @@ public class GoogleBottomBarActionsHandlerTest {
 
     @Test
     public void testSaveAction_buttonConfigHasNoPendingIntent_showsTooltip() {
+        TextBubble.setSkipShowCheckForTesting(true);
         mHistogramWatcher =
                 HistogramWatcher.newSingleRecordWatcher(
                         BUTTON_CLICKED_HISTOGRAM, GoogleBottomBarButtonEvent.SAVE_DISABLED);
@@ -165,7 +165,6 @@ public class GoogleBottomBarActionsHandlerTest {
                         context.getString(
                                 R.string.google_bottom_bar_save_disabled_button_description),
                         /* pendingIntent= */ null);
-        TextBubble.setSkipShowCheckForTesting(true);
 
         View.OnClickListener clickListener =
                 mGoogleBottomBarActionsHandler.getClickListener(buttonConfig);
@@ -585,7 +584,9 @@ public class GoogleBottomBarActionsHandlerTest {
     }
 
     @Test
+    @DisabledTest(message = "https://crbug.com/477372460")
     public void testOnSearchboxLensTap_lensNotEnabled_lensNotStarted() {
+        TextBubble.setSkipShowCheckForTesting(true);
         mHistogramWatcher =
                 HistogramWatcher.newSingleRecordWatcher(
                         BUTTON_CLICKED_HISTOGRAM, GoogleBottomBarButtonEvent.SEARCHBOX_LENS);
@@ -594,7 +595,7 @@ public class GoogleBottomBarActionsHandlerTest {
         Context context = mActivity;
         mGoogleBottomBarActionsHandler.onSearchboxLensTap(new View(context));
 
-        verify(mLensController, never()).startLens(any(), any());
+        verify(mLensController, never()).startLens(any(WindowAndroid.class), any());
     }
 
     @Test
@@ -607,7 +608,8 @@ public class GoogleBottomBarActionsHandlerTest {
         Context context = mActivity;
         mGoogleBottomBarActionsHandler.onSearchboxLensTap(new View(context));
 
-        verify(mLensController).startLens(any(), mLensIntentParamsArgumentCaptor.capture());
+        verify(mLensController)
+                .startLens(any(WindowAndroid.class), mLensIntentParamsArgumentCaptor.capture());
         LensIntentParams params = mLensIntentParamsArgumentCaptor.getValue();
         assertEquals(LensEntryPoint.GOOGLE_BOTTOM_BAR, params.getLensEntryPoint());
     }

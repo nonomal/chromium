@@ -69,7 +69,7 @@ class SuspendedProcessWatcher : public content::RenderProcessHostObserver {
   void ResumeWebkitSharedTimers() {
     for (auto id : suspended_processes_) {
       content::RenderProcessHost* host = content::RenderProcessHost::FromID(id);
-      DCHECK(host);
+      CHECK(host, base::NotFatalUntil::M159);
       host->RemoveObserver(this);
       host->GetRendererInterface()->SetWebKitSharedTimersSuspended(false);
     }
@@ -94,7 +94,7 @@ base::LazyInstance<SuspendedProcessWatcher>::DestructorAtExit
 
 static void JNI_ContentViewStaticsImpl_SetWebKitSharedTimersSuspended(
     JNIEnv* env,
-    jboolean suspend) {
+    bool suspend) {
   if (suspend) {
     g_suspended_processes_watcher.Pointer()->SuspendWebKitSharedTimers();
   } else {

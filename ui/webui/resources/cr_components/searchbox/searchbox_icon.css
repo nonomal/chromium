@@ -34,7 +34,7 @@
 }
 
 /* Entities may feature a dominant color background until image loads. */
-:host([has-image_]:not([in-searchbox]):not([is-weather-answer])) #container {
+:host([has-image_]:not([in-searchbox])) #container {
   background-color: var(--color-searchbox-results-icon-container-background,
       var(--container-bg-color));
 }
@@ -44,9 +44,6 @@
   background-color: var(--color-searchbox-answer-icon-background);
 }
 
-:host([is-weather-answer]:not([in-searchbox])) #container {
-  background-color: var(--color-searchbox-results-background);
-}
 
 #image {
   display: none;
@@ -59,12 +56,12 @@
   display: initial;
 }
 
-:host([is-answer]) #image {
-  max-height: 24px;
-  max-width: 24px;
-}
 
 #icon {
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: var(--cr-searchbox-results-search-icon-size, 16px);
+  background-color: var(--color-searchbox-search-icon-background);
   height: 24px;
   width: 24px;
 }
@@ -83,25 +80,16 @@
   width: 16px;
 }
 
-#icon {
-  -webkit-mask-position: center;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-size: var(--cr-searchbox-results-search-icon-size, 16px);
-  background-color: var(--color-searchbox-search-icon-background);
+@media (forced-colors: active) {
+  #icon {
+    --color-searchbox-search-icon-background: ButtonText;
+  }
 }
 
 :host([in-searchbox][is-lens-searchbox_]) #icon {
   background-color: var(--color-searchbox-google-g-background);
   height: var(--cr-searchbox-icon-size-in-searchbox);
   width: var(--cr-searchbox-icon-size-in-searchbox);
-}
-
-/* Set styles for high contrast mode in Windows. */
-@media (forced-colors: active) {
-  :host([in-searchbox][is-lens-searchbox_]) #icon {
-    /* Set the icon color to hcm (high contrast mode) value. */
-    background-color: ButtonText;
-  }
 }
 
 :host([in-searchbox][favicon-image_*='//resources/cr_components/omnibox/icons/google_g.svg']) #faviconImage {
@@ -134,8 +122,10 @@
 }
 
 :host([in-searchbox]) #iconImg {
-  height: var(--cr-searchbox-icon-size-in-searchbox);
-  width: var(--cr-searchbox-icon-size-in-searchbox);
+  height: var(--cr-searchbox-icon-size-in-searchbox,
+      var(--cr-searchbox-results-search-icon-size));
+  width: var(--cr-searchbox-icon-size-in-searchbox,
+      var(--cr-searchbox-results-search-icon-size));
 }
 
 :host([has-image_]:not([in-searchbox])) #icon,

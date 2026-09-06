@@ -5,9 +5,10 @@
 
 #include <optional>
 
-#include "base/containers/contains.h"
+#include "base/check.h"
 #include "base/containers/fixed_flat_map.h"
 #include "base/json/json_reader.h"
+#include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
@@ -55,9 +56,9 @@ void DevicePostureRegistryWatcherWin::AddObserver(
     return;
   }
 
-  DCHECK(!observers_.HasObserver(observer));
+  CHECK(!observers_.HasObserver(observer), base::NotFatalUntil::M159);
   if (observers_.empty()) {
-    DCHECK(!registry_key_);
+    CHECK(!registry_key_, base::NotFatalUntil::M159);
     registry_key_.emplace(HKEY_CURRENT_USER, kFoledRegKeyPath,
                           KEY_NOTIFY | KEY_QUERY_VALUE);
     if (registry_key_->Valid()) {
@@ -110,7 +111,7 @@ void DevicePostureRegistryWatcherWin::ComputeFoldableState(
     return;
   }
 
-  std::optional<base::Value::Dict> dict = base::JSONReader::ReadDict(
+  std::optional<base::DictValue> dict = base::JSONReader::ReadDict(
       base::WideToUTF8(posture_data), base::JSON_PARSE_CHROMIUM_EXTENSIONS);
   if (!dict) {
     DVLOG(1) << "Could not read the foldable status.";
@@ -133,7 +134,7 @@ void DevicePostureRegistryWatcherWin::ComputeFoldableState(
     }
   }
 
-  base::Value::List* viewport_segments = dict->FindList("Rectangles");
+  base::ListValue* viewport_segments = dict->FindList("Rectangles");
   if (!viewport_segments) {
     DVLOG(1) << "Could not parse the viewport segments data.";
     return;
@@ -162,7 +163,7 @@ void DevicePostureRegistryWatcherWin::ComputeFoldableState(
 
 std::optional<std::vector<gfx::Rect>>
 DevicePostureRegistryWatcherWin::ParseViewportSegments(
-    const base::Value::List& viewport_segments) {
+    const base::ListValue& viewport_segments) {
   if (viewport_segments.empty()) {
     return std::nullopt;
   }

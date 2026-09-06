@@ -18,6 +18,7 @@ buildflag_header("buildflags") {
 
 if (enable_vulkan) {
   use_vulkan_xcb = ozone_platform_x11
+
   config("vulkan_config") {
     defines = [ "VK_NO_PROTOTYPES" ]
     if (use_vulkan_xcb) {
@@ -132,6 +133,7 @@ if (enable_vulkan) {
       "//base",
       "//components/crash/core/common:crash_key",
       "//components/viz/common/resources:shared_image_format",
+      "//third_party/re2",
       "//third_party/vulkan_memory_allocator",
       "//ui/base:ozone_buildflags",
       "//ui/gfx",
@@ -200,7 +202,7 @@ if (enable_vulkan) {
     deps = [
       "//ui/base:features",
       "//ui/gfx",
-      "//ui/gfx:native_widget_types",
+      "//ui/gfx:native_ui_types",
     ]
 
     if (use_ozone) {
@@ -248,14 +250,14 @@ if (enable_vulkan) {
         ":test_support",
         "//base",
         "//base/test:test_support",
-        "//components/viz/common:vulkan_context_provider",
+        "//gpu/command_buffer/service:gles2",
         "//gpu/ipc/service",
         "//gpu/vulkan/init",
         "//testing/gmock",
         "//testing/gtest",
         "//ui/events/platform",
         "//ui/gfx",
-        "//ui/gfx:native_widget_types",
+        "//ui/gfx:native_ui_types",
         "//ui/gfx:test_support",
         "//ui/gfx/geometry",
       ]

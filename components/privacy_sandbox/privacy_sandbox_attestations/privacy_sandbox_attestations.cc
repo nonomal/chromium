@@ -4,6 +4,7 @@
 
 #include "components/privacy_sandbox/privacy_sandbox_attestations/privacy_sandbox_attestations.h"
 
+#include <algorithm>
 #include <ios>
 #include <memory>
 #include <optional>
@@ -14,7 +15,6 @@
 
 #include "base/check.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -55,41 +55,6 @@ namespace {
 
 // Global PrivacySandboxAttestations instance for testing.
 PrivacySandboxAttestations* g_test_instance = nullptr;
-
-// Helper function that checks if enrollment overrides are set from the
-// chrome://flags entry.
-bool IsOverriddenByFlags(const net::SchemefulSite& site) {
-  const base::CommandLine& command_line =
-      *base::CommandLine::ForCurrentProcess();
-
-  if (!command_line.HasSwitch(
-          privacy_sandbox::kPrivacySandboxEnrollmentOverrides)) {
-    return false;
-  }
-
-  std::string origins_str = command_line.GetSwitchValueASCII(
-      privacy_sandbox::kPrivacySandboxEnrollmentOverrides);
-
-  std::vector<std::string> overrides_list = base::SplitString(
-      origins_str, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
-
-  for (std::string override_str : overrides_list) {
-    if (override_str.empty()) {
-      continue;
-    }
-
-    GURL override_url(override_str);
-    if (!override_url.is_valid()) {
-      continue;
-    }
-
-    if (site.IsSameSiteWith(override_url)) {
-      return true;
-    }
-  }
-
-  return false;
-}
 
 void RecordParsingStatusHistogram(ParsingStatus status) {
   base::UmaHistogramEnumeration(kAttestationsFileParsingStatusUMA, status);
@@ -390,7 +355,7 @@ void PrivacySandboxAttestations::AddOverride(const net::SchemefulSite& site) {
 
 bool PrivacySandboxAttestations::IsOverridden(
     const net::SchemefulSite& site) const {
-  return IsOverriddenByFlags(site) || base::Contains(overridden_sites_, site);
+  return std::ranges::contains(overridden_sites_, site);
 }
 
 void PrivacySandboxAttestations::SetAllPrivacySandboxAttestedForTesting(

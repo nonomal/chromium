@@ -10,8 +10,9 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/style_recalc_change.h"
-#include "third_party/blink/renderer/core/dom/element_rare_data_field.h"
+#include "third_party/blink/renderer/core/dom/node_rare_data_field.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/paint/pre_paint_subtree_walk_reasons.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/core/style/computed_style_base_constants.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cancellable_task.h"
@@ -69,7 +70,7 @@ static_assert(static_cast<uint32_t>(DisplayLockActivationReason::kAny) <
 class CORE_EXPORT DisplayLockContext final
     : public GarbageCollected<DisplayLockContext>,
       public LocalFrameView::LifecycleNotificationObserver,
-      public ElementRareDataField {
+      public NodeRareDataField {
  public:
   // Note the order of the phases matters. Each phase implies all previous ones
   // as well.
@@ -118,21 +119,33 @@ class CORE_EXPORT DisplayLockContext final
     //     scroll-marker-group property.
     //   - This is an activatable for a11y lock and a11y is enabled.
     // TODO(400977357): Optimize layout for the scroll-marker-group cases.
-    return !is_locked_ || forced_info_.is_forced(ForcedPhase::kLayout) ||
-           (IsActivatable(DisplayLockActivationReason::kAny) &&
-            ActivatableDisplayLocksForced()) ||
-           (IsAuto() && HasScrollerWithScrollMarkerGroup()) ||
-           ShouldActivateForScreenReader();
+    bool should = !is_locked_ || forced_info_.is_forced(ForcedPhase::kLayout) ||
+                  (IsActivatable(DisplayLockActivationReason::kAny) &&
+                   ActivatableDisplayLocksForced()) ||
+                  (IsAuto() && HasScrollerWithScrollMarkerGroup()) ||
+                  ShouldActivateForScreenReader();
+    // Should only lay out if style recalc is allowed.
+    DCHECK(!should || ShouldStyleChildren());
+    return should;
   }
 
   bool ShouldActivateForScreenReader() const;
   void DidLayoutChildren();
   ALWAYS_INLINE bool ShouldPrePaintChildren() const {
-    return !is_locked_ || forced_info_.is_forced(ForcedPhase::kPrePaint) ||
-           (IsActivatable(DisplayLockActivationReason::kAny) &&
-            ActivatableDisplayLocksForced());
+    bool should = !is_locked_ ||
+                  forced_info_.is_forced(ForcedPhase::kPrePaint) ||
+                  (IsActivatable(DisplayLockActivationReason::kAny) &&
+                   ActivatableDisplayLocksForced());
+    // Should only pre-paint of layout is allowed.
+    DCHECK(!should || ShouldLayoutChildren());
+    return should;
   }
-  ALWAYS_INLINE bool ShouldPaintChildren() const { return !is_locked_; }
+  ALWAYS_INLINE bool ShouldPaintChildren() const {
+    bool should = !is_locked_;
+    // Should only paint if pre-paint is allowed.
+    DCHECK(!should || ShouldPrePaintChildren());
+    return should;
+  }
 
   // Returns true if the last style recalc traversal was blocked at this
   // element.
@@ -190,6 +203,10 @@ class CORE_EXPORT DisplayLockContext final
     needs_compositing_dependent_flag_update_ = true;
   }
 
+  void NotifyVisualOverflowRecalcWasBlocked() {
+    needs_visual_overflow_recalc_update_ = true;
+  }
+
   // Notify this element will be disconnected.
   void NotifyWillDisconnect();
 
@@ -205,24 +222,17 @@ class CORE_EXPORT DisplayLockContext final
   void NotifySubtreeLostSelection();
   void NotifySubtreeGainedSelection();
 
-  void SetNeedsPrePaintSubtreeWalk(
-      bool needs_effective_allowed_touch_action_update,
-      bool needs_blocking_wheel_event_handler_update,
-      bool needs_soft_navigation_context_update) {
-    needs_effective_allowed_touch_action_update_ =
-        needs_effective_allowed_touch_action_update;
-    needs_blocking_wheel_event_handler_update_ =
-        needs_blocking_wheel_event_handler_update;
-    needs_soft_navigation_context_update_ =
-        needs_soft_navigation_context_update;
-    needs_prepaint_subtree_walk_ = true;
+  void SetNeedsPrePaintSubtreeWalk(PrePaintSubtreeWalkReasons reasons) {
+    pre_paint_subtree_walk_reasons_ = reasons;
+    // TODO(crbug.com/547894783): Clear this after update.
+    needs_pre_paint_subtree_walk_ = true;
   }
 
   void DidForceActivatableDisplayLocks() {
     if (IsLocked() && IsActivatable(DisplayLockActivationReason::kAny)) {
       MarkForStyleRecalcIfNeeded();
       MarkForLayoutIfNeeded();
-      MarkAncestorsForPrePaintIfNeeded();
+      MarkForPrePaintIfNeeded();
     }
   }
 
@@ -332,14 +342,17 @@ class CORE_EXPORT DisplayLockContext final
   // dirty, and false otherwise.
   bool MarkForStyleRecalcIfNeeded();
   bool MarkForLayoutIfNeeded();
-  bool MarkAncestorsForPrePaintIfNeeded();
+  bool MarkForPrePaintIfNeeded();
   bool MarkNeedsRepaintAndPaintArtifactCompositorUpdate();
   bool MarkNeedsCullRectUpdate();
   bool MarkForCompositingUpdatesIfNeeded();
+  bool MarkForVisualOverflowRecalcIfNeeded();
 
   bool IsElementDirtyForStyleRecalc() const;
   bool IsElementDirtyForLayout() const;
+
   bool IsElementDirtyForPrePaint() const;
+  bool IsContextDirtyForPrePaint() const;
 
   // Helper to schedule an animation to delay lifecycle updates for the next
   // frame.
@@ -431,7 +444,7 @@ class CORE_EXPORT DisplayLockContext final
 
   bool IsScreenReaderActive() const;
 
-  WeakMember<Element> element_;
+  Member<Element> element_;
   WeakMember<Document> document_;
   EContentVisibility state_ = EContentVisibility::kVisible;
 
@@ -497,11 +510,14 @@ class CORE_EXPORT DisplayLockContext final
 
   StyleRecalcChange blocked_child_recalc_change_;
 
-  bool needs_effective_allowed_touch_action_update_ = false;
-  bool needs_blocking_wheel_event_handler_update_ = false;
-  bool needs_soft_navigation_context_update_ = false;
-  bool needs_prepaint_subtree_walk_ = false;
+  PrePaintSubtreeWalkReasons pre_paint_subtree_walk_reasons_;
+  // This can be true even if `pre_paint_subtree_walk_reasons_` is empty,
+  // in cases where we need to walk the subtree for reasons other than the
+  // specific reasons in `pre_paint_subtree_walk_reasons_`.
+  bool needs_pre_paint_subtree_walk_ = false;
+
   bool needs_compositing_dependent_flag_update_ = false;
+  bool needs_visual_overflow_recalc_update_ = false;
 
   // Will be true if child traversal was blocked on a previous layout run on the
   // locked element. We need to keep track of this to ensure that on the next

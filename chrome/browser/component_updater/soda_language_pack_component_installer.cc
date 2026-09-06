@@ -4,9 +4,11 @@
 
 #include "chrome/browser/component_updater/soda_language_pack_component_installer.h"
 
-#include <iterator>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/containers/flat_set.h"
@@ -16,7 +18,6 @@
 #include "base/functional/callback.h"
 #include "base/logging.h"
 #include "base/notreached.h"
-#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "build/build_config.h"
@@ -29,6 +30,7 @@
 #include "components/update_client/update_client_errors.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "third_party/abseil-cpp/absl/strings/str_format.h"
 
 namespace component_updater {
 
@@ -84,13 +86,13 @@ void SodaLanguagePackComponentInstallerPolicy::
           LOG(ERROR)
               << "On demand update of the SODA language component failed "
                  "with error: "
-              << static_cast<int>(error);
+              << std::to_underlying(error);
         }
       }));
 }
 
 bool SodaLanguagePackComponentInstallerPolicy::VerifyInstallation(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) const {
   return base::PathExists(
       install_dir.Append(speech::kSodaLanguagePackDirectoryRelativePath));
@@ -108,7 +110,7 @@ bool SodaLanguagePackComponentInstallerPolicy::RequiresNetworkEncryption()
 
 update_client::CrxInstaller::Result
 SodaLanguagePackComponentInstallerPolicy::OnCustomInstall(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     const base::FilePath& install_dir) {
   return SodaComponentInstallerPolicy::SetComponentDirectoryPermission(
       install_dir);
@@ -119,7 +121,7 @@ void SodaLanguagePackComponentInstallerPolicy::OnCustomUninstall() {}
 void SodaLanguagePackComponentInstallerPolicy::ComponentReady(
     const base::Version& version,
     const base::FilePath& install_dir,
-    base::Value::Dict manifest) {
+    base::DictValue manifest) {
   VLOG(1) << "Component ready, version " << version.GetString() << " in "
           << install_dir.value();
 
@@ -146,13 +148,12 @@ base::FilePath SodaLanguagePackComponentInstallerPolicy::GetRelativeInstallDir()
 
 void SodaLanguagePackComponentInstallerPolicy::GetHash(
     std::vector<uint8_t>* hash) const {
-  hash->assign(std::begin(language_config_.public_key_sha),
-               std::end(language_config_.public_key_sha));
+  hash->assign_range(language_config_.public_key_sha);
 }
 
 std::string SodaLanguagePackComponentInstallerPolicy::GetName() const {
-  return base::StringPrintf(kLanguagePackManifestName,
-                            language_config_.language_name);
+  return absl::StrFormat(kLanguagePackManifestName,
+                         language_config_.language_name);
 }
 
 update_client::InstallerAttributes

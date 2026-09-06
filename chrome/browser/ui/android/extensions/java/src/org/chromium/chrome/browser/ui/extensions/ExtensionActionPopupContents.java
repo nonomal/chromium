@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.ui.extensions;
 
+import android.view.KeyEvent;
+
 import org.jni_zero.CalledByNative;
 import org.jni_zero.JNINamespace;
 import org.jni_zero.JniType;
@@ -12,7 +14,6 @@ import org.jni_zero.NativeMethods;
 import org.chromium.base.lifetime.Destroyable;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
-import org.chromium.chrome.browser.ui.browser_window.ChromeAndroidTask;
 import org.chromium.content_public.browser.WebContents;
 
 /**
@@ -47,13 +48,6 @@ public class ExtensionActionPopupContents implements Destroyable {
             @JniType("content::WebContents*") WebContents webContents) {
         mNativeExtensionActionPopupContents = nativeExtensionActionPopupContents;
         mWebContents = webContents;
-    }
-
-    /** Creates an {@link ExtensionActionPopupContents} instance. */
-    public static ExtensionActionPopupContents create(
-            ChromeAndroidTask task, String actionId, int tabId) {
-        return ExtensionActionPopupContentsJni.get()
-                .create(task.getOrCreateNativeBrowserWindowPtr(), actionId, tabId);
     }
 
     /**
@@ -117,6 +111,17 @@ public class ExtensionActionPopupContents implements Destroyable {
         }
     }
 
+    @CalledByNative
+    private boolean handleKeyboardEvent(@Nullable KeyEvent event) {
+        if (event == null) {
+            return false;
+        }
+        if (mDelegate != null) {
+            return mDelegate.handleKeyboardEvent(event);
+        }
+        return false;
+    }
+
     /**
      * Interface for receiving UI-related callbacks from an {@link ExtensionActionPopupContents}.
      *
@@ -125,6 +130,13 @@ public class ExtensionActionPopupContents implements Destroyable {
     public interface Delegate {
         /** Called when the renderer requested to resize the window to fit the content size. */
         void resizeDueToAutoResize(int width, int height);
+
+        /**
+         * Allows delegates to handle unhandled keyboard messages coming back from the renderer.
+         *
+         * @return True if the event was handled, otherwise false.
+         */
+        boolean handleKeyboardEvent(@Nullable KeyEvent event);
 
         /** Called when it finished loading the initial page. */
         void onLoaded();
@@ -137,17 +149,6 @@ public class ExtensionActionPopupContents implements Destroyable {
 
     @NativeMethods
     public interface Natives {
-        /**
-         * Creates the native ExtensionActionPopupContents object and returns its Java peer.
-         *
-         * @param androidBrowserWindowPtr The address of a native {@code BrowserWindowInterface}.
-         * @param actionId The ID of the extension action.
-         * @param tabId The ID of the tab context.
-         * @return The Java {@link ExtensionActionPopupContents} object, or {@code null} on failure.
-         */
-        ExtensionActionPopupContents create(
-                long androidBrowserWindowPtr, @JniType("std::string") String actionId, int tabId);
-
         /**
          * Destroys the native ExtensionActionPopupContents object.
          *

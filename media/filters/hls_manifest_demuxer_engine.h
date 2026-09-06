@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/sequence_checker.h"
 #include "base/task/sequenced_task_runner.h"
@@ -44,19 +45,20 @@ class MEDIA_EXPORT HlsManifestDemuxerEngine : public ManifestDemuxer::Engine,
                            scoped_refptr<base::SequencedTaskRunner> task_runner,
                            std::unique_ptr<TrackManager> track_manager,
                            bool was_already_tainted,
+                           url::Origin security_origin,
                            GURL root_playlist_uri,
                            MediaLog* media_log);
   ~HlsManifestDemuxerEngine() override;
 
   // DataSourceInfo implementation
   int64_t GetMemoryUsage() override;
-  bool WouldTaintOrigin() override;
-  bool IsStreaming() override;
+  bool WouldTaintOrigin() const override;
+  bool IsStreaming() const override;
 
   // ManifestDemuxer::Engine implementation
   std::string GetName() const override;
   void Initialize(ManifestDemuxerEngineHost* host,
-                  PipelineStatusCallback status_cb) override;
+                  HlsDemuxerStatusCallback status_cb) override;
   void OnTimeUpdate(base::TimeDelta time,
                     double playback_rate,
                     ManifestDemuxer::DelayCallback cb) override;
@@ -67,19 +69,16 @@ class MEDIA_EXPORT HlsManifestDemuxerEngine : public ManifestDemuxer::Engine,
   int64_t GetMemoryUsage() const override;
   void Stop() override;
 
-  void SelectVideoVariant(const MediaTrack::Id&) override;
-  void SelectAudioRendition(const MediaTrack::Id&) override;
+  void SelectVideoTrack(const MediaTrack::Id&) override;
+  void SelectAudioTrack(const MediaTrack::Id&) override;
+  std::vector<raw_ptr<DemuxerStream>> FilterDemuxerStreams(
+      std::vector<raw_ptr<DemuxerStream>>&&) override;
 
   // HlsRenditionHost implementation.
-  void ReadKey(const hls::MediaSegment::EncryptionData& data,
-               HlsDataSourceProvider::ReadCb) override;
-  void ReadManifest(const GURL& uri, HlsDataSourceProvider::ReadCb cb) override;
   void ReadMediaSegment(const hls::MediaSegment& segment,
                         bool read_chunked,
                         bool include_init,
                         HlsDataSourceProvider::ReadCb cb) override;
-  void ReadStream(std::unique_ptr<HlsDataSourceStream> stream,
-                  HlsDataSourceProvider::ReadCb cb) override;
   void UpdateNetworkSpeed(uint64_t bps) override;
   void UpdateRenditionManifestUri(std::string role,
                                   GURL uri,
@@ -164,8 +163,9 @@ class MEDIA_EXPORT HlsManifestDemuxerEngine : public ManifestDemuxer::Engine,
                             ManifestDemuxer::SeekCallback cb);
 
   // Posted by `::Initialize()`
-  void InitAction(PipelineStatusCallback status_cb);
-  void FinishInitialization(PipelineStatusCallback cb, HlsDemuxerStatus status);
+  void InitAction(HlsDemuxerStatusCallback status_cb);
+  void FinishInitialization(HlsDemuxerStatusCallback cb,
+                            HlsDemuxerStatus status);
 
   // Posted by `::OnTimeUpdate()`
   void OnTimeUpdateAction(base::TimeDelta time,
@@ -180,7 +180,6 @@ class MEDIA_EXPORT HlsManifestDemuxerEngine : public ManifestDemuxer::Engine,
                   base::TimeDelta delay_time);
   void UpdateMediaPlaylistForRole(
       std::string role,
-      GURL uri,
       HlsDemuxerStatusCallback cb,
       HlsDataSourceProvider::ReadResult maybe_stream);
 
@@ -219,21 +218,21 @@ class MEDIA_EXPORT HlsManifestDemuxerEngine : public ManifestDemuxer::Engine,
 
   // Capture the stream before it gets posted to `cb` and update the internal
   // memory state and origin tainting.
-  void UpdateHlsDataSourceStats(
-      HlsDataSourceProvider::ReadCb cb,
-      HlsDataSourceProvider::ReadStatus::Or<
-          std::unique_ptr<HlsDataSourceStream>> result);
+  void UpdateHlsDataSourceStats(HlsDataSourceProvider::ReadCb cb,
+                                HlsDataSourceProvider::ReadResult result);
 
   // Helper to bind `UpdateHlsDataSourceStats` around a response CB.
   HlsDataSourceProvider::ReadCb BindStatsUpdate(
       HlsDataSourceProvider::ReadCb cb);
 
+  void ReadManifest(const GURL& uri, HlsDataSourceProvider::ReadCb cb);
   void ParsePlaylist(HlsDemuxerStatusCallback parse_complete_cb,
                      PlaylistParseInfo parse_info,
                      HlsDataSourceProvider::ReadResult m_stream);
 
   HlsDemuxerStatusCallback BindPlaylistLoader(
       hls::RenditionGroup::RenditionTrack rendition,
+      const hls::VariantStream& variant,
       std::string rendition_role,
       HlsDemuxerStatusCallback do_next);
   void OnMultivariantPlaylist(
@@ -249,6 +248,7 @@ class MEDIA_EXPORT HlsManifestDemuxerEngine : public ManifestDemuxer::Engine,
       const hls::VariantStream* variant,
       std::optional<hls::RenditionGroup::RenditionTrack> video,
       std::optional<hls::RenditionGroup::RenditionTrack> audio);
+  void UpdateSelectableTrackLists();
 
   void LoadPlaylist(PlaylistParseInfo parse_info,
                     HlsDemuxerStatusCallback on_complete);
@@ -278,11 +278,17 @@ class MEDIA_EXPORT HlsManifestDemuxerEngine : public ManifestDemuxer::Engine,
   hls::ParseStatus::Or<scoped_refptr<hls::MediaPlaylist>>
   ParseMediaPlaylistFromStringSource(std::string_view source,
                                      GURL uri,
+                                     const url::Origin& manifest_origin,
                                      hls::types::DecimalInteger version);
 
   scoped_refptr<base::SequencedTaskRunner> media_task_runner_;
   std::unique_ptr<TrackManager> track_manager_
       GUARDED_BY_CONTEXT(media_sequence_checker_);
+
+  // The security origin of the frame in which the player is hosted. For
+  // manifests that are loaded via data urls, the frame security origin becomes
+  // the manifest security origin.
+  url::Origin security_origin_;
 
   // root playlist, either multivariant or media.
   GURL root_playlist_uri_;
@@ -302,6 +308,14 @@ class MEDIA_EXPORT HlsManifestDemuxerEngine : public ManifestDemuxer::Engine,
   std::unique_ptr<hls::RenditionManager> rendition_manager_
       GUARDED_BY_CONTEXT(media_sequence_checker_);
   std::vector<std::string> selected_variant_codecs_
+      GUARDED_BY_CONTEXT(media_sequence_checker_);
+
+  // Keep track of tracks :)
+  // If tracks change, we have to know which ones to delete and which ones to
+  // add via `add_track_` and `remove_track_`.
+  std::vector<MediaTrack> audio_tracks_
+      GUARDED_BY_CONTEXT(media_sequence_checker_);
+  std::vector<MediaTrack> video_tracks_
       GUARDED_BY_CONTEXT(media_sequence_checker_);
 
   // Multiple renditions are allowed, and have to be synchronized.

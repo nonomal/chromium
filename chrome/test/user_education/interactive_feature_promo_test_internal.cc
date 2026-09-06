@@ -8,7 +8,6 @@
 #include <optional>
 #include <variant>
 
-#include "base/containers/contains.h"
 #include "base/containers/map_util.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
@@ -16,6 +15,7 @@
 #include "base/time/time.h"
 #include "chrome/browser/feature_engagement/tracker_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/user_education/user_education_service.h"
 #include "chrome/browser/user_education/user_education_service_factory.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
@@ -31,6 +31,7 @@
 #include "content/public/browser/browser_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/interaction/interactive_test_internal.h"
 
 namespace internal {
 
@@ -50,7 +51,7 @@ std::optional<base::Time> CalculateNewTime(
 
 }  // namespace
 
-DEFINE_FRAMEWORK_SPECIFIC_METADATA(InteractiveFeaturePromoTestPrivate)
+DEFINE_SAFE_CAST_TARGET(InteractiveFeaturePromoTestPrivate)
 
 InteractiveFeaturePromoTestPrivate::ProfileData::ProfileData() = default;
 InteractiveFeaturePromoTestPrivate::ProfileData::ProfileData(
@@ -74,23 +75,25 @@ InteractiveFeaturePromoTestPrivate::InteractiveFeaturePromoTestPrivate(
           ->RegisterCreateServicesCallbackForTesting(base::BindRepeating(
               &InteractiveFeaturePromoTestPrivate::CreateServicesCallback,
               base::Unretained(this)));
-  activation_lock_ = user_education::FeaturePromoControllerCommon::
+  activation_lock_ = user_education::FeaturePromoControllerImpl::
       BlockActiveWindowCheckForTesting();
+
+  // Keep additional context detailing all of the promos that were attempted to
+  // show, whether they succeeded or not, and why.
+  feature_promo_result_context_ = test_impl.CreateAdditionalContext();
+  feature_promo_result_string_ << "Feature Promo Results:";
+  feature_promo_result_context_.Set(feature_promo_result_string_.str());
+  feature_promo_result_subscription_ =
+      user_education::FeaturePromoController::AddResultCallbackForTesting(
+          base::BindRepeating(
+              &InteractiveFeaturePromoTestPrivate::OnFeaturePromoResult,
+              base::Unretained(this)));
 }
 
 InteractiveFeaturePromoTestPrivate::~InteractiveFeaturePromoTestPrivate() =
     default;
 
-void InteractiveFeaturePromoTestPrivate::SetControllerMode(
-    ControllerMode mode) {
-  CHECK(!controller_mode_.has_value());
-  controller_mode_ = mode;
-}
-
-void InteractiveFeaturePromoTestPrivate::CommitControllerMode() {
-  if (!controller_mode_.has_value()) {
-    SetControllerMode(ControllerMode::kUserEd25);
-  }
+void InteractiveFeaturePromoTestPrivate::ConfigureController() {
   if (clock_mode_ == ClockMode::kUseTestClock) {
     CHECK(!use_shortened_timeouts_for_internal_testing_)
         << "Changing timeouts has no effect with a test clock.";
@@ -110,40 +113,22 @@ void InteractiveFeaturePromoTestPrivate::CommitControllerMode() {
       enable.push_back(feature_with_params);
     }
   }
-  switch (*controller_mode_) {
-    case ControllerMode::kUserEd25:
-      if (use_shortened_timeouts_for_internal_testing_) {
-        enable.push_back(base::test::FeatureRefAndParams(
-            user_education::features::kUserEducationExperienceVersion2Point5,
-            {{"low_priority_timeout", "3s"},
-             {"medium_priority_timeout", "2s"},
-             {"high_priority_timeout", "1s"},
-             // Idle timeout must be larger than low priority timeout for
-             // timeout tests to work, otherwise it's not possible for the test
-             // to time out due to user input.
-             {"idle_before_heavyweight", "5s"}}));
-      } else {
-        enable.push_back(base::test::FeatureRefAndParams(
-            user_education::features::kUserEducationExperienceVersion2Point5,
-            {}));
-      }
-      break;
-    case ControllerMode::kUserEd20:
-      disable.push_back(
-          user_education::features::kUserEducationExperienceVersion2Point5);
-      break;
-  }
   feature_list_.InitAndEnableFeaturesWithParameters(enable, disable);
+
+  if (use_shortened_timeouts_for_internal_testing_) {
+    user_education::features::testing::TimeoutOverrides overrides;
+    overrides.low_priority_timeout = base::Seconds(3);
+    overrides.medium_priority_timeout = base::Seconds(2);
+    overrides.high_priority_timeout = base::Seconds(1);
+    overrides.idle_before_heavyweight = base::Seconds(5);
+    timeout_override_handle_ =
+        user_education::features::testing::SetTimeoutOverridesForTest(
+            overrides);
+  }
 }
 
-void InteractiveFeaturePromoTestPrivate::ResetControllerMode() {
+void InteractiveFeaturePromoTestPrivate::ResetController() {
   feature_list_.Reset();
-}
-
-void InteractiveFeaturePromoTestPrivate::DoTestSetUp() {
-  CHECK(controller_mode_.has_value());
-  CHECK_NE(controller_mode_ == ControllerMode::kUserEd20,
-           user_education::features::IsUserEducationV25());
 }
 
 void InteractiveFeaturePromoTestPrivate::DoTestTearDown() {
@@ -153,8 +138,9 @@ void InteractiveFeaturePromoTestPrivate::DoTestTearDown() {
 }
 
 InteractiveFeaturePromoTestPrivate::MockTracker*
-InteractiveFeaturePromoTestPrivate::GetMockTrackerFor(Browser* browser) {
-  auto* const data = base::FindOrNull(profile_data_, browser->profile());
+InteractiveFeaturePromoTestPrivate::GetMockTrackerFor(
+    BrowserWindowInterface* browser) {
+  auto* const data = base::FindOrNull(profile_data_, browser->GetProfile());
   return data ? data->mock_tracker : nullptr;
 }
 
@@ -181,7 +167,7 @@ void InteractiveFeaturePromoTestPrivate::SetLastActive(NewTime time) {
 }
 
 void InteractiveFeaturePromoTestPrivate::MaybeWaitForTrackerInitialization(
-    Browser* browser) {
+    BrowserWindowInterface* browser) {
   bool wait_for_browser = false;
   if (const auto* const mode =
           std::get_if<UseDefaultTrackerAllowingPromos>(&tracker_mode_)) {
@@ -196,7 +182,7 @@ void InteractiveFeaturePromoTestPrivate::MaybeWaitForTrackerInitialization(
   if (wait_for_browser) {
     auto* const tracker =
         feature_engagement::TrackerFactory::GetForBrowserContext(
-            browser->profile());
+            browser->GetProfile());
     ASSERT_NE(nullptr, tracker);
     base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
     tracker->AddOnInitializedCallback(
@@ -211,7 +197,7 @@ void InteractiveFeaturePromoTestPrivate::MaybeWaitForTrackerInitialization(
 void InteractiveFeaturePromoTestPrivate::CreateServicesCallback(
     content::BrowserContext* context) {
   auto* const profile = Profile::FromBrowserContext(context);
-  if (base::Contains(profile_data_, profile)) {
+  if (profile_data_.contains(profile)) {
     return;
   }
   profile_data_.emplace(profile, ProfileData());
@@ -227,6 +213,13 @@ void InteractiveFeaturePromoTestPrivate::CreateServicesCallback(
       base::BindRepeating(
           &InteractiveFeaturePromoTestPrivate::CreateUserEducationService,
           weak_ptr_factory_.GetWeakPtr()));
+}
+
+void InteractiveFeaturePromoTestPrivate::OnFeaturePromoResult(
+    const base::Feature& feature,
+    user_education::FeaturePromoResult result) {
+  feature_promo_result_string_ << "\n   - " << feature.name << ": " << result;
+  feature_promo_result_context_.Set(feature_promo_result_string_.str());
 }
 
 // static

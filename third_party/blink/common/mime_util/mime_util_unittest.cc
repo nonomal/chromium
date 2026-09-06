@@ -42,15 +42,7 @@ TEST(MimeUtilJsonMimeTypeTest, IsJSON) {
   EXPECT_TRUE(IsJSONMimeType("text/blah+json;x=1"));
   EXPECT_TRUE(IsJSONMimeType("text/html+json"));
   EXPECT_TRUE(IsJSONMimeType("image/svg+json"));
-}
 
-TEST(MimeUtilJsonMimeTypeTest, IsJSONStrictTokenValidation) {
-  base::test::ScopedFeatureList features;
-  features.InitWithFeatureState(
-      blink::features::kStrictJsonMimeTypeTokenValidation, true);
-
-  EXPECT_TRUE(IsJSONMimeType("application/json"));
-  EXPECT_TRUE(IsJSONMimeType("text/json"));
   EXPECT_TRUE(IsJSONMimeType("text/hal+json"));
   EXPECT_FALSE(IsJSONMimeType("te xt/hal+json"));
   EXPECT_FALSE(IsJSONMimeType("text/ha l+json"));
@@ -58,15 +50,63 @@ TEST(MimeUtilJsonMimeTypeTest, IsJSONStrictTokenValidation) {
   EXPECT_FALSE(IsJSONMimeType("text/halé+json"));
 }
 
+class MimeUtilXmlMimeTypeTest : public testing::TestWithParam<bool> {};
+
+TEST_P(MimeUtilXmlMimeTypeTest, IsXML) {
+  base::test::ScopedFeatureList features;
+  features.InitWithFeatureState(blink::features::kSpecCompliantXmlMimeTypes,
+                                GetParam());
+  const bool spec_compliant = GetParam();
+
+  EXPECT_TRUE(IsXMLMimeType("text/xml"));
+  EXPECT_TRUE(IsXMLMimeType("application/xml"));
+  EXPECT_TRUE(IsXMLMimeType("application/atom+xml"));
+  EXPECT_TRUE(IsXMLMimeType("Application/XML"));
+  EXPECT_TRUE(IsXMLMimeType("Text/XML"));
+  EXPECT_TRUE(IsXMLMimeType("application/xml;x=1"));
+  EXPECT_TRUE(IsXMLMimeType("application/atom+xml;x=1"));
+
+  EXPECT_EQ(IsXMLMimeType("text/+xml"), spec_compliant);
+  EXPECT_EQ(IsXMLMimeType("text/html+xml"), spec_compliant);
+  EXPECT_EQ(IsXMLMimeType("image/svg+xml"), spec_compliant);
+  EXPECT_EQ(IsXMLMimeType("text/blah+xml;x=1"), spec_compliant);
+  EXPECT_EQ(IsXMLMimeType("image/svg+xml;x=1"), spec_compliant);
+
+  EXPECT_FALSE(IsXMLMimeType("xml"));
+  EXPECT_FALSE(IsXMLMimeType("+xml"));
+  EXPECT_FALSE(IsXMLMimeType("text+xml"));
+  EXPECT_FALSE(IsXMLMimeType("application/"));
+  EXPECT_FALSE(IsXMLMimeType("application/xmlabcd"));
+  EXPECT_FALSE(IsXMLMimeType("application/blahxml"));
+  EXPECT_FALSE(IsXMLMimeType("application/blah+xmlabcd"));
+  EXPECT_FALSE(IsXMLMimeType("application/foo+xml bar"));
+  EXPECT_FALSE(IsXMLMimeType("application/foo+xmlbar;a=b"));
+  EXPECT_FALSE(IsXMLMimeType("application/xml+blah"));
+  EXPECT_FALSE(IsXMLMimeType("application/problem+"));
+  EXPECT_FALSE(IsXMLMimeType("application/+"));
+  EXPECT_FALSE(IsXMLMimeType("text/html;+xml"));
+  EXPECT_FALSE(IsXMLMimeType("text/html+xml+json"));
+  EXPECT_FALSE(IsXMLMimeType("text/xml/xml"));
+  EXPECT_FALSE(IsXMLMimeType("text/xsl"));
+
+  EXPECT_FALSE(IsXMLMimeType("te xt/hal+xml"));
+  EXPECT_FALSE(IsXMLMimeType("text/ha l+xml"));
+  EXPECT_FALSE(IsXMLMimeType("aplicación/hal+xml"));
+  EXPECT_FALSE(IsXMLMimeType("text/halé+xml"));
+}
+
+INSTANTIATE_TEST_SUITE_P(MimeUtilTest,
+                         MimeUtilXmlMimeTypeTest,
+                         testing::Bool());
+
 TEST(MimeUtilTest, LookupTypes) {
   EXPECT_FALSE(IsUnsupportedTextMimeType("text/banana"));
   EXPECT_TRUE(IsUnsupportedTextMimeType("text/vcard"));
 
   EXPECT_TRUE(IsSupportedImageMimeType("image/jpeg"));
   EXPECT_TRUE(IsSupportedImageMimeType("Image/JPEG"));
-  EXPECT_FALSE(IsSupportedImageMimeType("image/jxl"));
   EXPECT_EQ(IsSupportedImageMimeType("image/avif"),
-            BUILDFLAG(ENABLE_AV1_DECODER));
+            BUILDFLAG(ENABLE_DAV1D_DECODER));
   EXPECT_FALSE(IsSupportedImageMimeType("image/lolcat"));
   EXPECT_FALSE(IsSupportedImageMimeType("Image/LolCat"));
   EXPECT_TRUE(IsSupportedNonImageMimeType("text/html"));
@@ -102,5 +142,21 @@ TEST(MimeUtilTest, LookupTypes) {
   EXPECT_FALSE(IsSupportedNonImageMimeType("application/vnd.doc;x=y+json"));
   EXPECT_FALSE(IsSupportedNonImageMimeType("Application/VND.DOC;X=Y+JSON"));
 }
+
+#if BUILDFLAG(ENABLE_JXL_DECODER)
+class JxlFeatureFlagTest : public testing::TestWithParam<bool> {};
+
+TEST_P(JxlFeatureFlagTest, JxlSupportMatchesFeatureFlag) {
+  base::test::ScopedFeatureList features;
+  features.InitWithFeatureState(blink::features::kJXLImageFormat, GetParam());
+  EXPECT_EQ(IsSupportedImageMimeType("image/jxl"), GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(MimeUtilTest, JxlFeatureFlagTest, testing::Bool());
+#else
+TEST(MimeUtilTest, JxlNotSupportedWhenDecoderDisabled) {
+  EXPECT_FALSE(IsSupportedImageMimeType("image/jxl"));
+}
+#endif
 
 }  // namespace blink

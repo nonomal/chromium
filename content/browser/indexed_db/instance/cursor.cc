@@ -19,8 +19,11 @@
 #include "base/trace_event/trace_event.h"
 #include "content/browser/indexed_db/indexed_db_database_error.h"
 #include "content/browser/indexed_db/indexed_db_external_object.h"
+#include "content/browser/indexed_db/indexed_db_reporting.h"
 #include "content/browser/indexed_db/indexed_db_value.h"
+#include "content/browser/indexed_db/instance/bucket_context.h"
 #include "content/browser/indexed_db/instance/callback_helpers.h"
+#include "content/browser/indexed_db/instance/connection.h"
 #include "content/browser/indexed_db/instance/transaction.h"
 #include "content/browser/indexed_db/status.h"
 #include "mojo/public/cpp/bindings/message.h"
@@ -81,7 +84,7 @@ Cursor::Cursor(std::unique_ptr<BackingStore::Cursor> cursor,
                Type type,
                blink::mojom::IDBTaskType task_type,
                base::WeakPtr<Transaction> transaction)
-    : bucket_locator_(transaction->bucket_context()->bucket_locator()),
+    : bucket_locator_(transaction->bucket_context().bucket_locator()),
       type_(std::move(type)),
       task_type_(task_type),
       transaction_(std::move(transaction)),
@@ -101,11 +104,12 @@ void Cursor::Advance(uint32_t count,
 
   if (count == 0) {
     std::move(callback).Run(CreateInvalidArgumentErrorResult());
-    receiver_.ReportBadMessage("Invalid count");
+    ReportBadMessage(BadMessageReason::kCursorAdvanceInvalidCount,
+                     "Invalid count", receiver_.GetBadMessageCallback());
     return;
   }
 
-  if (!transaction_) {
+  if (!transaction_ || !transaction_->IsAcceptingRequests()) {
     Close();
   }
   if (closed_) {
@@ -187,11 +191,13 @@ void Cursor::Continue(IndexedDBKey key,
        type_.direction == blink::mojom::IDBCursorDirection::PrevNoDuplicate) &&
       primary_key.IsValid()) {
     std::move(callback).Run(CreateInvalidArgumentErrorResult());
-    receiver_.ReportBadMessage("Primary key not allowed");
+    ReportBadMessage(BadMessageReason::kCursorContinueInvalidPrimaryKey,
+                     "Primary key not allowed",
+                     receiver_.GetBadMessageCallback());
     return;
   }
 
-  if (!transaction_) {
+  if (!transaction_ || !transaction_->IsAcceptingRequests()) {
     Close();
   }
   if (closed_) {
@@ -268,7 +274,7 @@ void Cursor::Prefetch(int number_to_fetch,
                       blink::mojom::IDBCursor::PrefetchCallback callback) {
   TRACE_EVENT0("IndexedDB", "Cursor::Prefetch");
 
-  if (!transaction_) {
+  if (!transaction_ || !transaction_->IsAcceptingRequests()) {
     Close();
   }
   if (closed_) {
@@ -305,9 +311,6 @@ Status Cursor::PrefetchIterationOperation(
   const size_t max_size_estimate = 10 * 1024 * 1024;
   size_t size_estimate = 0;
 
-  // TODO(cmumford): Handle this error (crbug.com/363397). Although this will
-  //                 properly fail, caller will not know why, and any corruption
-  //                 will be ignored.
   for (int i = 0; i < number_to_fetch; ++i) {
     if (!cursor_ || reached_end_during_prefetch_) {
       break;
@@ -361,8 +364,8 @@ Status Cursor::PrefetchIterationOperation(
     return Status::OK();
   }
 
-  DCHECK_EQ(found_keys.size(), found_primary_keys.size());
-  DCHECK_EQ(found_keys.size(), found_values.size());
+  CHECK_EQ(found_keys.size(), found_primary_keys.size());
+  CHECK_EQ(found_keys.size(), found_values.size());
 
   std::vector<blink::mojom::IDBValuePtr> mojo_values;
   mojo_values.reserve(found_values.size());
@@ -379,7 +382,28 @@ Status Cursor::PrefetchIterationOperation(
 
 void Cursor::PrefetchReset(int used_prefetches) {
   TRACE_EVENT0("IndexedDB", "Cursor::PrefetchReset");
-  if (closed_) {
+  if (closed_ || !cursor_ || !transaction_) {
+    return;
+  }
+
+  auto on_bad_message = [this](BadMessageReason reason,
+                               const std::string& message) {
+    ReportBadMessage(reason, message, receiver_.GetBadMessageCallback());
+    cursor_.reset();
+  };
+
+  auto on_db_error = [this](Status status) {
+    // The error is reported explicitly since this method is not part of the
+    // transaction task queue. Resetting `cursor_` is not necessary because
+    // `this` will be destroyed.
+    transaction_->bucket_context().OnDatabaseError(
+        transaction_->connection().database().get(), status, {});
+  };
+
+  // First prefetched result is always used.
+  if (used_prefetches <= 0) {
+    on_bad_message(BadMessageReason::kCursorPrefetchResetInvalidCount,
+                   "used_prefetches <= 0");
     return;
   }
 
@@ -387,18 +411,24 @@ void Cursor::PrefetchReset(int used_prefetches) {
   Status s = cursor_->TryResetToLastSavedPosition();
   if (!s.ok()) {
     if (s.IsInvalidArgument()) {
-      mojo::ReportBadMessage(s.ToString());
+      on_bad_message(BadMessageReason::kCursorPrefetchResetFailedToReset,
+                     s.ToString());
+    } else {
+      on_db_error(s);
     }
-    cursor_.reset();
+    return;
   }
 
-  // First prefetched result is always used.
-  if (cursor_) {
-    DCHECK_GT(used_prefetches, 0);
-    if (used_prefetches > 1) {
-      auto result = cursor_->Advance(used_prefetches - 1);
-      DCHECK(!result.has_value() || result.value());
-    }
+  if (used_prefetches == 1) {
+    return;
+  }
+
+  StatusOr<bool> result = cursor_->Advance(used_prefetches - 1);
+  if (!result.has_value()) {
+    on_db_error(result.error());
+  } else if (!*result) {
+    on_bad_message(BadMessageReason::kCursorPrefetchResetInvalidUsedPrefetches,
+                   "Invalid used_prefetches");
   }
 }
 
@@ -410,6 +440,7 @@ void Cursor::Close() {
   TRACE_EVENT_END("IndexedDB", perfetto::Track::FromPointer(this));
   TRACE_EVENT0("IndexedDB", "Cursor::Close");
   closed_ = true;
+  ptr_factory_.InvalidateWeakPtrs();
   cursor_.reset();
   if (transaction_) {
     transaction_->UnregisterOpenCursor(this);

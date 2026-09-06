@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "ash/constants/ash_features.h"
+#include "ash/constants/chrome_switches.h"
 #include "base/command_line.h"
 #include "base/functional/bind.h"
 #include "base/test/bind.h"
@@ -20,7 +21,6 @@
 #include "chrome/browser/web_applications/test/fake_web_app_provider.h"
 #include "chrome/browser/web_applications/test/web_app_install_test_utils.h"
 #include "chrome/browser/web_applications/web_app_install_info.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
@@ -38,8 +38,11 @@
 
 namespace {
 
-constexpr char kTestAppUrl[] = "https://www.example.com/";
-constexpr char kTestAppActionUrl[] = "https://www.example.com/share";
+constexpr char kTestAppUrl[] = "https://www.example.com/path/index.html";
+constexpr char kTestAppScope[] = "https://www.example.com/path/";
+// The different scope still has to be valid for the other app urls.
+constexpr char kTestAppDifferentScope[] = "https://www.example.com/";
+constexpr char kTestAppActionUrl[] = "https://www.example.com/path/share";
 constexpr char kTestAppIcon[] = "https://www.example.com/icon.png";
 constexpr char kTestManifestUrl[] = "https://www.example.com/manifest.json";
 constexpr char kTestShareTextParam[] = "share_text";
@@ -48,7 +51,7 @@ const std::u16string kTestAppTitle = u"Test App";
 std::unique_ptr<web_app::WebAppInstallInfo> BuildDefaultWebAppInfo() {
   auto app_info = web_app::WebAppInstallInfo::CreateWithStartUrlForTesting(
       GURL(kTestAppUrl));
-  app_info->scope = GURL(kTestAppUrl);
+  app_info->scope = GURL(kTestAppScope);
   app_info->title = kTestAppTitle;
   app_info->manifest_url = GURL(kTestManifestUrl);
   apps::IconInfo icon;
@@ -77,7 +80,7 @@ arc::mojom::WebApkInfoPtr BuildDefaultWebApkInfo(
   webapk_info->manifest_url = kTestManifestUrl;
   webapk_info->name = "Test App";
   webapk_info->start_url = kTestAppUrl;
-  webapk_info->scope = kTestAppUrl;
+  webapk_info->scope = kTestAppScope;
   webapk_info->icon_hash = icon_hash;
   auto target_info = arc::mojom::WebShareTargetInfo::New();
   target_info->action = kTestAppActionUrl;
@@ -322,7 +325,8 @@ TEST_F(WebApkInstallTaskTest, MinterTimeout) {
   auto app_id =
       web_app::test::InstallWebApp(profile(), BuildDefaultWebAppInfo());
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kWebApkServerUrl, test_server()->GetURL("/slow?1000").spec());
+      ash::chrome_switches::kWebApkServerUrl,
+      test_server()->GetURL("/slow?1000").spec());
   base::HistogramTester histograms;
 
   apps::WebApkInstallTask install_task(profile(), app_id);
@@ -397,7 +401,7 @@ TEST_F(WebApkInstallTaskTest, SuccessfulUpdateScope) {
   // Install the same app with |scope| changed. This should trigger an
   // update.
   auto web_app_info = BuildDefaultWebAppInfo();
-  web_app_info->scope = GURL("https://www.differentexample.com/");
+  web_app_info->scope = GURL(kTestAppDifferentScope);
   web_app::test::InstallWebApp(profile(), std::move(web_app_info),
                                /*overwrite_existing_manifest_fields=*/true);
   EXPECT_TRUE(UpdateWebApk(app_id));
@@ -406,10 +410,10 @@ TEST_F(WebApkInstallTaskTest, SuccessfulUpdateScope) {
   ASSERT_THAT(last_webapk_request()->update_reasons(),
               ::testing::ElementsAre(webapk::WebApk::SCOPE_DIFFERS));
 
-  webapk::WebAppManifest manifest = last_webapk_request()->manifest();
-  EXPECT_EQ(last_webapk_request()->manifest().scopes_size(), 1);
-  EXPECT_EQ(last_webapk_request()->manifest().scopes(0),
-            "https://www.differentexample.com/");
+  const webapk::WebAppManifest& manifest = last_webapk_request()->manifest();
+  EXPECT_EQ(manifest.scopes_size(), 1);
+  EXPECT_EQ(manifest.scopes(0),
+            GURL(kTestAppDifferentScope).spec());
 
   // Check we still only have 1 version of |app_id| installed.
   ASSERT_THAT(apps::webapk_prefs::GetWebApkAppIds(profile()),

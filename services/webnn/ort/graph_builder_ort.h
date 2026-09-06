@@ -209,6 +209,10 @@ class GraphBuilderOrt {
   std::string CreateTransposeNode(base::cstring_view input,
                                   base::span<const uint32_t> perm_value);
 
+  void EmulateWithIdentityNode(base::cstring_view label,
+                               base::cstring_view input,
+                               base::cstring_view output);
+
   // Clamp the indices to the range [-dim_size, dim_size), the given data type
   // should be indices's data type.
   std::string ClampIndices(base::cstring_view indices,
@@ -291,9 +295,8 @@ class GraphBuilderOrt {
 
   std::unique_ptr<ModelEditor::ModelInfo> BuildModel();
 
-  // An increasing id starting from 0, used for generating unique names for each
-  // operand.
-  base::CheckedNumeric<uint32_t> next_operand_id_ = 0;
+  // An increasing id used for generating unique names for inserted operand.
+  base::CheckedNumeric<uint32_t> next_operand_id_;
 
   // An increasing id starting from 0, used for generating unique names for each
   // operation.
@@ -306,6 +309,12 @@ class GraphBuilderOrt {
 
   base::flat_map<OperandId, std::unique_ptr<WebNNConstantOperand>>
       constant_operands_;
+
+  // The output of logical operators is cast to uint8 to match the specified
+  // WebNN behavior however if these are passed as inputs to other logical
+  // operators the original uncast tensors, stored in this map, can be used
+  // directly.
+  base::flat_map<OperandId, std::string> operand_to_bool_name_;
 
   const ContextProperties context_properties_;
 

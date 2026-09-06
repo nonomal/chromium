@@ -11,7 +11,7 @@ import android.webkit.WebViewClient;
 
 import androidx.annotation.Nullable;
 
-import org.chromium.android_webview.AwContentsClient.AwWebResourceError;
+import org.chromium.android_webview.AwWebResourceError;
 import org.chromium.android_webview.safe_browsing.AwSafeBrowsingResponse;
 import org.chromium.base.Callback;
 import org.chromium.base.metrics.RecordHistogram;
@@ -78,7 +78,7 @@ public class SupportLibWebViewContentsClientAdapter {
     }
 
     /**
-     * Indicates whether this client can handle the callback(s) assocated with {@param featureName}.
+     * Indicates whether this client can handle the callback(s) assocated with {@code featureName}.
      * This should be called with the correct feature name before invoking the corresponding
      * callback, and the callback must not be called if this returns {@code false} for the feature.
      *

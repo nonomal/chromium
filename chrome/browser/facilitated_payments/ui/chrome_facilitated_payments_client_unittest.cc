@@ -6,11 +6,14 @@
 
 #include <memory>
 
+#include "base/functional/bind.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/facilitated_payments/core/browser/facilitated_payments_app_info_list.h"
 #include "components/facilitated_payments/core/browser/pix_account_linking_manager.h"
 #include "components/facilitated_payments/core/features/features.h"
 #include "components/optimization_guide/core/hints/mock_optimization_guide_decider.h"
+#include "components/signin/public/identity_manager/identity_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/origin.h"
@@ -44,8 +47,14 @@ class MockFacilitatedPaymentsController : public FacilitatedPaymentsController {
   MOCK_METHOD(void, Dismiss, (), (override));
   MOCK_METHOD(void,
               ShowPixAccountLinkingPrompt,
-              (base::OnceCallback<void()> on_accepted,
+              (int strike_count,
+               const std::string& account_email,
+               base::OnceCallback<void()> on_accepted,
                base::OnceCallback<void()> on_declined),
+              (override));
+  MOCK_METHOD(void,
+              ShowAccountLinkingFailureNotification,
+              (payments::facilitated::FacilitatedPaymentsType),
               (override));
 };
 
@@ -61,6 +70,7 @@ class MockPixAccountLinkingManager
               MaybeShowPixAccountLinkingPrompt,
               (const url::Origin& pix_payment_page_origin),
               (override));
+  MOCK_METHOD(void, DismissPrompt, (), (override));
 };
 
 class ChromeFacilitatedPaymentsClientTest
@@ -116,12 +126,15 @@ TEST_F(ChromeFacilitatedPaymentsClientTest,
   base_client().ShowPixPaymentPrompt({}, base::DoNothing());
 }
 
-// Test that the `EWALLET_MERCHANT_ALLOWLIST` and
-// `PIX_PAYMENT_MERCHANT_ALLOWLIST` optimization type is registered when the
-// `ChromeFacilitatedPaymentClient` is created.
+// Test that the `A2A_MERCHANT_ALLOWLIST`, `EWALLET_MERCHANT_ALLOWLIST`,
+// `PIX_PAYMENT_MERCHANT_ALLOWLIST` and `PIX_PSP_ALLOWLIST` optimization types
+// are registered when the `ChromeFacilitatedPaymentClient` is created.
 TEST_F(ChromeFacilitatedPaymentsClientTest, RegisterAllowlists) {
-  base::test::ScopedFeatureList feature_list(
-      payments::facilitated::kEwalletPayments);
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitWithFeatures(
+      /*enabled_features=*/{payments::facilitated::kEwalletPayments,
+                            payments::facilitated::kEnableIframeForPix},
+      /*disabled_features=*/{});
   EXPECT_CALL(optimization_guide_decider_,
               RegisterOptimizationTypes(testing::ElementsAre(
                   optimization_guide::proto::PIX_MERCHANT_ORIGINS_ALLOWLIST)))
@@ -133,6 +146,10 @@ TEST_F(ChromeFacilitatedPaymentsClientTest, RegisterAllowlists) {
   EXPECT_CALL(optimization_guide_decider_,
               RegisterOptimizationTypes(testing::ElementsAre(
                   optimization_guide::proto::EWALLET_MERCHANT_ALLOWLIST)))
+      .Times(1);
+  EXPECT_CALL(optimization_guide_decider_,
+              RegisterOptimizationTypes(testing::ElementsAre(
+                  optimization_guide::proto::PIX_PSP_ALLOWLIST)))
       .Times(1);
 
   // Re-create the client; it should register the allowlist.
@@ -157,7 +174,41 @@ TEST_F(ChromeFacilitatedPaymentsClientTest, RegisterAllowlists_EWalletExpOff) {
       .Times(1);
   EXPECT_CALL(optimization_guide_decider_,
               RegisterOptimizationTypes(testing::ElementsAre(
+                  optimization_guide::proto::PIX_PSP_ALLOWLIST)))
+      .Times(1);
+  EXPECT_CALL(optimization_guide_decider_,
+              RegisterOptimizationTypes(testing::ElementsAre(
                   optimization_guide::proto::EWALLET_MERCHANT_ALLOWLIST)))
+      .Times(0);
+
+  // Re-create the client; it should not register the allowlist.
+  client_ = std::make_unique<ChromeFacilitatedPaymentsClient>(
+      web_contents(), &optimization_guide_decider_);
+}
+
+// Test that the `PIX_PSP_ALLOWLIST` optimization type is not registered when
+// the `ChromeFacilitatedPaymentClient` is created and the iframe experiment is
+// disabled.
+TEST_F(ChromeFacilitatedPaymentsClientTest, RegisterAllowlists_IframeExpOff) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(
+      payments::facilitated::kEnableIframeForPix);
+
+  EXPECT_CALL(optimization_guide_decider_,
+              RegisterOptimizationTypes(testing::ElementsAre(
+                  optimization_guide::proto::A2A_MERCHANT_ALLOWLIST)))
+      .Times(1);
+  EXPECT_CALL(optimization_guide_decider_,
+              RegisterOptimizationTypes(testing::ElementsAre(
+                  optimization_guide::proto::EWALLET_MERCHANT_ALLOWLIST)))
+      .Times(1);
+  EXPECT_CALL(optimization_guide_decider_,
+              RegisterOptimizationTypes(testing::ElementsAre(
+                  optimization_guide::proto::PIX_MERCHANT_ORIGINS_ALLOWLIST)))
+      .Times(1);
+  EXPECT_CALL(optimization_guide_decider_,
+              RegisterOptimizationTypes(testing::ElementsAre(
+                  optimization_guide::proto::PIX_PSP_ALLOWLIST)))
       .Times(0);
 
   // Re-create the client; it should not register the allowlist.
@@ -189,6 +240,17 @@ TEST_F(ChromeFacilitatedPaymentsClientTest,
 
   base_client().ShowPixPaymentPrompt({}, base::DoNothing());
   base_client().ShowProgressScreen();
+}
+
+// Test that DismissPrompt is called when the client is destroyed.
+TEST_F(ChromeFacilitatedPaymentsClientTest,
+       Destructor_DismissesPixAccountLinkingPrompt) {
+  base_client().InitPixAccountLinkingFlow(
+      url::Origin::Create(GURL("https://example.com")));
+
+  EXPECT_CALL(pix_account_linking_manager(), DismissPrompt());
+
+  client_.reset();
 }
 
 // Test the client forwards call for closing the bottom sheet to the
@@ -239,10 +301,72 @@ TEST_F(ChromeFacilitatedPaymentsClientTest, InitPixAccountLinkingFlow) {
 }
 
 // Test that the client forwards call to show Pix account linking prompt to the
-// controller.
+// controller when an account email is available.
 TEST_F(ChromeFacilitatedPaymentsClientTest, ShowPixAccountLinkingPrompt) {
-  EXPECT_CALL(controller(), ShowPixAccountLinkingPrompt);
+  signin::SetPrimaryAccount(IdentityManagerFactory::GetForProfile(profile()),
+                            "test@example.com", signin::ConsentLevel::kSignin);
+  EXPECT_CALL(controller(),
+              ShowPixAccountLinkingPrompt(0, "test@example.com", _, _));
 
-  base_client().ShowPixAccountLinkingPrompt(base::DoNothing(),
-                                            base::DoNothing());
+  base_client().ShowPixAccountLinkingPrompt(
+      /*strike_count=*/0, base::DoNothing(), base::DoNothing());
+}
+
+// Test that the client does not show Pix account linking prompt when no account
+// email is available.
+TEST_F(ChromeFacilitatedPaymentsClientTest,
+       ShowPixAccountLinkingPrompt_NoAccount_DoesNotShowPrompt) {
+  EXPECT_CALL(controller(), ShowPixAccountLinkingPrompt).Times(0);
+
+  base_client().ShowPixAccountLinkingPrompt(
+      /*strike_count=*/0, base::DoNothing(), base::DoNothing());
+}
+
+// Test that the client forwards call to show Pix account linking failure
+// notification to the controller.
+TEST_F(ChromeFacilitatedPaymentsClientTest,
+       ShowAccountLinkingFailureNotification) {
+  EXPECT_CALL(controller(),
+              ShowAccountLinkingFailureNotification(
+                  payments::facilitated::FacilitatedPaymentsType::kPix));
+
+  base_client().ShowAccountLinkingFailureNotification(
+      payments::facilitated::FacilitatedPaymentsType::kPix);
+}
+
+TEST_F(ChromeFacilitatedPaymentsClientTest,
+       IsInChromeCustomTabMode_NullCallback) {
+  EXPECT_FALSE(base_client().IsInChromeCustomTabMode());
+}
+
+TEST_F(ChromeFacilitatedPaymentsClientTest,
+       IsInChromeCustomTabMode_CallbackReturnsTrue) {
+  client_ = std::make_unique<ChromeFacilitatedPaymentsClient>(
+      web_contents(), &optimization_guide_decider_,
+      base::BindRepeating([](content::WebContents*) { return true; }));
+
+  EXPECT_TRUE(base_client().IsInChromeCustomTabMode());
+}
+
+TEST_F(ChromeFacilitatedPaymentsClientTest,
+       IsInChromeCustomTabMode_CallbackReturnsFalse) {
+  client_ = std::make_unique<ChromeFacilitatedPaymentsClient>(
+      web_contents(), &optimization_guide_decider_,
+      base::BindRepeating([](content::WebContents*) { return false; }));
+
+  EXPECT_FALSE(base_client().IsInChromeCustomTabMode());
+}
+
+// Test that initializing ChromeFacilitatedPaymentsClient creates a default
+// PixAccountLinkingManager that handles flow initialization without crashing.
+TEST_F(ChromeFacilitatedPaymentsClientTest,
+       PixAccountLinkingManager_InitializedByDefault) {
+  const url::Origin kPageOrigin =
+      url::Origin::Create(GURL("https://example.com"));
+  auto client = std::make_unique<ChromeFacilitatedPaymentsClient>(
+      web_contents(), &optimization_guide_decider_);
+
+  EXPECT_NO_FATAL_FAILURE(
+      static_cast<payments::facilitated::FacilitatedPaymentsClient&>(*client)
+          .InitPixAccountLinkingFlow(kPageOrigin));
 }

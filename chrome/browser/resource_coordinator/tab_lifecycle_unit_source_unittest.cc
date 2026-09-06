@@ -8,8 +8,9 @@
 #include <utility>
 #include <vector>
 
-#include "base/byte_count.h"
+#include "base/byte_size.h"
 #include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
@@ -38,7 +39,7 @@
 #include "components/performance_manager/test_support/graph_impl.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
-#include "components/tabs/public/split_tab_visual_data.h"
+#include "components/split_tabs/split_tab_visual_data.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/mock_web_contents_observer.h"
@@ -136,6 +137,7 @@ class TabLifecycleUnitSourceTest : public ChromeRenderViewHostTestHarness {
     // Don't observe OnLifecycleUnitDestroyed notifications after the test.
     source_->RemoveLifecycleObserver(&tab_observer_);
 
+    focused_tab_strip_model_override_.RunAndReset();
     tab_strip_model_->CloseAllTabs();
     tab_strip_model_.reset();
 
@@ -150,8 +152,10 @@ class TabLifecycleUnitSourceTest : public ChromeRenderViewHostTestHarness {
   void CreateTwoTabs(bool focus_tab_strip,
                      LifecycleUnit** first_lifecycle_unit,
                      LifecycleUnit** second_lifecycle_unit) {
-    if (focus_tab_strip)
-      source_->SetFocusedTabStripModelForTesting(tab_strip_model_.get());
+    if (focus_tab_strip) {
+      focused_tab_strip_model_override_ =
+          source_->SetFocusedTabStripModelForTesting(tab_strip_model_.get());
+    }
 
     // Add a foreground tab to the tab strip.
     task_environment()->FastForwardBy(kShortDelay);
@@ -334,7 +338,7 @@ class TabLifecycleUnitSourceTest : public ChromeRenderViewHostTestHarness {
     EXPECT_EQ(kDummyLastActiveTime,
               tab_strip_model_->GetWebContentsAt(0)->GetLastActiveTimeTicks());
 
-    source_->SetFocusedTabStripModelForTesting(nullptr);
+    focused_tab_strip_model_override_.RunAndReset();
   }
 
   void DiscardAndActivateTest(LifecycleUnitDiscardReason reason) {
@@ -507,6 +511,7 @@ class TabLifecycleUnitSourceTest : public ChromeRenderViewHostTestHarness {
   ::testing::StrictMock<MockLifecycleUnitSourceObserver> source_observer_;
   ::testing::StrictMock<MockLifecycleUnitObserver> tab_observer_;
   std::unique_ptr<TabStripModel> tab_strip_model_;
+  base::ScopedClosureRunner focused_tab_strip_model_override_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   std::unique_ptr<content::WebContents> CreateAndNavigateWebContents() {
@@ -592,7 +597,8 @@ TEST_F(TabLifecycleUnitSourceTest, DiscardWebContents) {
       CreateTestWebContents();
   content::WebContents* raw_new_web_contents = new_web_contents.get();
   std::unique_ptr<content::WebContents> original_web_contents_deleter =
-      tab_strip_model_->DiscardWebContentsAt(1, std::move(new_web_contents));
+      tab_strip_model_->DiscardWebContents(original_web_contents,
+                                           std::move(new_web_contents));
   EXPECT_EQ(original_web_contents, original_web_contents_deleter.get());
   EXPECT_FALSE(source_->GetTabLifecycleUnitExternal(original_web_contents));
   EXPECT_EQ(tab_lifecycle_unit_external,
@@ -715,7 +721,7 @@ TEST_F(TabLifecycleUnitSourceTest, DetachWebContents_External) {
   DetachWebContentsTest(LifecycleUnitDiscardReason::EXTERNAL);
 }
 
-// Regression test for https://crbug.com/818454. Previously, TabLifecycleUnits
+// Regression test for https://crbug.com/40090674. Previously, TabLifecycleUnits
 // were destroyed from TabStripModelObserver::TabClosingAt(). If a tab was
 // detached (TabStripModel::DetachWebContentsAt) and its WebContents destroyed,
 // the TabLifecycleUnit was never destroyed. This was solved by giving ownership
@@ -776,6 +782,9 @@ TEST_F(TabLifecycleUnitSourceTest, Freeze) {
   LifecycleUnit* second_lifecycle_unit = nullptr;
   CreateTwoTabs(/*focus_tab_strip=*/true, &first_lifecycle_unit,
                 &second_lifecycle_unit);
+  content::WebContents* second_web_contents =
+      second_lifecycle_unit->AsTabLifecycleUnitExternal()->GetWebContents();
+  EXPECT_FALSE(ResourceCoordinatorTabHelper::IsFrozen(second_web_contents));
 
   // Pretend that the tab is frozen. The observer should be notified and the
   // `LifecyleState` should become `FROZEN`.
@@ -783,10 +792,10 @@ TEST_F(TabLifecycleUnitSourceTest, Freeze) {
                                  _, ::mojom::LifecycleUnitState::ACTIVE,
                                  ::mojom::LifecycleUnitState::FROZEN, _));
   TabLifecycleUnitSource::OnLifecycleStateChanged(
-      second_lifecycle_unit->AsTabLifecycleUnitExternal()->GetWebContents(),
-      performance_manager::mojom::LifecycleState::kFrozen);
+      second_web_contents, performance_manager::mojom::LifecycleState::kFrozen);
   EXPECT_EQ(second_lifecycle_unit->GetState(),
             ::mojom::LifecycleUnitState::FROZEN);
+  EXPECT_TRUE(ResourceCoordinatorTabHelper::IsFrozen(second_web_contents));
 }
 
 }  // namespace resource_coordinator

@@ -9,6 +9,7 @@
 
 #include "base/feature_list.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/bind_post_task.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/services/sharing/nearby/nearby_connections_conversions.h"
@@ -577,7 +578,7 @@ void NearbyConnections::RequestConnectionV3(
           [service_id];
   const std::string& endpoint_id = remote_device->endpoint_id;
 
-  if (base::Contains(endpoint_id_to_presence_device_map, endpoint_id)) {
+  if (endpoint_id_to_presence_device_map.contains(endpoint_id)) {
     CD_LOG(INFO, Feature::NEARBY_INFRA)
         << __func__ << "PresenceDevice already exists in map.";
   } else {
@@ -595,8 +596,10 @@ void NearbyConnections::RequestConnectionV3(
           GetPresenceDevice(service_id, endpoint_id), connection_options,
           CreateConnectionListenerV3(
               std::move(listener),
-              base::BindOnce(&NearbyConnections::RemovePresenceDevice,
-                             weak_ptr_factory_.GetWeakPtr(), service_id)),
+              base::BindPostTask(
+                  thread_task_runner_,
+                  base::BindOnce(&NearbyConnections::RemovePresenceDevice,
+                                 weak_ptr_factory_.GetWeakPtr(), service_id))),
           ResultCallbackFromMojom(std::move(callback)));
 }
 
@@ -727,12 +730,17 @@ void NearbyConnections::RejectConnectionV3(
           presence_device,
           [cb = std::move(callback),
            task_runner = base::SequencedTaskRunner::GetCurrentDefault(),
-           &service_id, &remote_device, this](Status status) mutable {
+           service_id, endpoint_id = remote_device->endpoint_id,
+           weak_ptr = weak_ptr_factory_.GetWeakPtr()](Status status) mutable {
             task_runner->PostTask(
                 FROM_HERE,
                 base::BindOnce(std::move(cb), StatusToMojom(status.value)));
 
-            RemovePresenceDevice(service_id, remote_device->endpoint_id);
+            task_runner->PostTask(
+                FROM_HERE,
+                base::BindOnce(&NearbyConnections::RemovePresenceDevice,
+                               std::move(weak_ptr), std::move(service_id),
+                               std::move(endpoint_id)));
           });
 }
 
@@ -748,12 +756,17 @@ void NearbyConnections::DisconnectFromDeviceV3(
           presence_device,
           [cb = std::move(callback),
            task_runner = base::SequencedTaskRunner::GetCurrentDefault(),
-           &service_id, &remote_device, this](Status status) mutable {
+           service_id, endpoint_id = remote_device->endpoint_id,
+           weak_ptr = weak_ptr_factory_.GetWeakPtr()](Status status) mutable {
             task_runner->PostTask(
                 FROM_HERE,
                 base::BindOnce(std::move(cb), StatusToMojom(status.value)));
 
-            RemovePresenceDevice(service_id, remote_device->endpoint_id);
+            task_runner->PostTask(
+                FROM_HERE,
+                base::BindOnce(&NearbyConnections::RemovePresenceDevice,
+                               std::move(weak_ptr), std::move(service_id),
+                               std::move(endpoint_id)));
           });
 }
 

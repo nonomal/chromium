@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.ntp_customization.theme;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 
@@ -25,14 +26,13 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
-import org.robolectric.annotation.Config;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.ntp_customization.R;
+import org.chromium.components.browser_ui.styles.SemanticColorUtils;
 
 /** Unit tests for {@link NtpThemeListThemeCollectionItemIconView}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
 public class NtpThemeListThemeCollectionItemIconViewUnitTest {
 
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
@@ -40,7 +40,6 @@ public class NtpThemeListThemeCollectionItemIconViewUnitTest {
     private Context mContext;
     private NtpThemeListThemeCollectionItemIconView mView;
 
-    private View mNoImagePlaceholder;
     private ImageView mPrimaryImage;
     private View mSecondaryImageContainer;
     private ImageView mSecondaryImage;
@@ -63,7 +62,6 @@ public class NtpThemeListThemeCollectionItemIconViewUnitTest {
                                         null,
                                         false);
 
-        mNoImagePlaceholder = mView.findViewById(R.id.no_image_placeholder_background);
         mPrimaryImage = mView.findViewById(R.id.primary_image);
         mSecondaryImageContainer = mView.findViewById(R.id.secondary_image_container);
         mSecondaryImage = mView.findViewById(R.id.secondary_image);
@@ -79,7 +77,6 @@ public class NtpThemeListThemeCollectionItemIconViewUnitTest {
 
         mView.setImageDrawables(primaryDrawable, secondaryDrawable);
 
-        assertEquals(View.GONE, mNoImagePlaceholder.getVisibility());
         assertEquals(View.VISIBLE, mPrimaryImage.getVisibility());
         assertEquals(View.VISIBLE, mSecondaryImageContainer.getVisibility());
         assertEquals(View.VISIBLE, mBottomRightContainer.getVisibility());
@@ -88,6 +85,24 @@ public class NtpThemeListThemeCollectionItemIconViewUnitTest {
 
         assertEquals(primaryDrawable, mPrimaryImage.getDrawable());
         assertEquals(secondaryDrawable, mSecondaryImage.getDrawable());
+    }
+
+    @Test
+    public void testSetImageDrawables_Null() {
+        mView.setImageDrawables(null, null);
+
+        assertEquals(View.VISIBLE, mPrimaryImage.getVisibility());
+        assertEquals(View.VISIBLE, mSecondaryImageContainer.getVisibility());
+        assertEquals(View.VISIBLE, mBottomRightContainer.getVisibility());
+        assertEquals(View.VISIBLE, mBottomRightBackground.getVisibility());
+        assertEquals(View.VISIBLE, mBottomRightIcon.getVisibility());
+
+        assertTrue(mPrimaryImage.getDrawable() instanceof ColorDrawable);
+        int expectedColor = SemanticColorUtils.getColorSurfaceContainerHigh(mContext);
+        assertEquals(expectedColor, ((ColorDrawable) mPrimaryImage.getDrawable()).getColor());
+
+        assertTrue(mSecondaryImage.getDrawable() instanceof ColorDrawable);
+        assertEquals(expectedColor, ((ColorDrawable) mSecondaryImage.getDrawable()).getColor());
     }
 
     @Test

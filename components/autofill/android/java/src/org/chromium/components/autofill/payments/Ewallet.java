@@ -8,6 +8,7 @@ import static org.chromium.build.NullUtil.assumeNonNull;
 
 import org.jni_zero.CalledByNative;
 import org.jni_zero.JNINamespace;
+import org.jni_zero.JniType;
 
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
@@ -43,12 +44,12 @@ public class Ewallet extends PaymentInstrument {
     @CalledByNative
     static Ewallet create(
             long instrumentId,
-            String nickname,
-            GURL displayIconUrl,
-            @PaymentRail int[] supportedPaymentRails,
+            @JniType("std::u16string") String nickname,
+            @JniType("GURL") GURL displayIconUrl,
+            @JniType("std::vector<int32_t>") @PaymentRail int[] supportedPaymentRails,
             boolean isFidoEnrolled,
-            String ewalletName,
-            String accountDisplayName) {
+            @JniType("std::u16string") String ewalletName,
+            @JniType("std::u16string") String accountDisplayName) {
         return new Ewallet.Builder()
                 .setPaymentInstrument(
                         new PaymentInstrument.Builder()
@@ -65,13 +66,13 @@ public class Ewallet extends PaymentInstrument {
 
     /** Returns the name of the eWallet provider. */
     @CalledByNative
-    public String getEwalletName() {
+    public @JniType("std::u16string") String getEwalletName() {
         return mEwalletName;
     }
 
     /** Returns the account display name that can be used to identify the eWallet account. */
     @CalledByNative
-    public String getAccountDisplayName() {
+    public @JniType("std::u16string") String getAccountDisplayName() {
         return mAccountDisplayName;
     }
 
@@ -109,7 +110,7 @@ public class Ewallet extends PaymentInstrument {
             return this;
         }
 
-        /** Set the payment instrument on the BankAccount. */
+        /** Set the payment instrument on the Ewallet. */
         public Builder setPaymentInstrument(PaymentInstrument paymentInstrument) {
             mPaymentInstrument = paymentInstrument;
             return this;

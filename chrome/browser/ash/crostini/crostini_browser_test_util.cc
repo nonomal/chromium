@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "ash/constants/ash_features.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/ash/crostini/crostini_pref_names.h"
@@ -16,8 +17,6 @@
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/chrome_browser_main_extra_parts.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/browser_process_platform_part_test_api_chromeos.h"
 #include "components/component_updater/ash/fake_component_manager_ash.h"
 #include "components/prefs/pref_service.h"
@@ -78,7 +77,7 @@ class CrostiniBrowserTestChromeBrowserMainExtraParts
     }
 
     connection_change_simulator_.SetConnectionType(
-        network::mojom::ConnectionType::CONNECTION_WIFI);
+        net::NetworkChangeNotifier::ConnectionType::CONNECTION_WIFI);
   }
   void PostMainMessageLoopRun() override {
     component_manager_ash_ptr_ = nullptr;
@@ -99,7 +98,7 @@ class CrostiniBrowserTestChromeBrowserMainExtraParts
 
 CrostiniBrowserTestBase::CrostiniBrowserTestBase(bool register_termina)
     : register_termina_(register_termina) {
-  scoped_feature_list_.InitAndEnableFeature(features::kCrostini);
+  scoped_feature_list_.InitAndEnableFeature(ash::features::kCrostini);
   fake_crostini_features_.SetAll(true);
 
   dmgr_ = new ash::disks::MockDiskMountManager;
@@ -133,12 +132,12 @@ void CrostiniBrowserTestBase::CreatedBrowserMainParts(
 }
 
 void CrostiniBrowserTestBase::SetUpOnMainThread() {
-  browser()->profile()->GetPrefs()->SetBoolean(
+  browser()->GetProfile()->GetPrefs()->SetBoolean(
       crostini::prefs::kCrostiniEnabled, true);
 }
 
 void CrostiniBrowserTestBase::SetConnectionType(
-    network::mojom::ConnectionType connection_type) {
+    net::NetworkChangeNotifier::ConnectionType connection_type) {
   extra_parts_->connection_change_simulator()->SetConnectionType(
       connection_type);
 }

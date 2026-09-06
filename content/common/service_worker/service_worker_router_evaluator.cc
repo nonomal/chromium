@@ -6,16 +6,22 @@
 
 #include <limits>
 #include <memory>
+#include <optional>
+#include <string>
 #include <tuple>
 #include <variant>
 
+#include "base/feature_list.h"
 #include "base/json/json_writer.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/notimplemented.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
+#include "content/common/features.h"
 #include "services/network/public/cpp/request_destination.h"
 #include "services/network/public/cpp/request_mode.h"
 #include "third_party/blink/public/common/service_worker/service_worker_router_rule.h"
@@ -142,9 +148,15 @@ std::string ConvertToPatternString(const blink::SafeUrlPattern& url_pattern,
   return pattern.GeneratePatternString();
 }
 
+// Returns true if the field (a sequence of parts) represents a single full
+// wildcard; i.e. `*`.
+bool IsSimpleFullWildcardField(const std::vector<liburlpattern::Part>& parts) {
+  return parts.size() == 1 && parts[0].IsSimpleFullWildcard();
+}
+
 base::Value RequestToValue(
     const blink::ServiceWorkerRouterRequestCondition& request) {
-  base::Value::Dict ret;
+  base::DictValue ret;
   if (request.method) {
     ret.Set("method", *request.method);
   }
@@ -170,9 +182,116 @@ std::string RunningStatusToString(
   }
 }
 
+// A struct representation requires at least one specified component (e.g.
+// `pathname`).
+bool CanReconstructAsStruct(const blink::SafeUrlPattern& pattern) {
+  return !IsSimpleFullWildcardField(pattern.protocol) ||
+         !IsSimpleFullWildcardField(pattern.username) ||
+         !IsSimpleFullWildcardField(pattern.password) ||
+         !IsSimpleFullWildcardField(pattern.hostname) ||
+         !IsSimpleFullWildcardField(pattern.port) ||
+         !IsSimpleFullWildcardField(pattern.pathname) ||
+         !IsSimpleFullWildcardField(pattern.search) ||
+         !IsSimpleFullWildcardField(pattern.hash);
+}
+
+// Returns true if the pathname ends with a pattern token that requires escaping
+// the following '?' as "\\?" when appending a query string.
+//
+// In URLPattern syntax, '?' can represent either the start of a query string
+// or an optional modifier (matching 0 or 1 time). If the preceding pathname
+// ends with a wildcard ('*'), regex group (')'), custom group ('}'), or a
+// segment wildcard (e.g. ":id") without a suffix, the parser would mistakenly
+// interpret '?' as a modifier on the preceding token. Escaping as "\\?"
+// prevents this ambiguity.
+bool NeedsQueryEscape(const std::vector<liburlpattern::Part>& pathname_parts,
+                      std::string_view pathname_str) {
+  CHECK(!pathname_str.empty());
+  CHECK(!pathname_parts.empty());
+  char last_char = pathname_str.back();
+  if (last_char == '*' || last_char == '}' || last_char == ')') {
+    return true;
+  }
+  const liburlpattern::Part& last_part = pathname_parts.back();
+  if (last_part.type == liburlpattern::PartType::kSegmentWildcard &&
+      last_part.suffix.empty()) {
+    return true;
+  }
+  return false;
+}
+
+// Reconstructs the search and hash components (e.g. "?q=1#hash", "\?q=1", or
+// "#hash"). Returns an empty string if both search and hash are default
+// wildcards.
+std::string ReconstructSearchAndHash(const blink::SafeUrlPattern& pattern,
+                                     std::string_view pathname) {
+  const bool is_search_wildcard = IsSimpleFullWildcardField(pattern.search);
+  const bool is_hash_wildcard = IsSimpleFullWildcardField(pattern.hash);
+  if (is_search_wildcard && is_hash_wildcard) {
+    return "";
+  }
+
+  const std::string search =
+      ConvertToPatternString(pattern, URLPatternFieldType::kSearch);
+  const std::string hash =
+      ConvertToPatternString(pattern, URLPatternFieldType::kHash);
+
+  if (!is_hash_wildcard && search.empty()) {
+    return base::StrCat({"#", hash});
+  }
+
+  const std::string_view query_prefix =
+      NeedsQueryEscape(pattern.pathname, pathname) ? "\\?" : "?";
+  if (is_hash_wildcard) {
+    return base::StrCat({query_prefix, search});
+  }
+  return base::StrCat({query_prefix, search, "#", hash});
+}
+
+// Tries to reconstruct `pattern` as a simple "https://" URL string.
+// Returns std::nullopt if the pattern cannot be represented as a simple URL
+// (e.g. non-https, non-empty port, or specified credentials).
+std::optional<std::string> MaybeReconstructAsURLString(
+    const blink::SafeUrlPattern& pattern) {
+  if (!IsSimpleFullWildcardField(pattern.username) ||
+      !IsSimpleFullWildcardField(pattern.password)) {
+    return std::nullopt;
+  }
+  if (ConvertToPatternString(pattern, URLPatternFieldType::kProtocol) !=
+      "https") {
+    return std::nullopt;
+  }
+  // In a URLPattern string, `port` is parsed as an empty string unless
+  // explicitly specified, while other omitted fields are set to "*".
+  if (!pattern.port.empty()) {
+    return std::nullopt;
+  }
+  const std::string hostname =
+      ConvertToPatternString(pattern, URLPatternFieldType::kHostname);
+  if (IsSimpleFullWildcardField(pattern.pathname)) {
+    // Do not support when `search` or `hash` is not a wildcard. For example,
+    // reconstructing as "https://example.com?q=1" would cause the URL parser
+    // to interpret the pathname as "/", losing the wildcard pathname "*".
+    if (!IsSimpleFullWildcardField(pattern.search) ||
+        !IsSimpleFullWildcardField(pattern.hash)) {
+      return std::nullopt;
+    }
+    return base::StrCat({"https://", hostname});
+  }
+
+  const std::string pathname =
+      ConvertToPatternString(pattern, URLPatternFieldType::kPathname);
+  if (pathname.empty() || pathname[0] != '/') {
+    return std::nullopt;
+  }
+
+  return base::StrCat({"https://", hostname, pathname,
+                       ReconstructSearchAndHash(pattern, pathname)});
+}
+
 base::Value OrConditionToValue(
     const blink::ServiceWorkerRouterOrCondition& or_condition) {
-  base::Value::List ret;
+  base::ListValue ret;
   ret.reserve(or_condition.conditions.size());
   for (const auto& c : or_condition.conditions) {
     ret.Append(ConditionToValue(c));
@@ -186,29 +305,57 @@ base::Value NotConditionToValue(
   return ConditionToValue(*not_condition.condition);
 }
 
+base::DictValue SafeURLPatternToValue(const blink::SafeUrlPattern& pattern) {
+  base::DictValue url_pattern_value;
+#define TO_VALUE(type, type_name)                       \
+  do {                                                  \
+    auto value = ConvertToPatternString(pattern, type); \
+    url_pattern_value.Set(type_name, value);            \
+  } while (0)
+
+  TO_VALUE(URLPatternFieldType::kProtocol, "protocol");
+  TO_VALUE(URLPatternFieldType::kUsername, "username");
+  TO_VALUE(URLPatternFieldType::kPassword, "password");
+  TO_VALUE(URLPatternFieldType::kHostname, "hostname");
+  TO_VALUE(URLPatternFieldType::kPort, "port");
+  TO_VALUE(URLPatternFieldType::kPathname, "pathname");
+  TO_VALUE(URLPatternFieldType::kSearch, "search");
+  TO_VALUE(URLPatternFieldType::kHash, "hash");
+#undef TO_VALUE
+  return url_pattern_value;
+}
+
+// Converts `pattern` to a base::DictValue, omitting default wildcard fields.
+base::DictValue SafeURLPatternToURLPatternInitDict(
+    const blink::SafeUrlPattern& pattern) {
+  base::DictValue url_pattern_value;
+#define TO_VALUE_IF_NOT_SIMPLE(type, field)               \
+  do {                                                    \
+    if (!IsSimpleFullWildcardField(pattern.field)) {      \
+      auto value = ConvertToPatternString(pattern, type); \
+      url_pattern_value.Set(#field, value);               \
+    }                                                     \
+  } while (0)
+
+  TO_VALUE_IF_NOT_SIMPLE(URLPatternFieldType::kProtocol, protocol);
+  TO_VALUE_IF_NOT_SIMPLE(URLPatternFieldType::kUsername, username);
+  TO_VALUE_IF_NOT_SIMPLE(URLPatternFieldType::kPassword, password);
+  TO_VALUE_IF_NOT_SIMPLE(URLPatternFieldType::kHostname, hostname);
+  TO_VALUE_IF_NOT_SIMPLE(URLPatternFieldType::kPort, port);
+  TO_VALUE_IF_NOT_SIMPLE(URLPatternFieldType::kPathname, pathname);
+  TO_VALUE_IF_NOT_SIMPLE(URLPatternFieldType::kSearch, search);
+  TO_VALUE_IF_NOT_SIMPLE(URLPatternFieldType::kHash, hash);
+#undef TO_VALUE_IF_NOT_SIMPLE
+  return url_pattern_value;
+}
+
 base::Value ConditionToValue(
     const blink::ServiceWorkerRouterCondition& condition) {
-  base::Value::Dict out_c;
+  base::DictValue out_c;
   const auto& [url_pattern, request, running_status, or_condition,
                not_condition] = condition.get();
   if (url_pattern) {
-    base::Value::Dict url_pattern_value;
-#define TO_VALUE(type, type_name)                            \
-  do {                                                       \
-    auto value = ConvertToPatternString(*url_pattern, type); \
-    url_pattern_value.Set(type_name, value);                 \
-  } while (0)
-
-    TO_VALUE(URLPatternFieldType::kProtocol, "protocol");
-    TO_VALUE(URLPatternFieldType::kUsername, "username");
-    TO_VALUE(URLPatternFieldType::kPassword, "password");
-    TO_VALUE(URLPatternFieldType::kHostname, "hostname");
-    TO_VALUE(URLPatternFieldType::kPort, "port");
-    TO_VALUE(URLPatternFieldType::kPathname, "pathname");
-    TO_VALUE(URLPatternFieldType::kSearch, "search");
-    TO_VALUE(URLPatternFieldType::kHash, "hash");
-#undef TO_VALUE
-      out_c.Set("urlPattern", std::move(url_pattern_value));
+    out_c.Set("urlPattern", SafeURLPatternToValue(*url_pattern));
   }
   if (request) {
     out_c.Set("request", RequestToValue(*request));
@@ -656,6 +803,23 @@ bool NotCondition::Match(
 
 namespace content {
 
+std::string SafeURLPatternToString(const blink::SafeUrlPattern& pattern) {
+  if (base::FeatureList::IsEnabled(
+          features::kServiceWorkerStaticRouterTypedRulesForDevTools)) {
+    // Prefer a simple URL string representation when possible, as it is more
+    // readable and concise for DevTools.
+    if (std::optional<std::string> url_string =
+            MaybeReconstructAsURLString(pattern)) {
+      return *url_string;
+    }
+    if (CanReconstructAsStruct(pattern)) {
+      return base::WriteJson(SafeURLPatternToURLPatternInitDict(pattern))
+          .value_or("");
+    }
+  }
+  return base::WriteJson(SafeURLPatternToValue(pattern)).value_or("");
+}
+
 class ServiceWorkerRouterEvaluator::RouterRule {
  public:
   ServiceWorkerRouterEvaluatorErrorEnums SetRule(
@@ -725,6 +889,7 @@ void ServiceWorkerRouterEvaluator::Compile() {
         ServiceWorkerRouterEvaluatorErrorEnums::kExceedMaxRouterSize;
     return;
   }
+  CHECK(compiled_rules_.empty());
   for (size_t idx = 0; idx < rules_.rules.size(); ++idx) {
     const auto& r = rules_.rules[idx];
     std::unique_ptr<RouterRule> rule = std::make_unique<RouterRule>();
@@ -748,6 +913,8 @@ void ServiceWorkerRouterEvaluator::Compile() {
       has_non_fetch_event_source_ |= !has_fetch_event;
     }
     compiled_rules_.emplace_back(std::move(rule));
+    UpdateMaxConditionDepthAndWidth(r.condition, max_rule_depth_,
+                                    max_rule_width_);
   }
   RecordSetupError(ServiceWorkerRouterEvaluatorErrorEnums::kNoError);
   is_valid_ = true;
@@ -790,13 +957,13 @@ ServiceWorkerRouterEvaluator::EvaluateWithoutRunningStatus(
 }
 
 base::Value ServiceWorkerRouterEvaluator::ToValue() const {
-  base::Value::List out;
+  base::ListValue out;
   CHECK_EQ(rules_.rules.size(), compiled_rules_.size());
   for (size_t idx = 0; idx < rules_.rules.size(); ++idx) {
     const auto& r = rules_.rules[idx];
-    base::Value::Dict rule;
+    base::DictValue rule;
     base::Value condition = ConditionToValue(r.condition);
-    base::Value::List source;
+    base::ListValue source;
     for (const auto& s : r.sources) {
       switch (s.type) {
         case network::mojom::ServiceWorkerRouterSourceType::kNetwork:
@@ -811,7 +978,7 @@ base::Value ServiceWorkerRouterEvaluator::ToValue() const {
           break;
         case network::mojom::ServiceWorkerRouterSourceType::kCache:
           if (s.cache_source->cache_name) {
-            base::Value::Dict out_s;
+            base::DictValue out_s;
             out_s.Set("cache_name", *s.cache_source->cache_name);
             source.Append(std::move(out_s));
           } else {
@@ -821,7 +988,7 @@ base::Value ServiceWorkerRouterEvaluator::ToValue() const {
         case network::mojom::ServiceWorkerRouterSourceType::
             kRaceNetworkAndCache:
           if (s.race_network_and_cache_source->cache_source.cache_name) {
-            base::Value::Dict out_s;
+            base::DictValue out_s;
             out_s.Set(
                 "race_network_and_cache_cache_name",
                 *s.race_network_and_cache_source->cache_source.cache_name);
@@ -844,24 +1011,26 @@ std::string ServiceWorkerRouterEvaluator::ToString() const {
   return base::WriteJson(ToValue()).value_or("");
 }
 
+std::vector<ServiceWorkerRouterRule>
+ServiceWorkerRouterEvaluator::CalculateRouterRulesForDevTools() const {
+  CHECK_EQ(rules_.rules.size(), compiled_rules_.size());
+  std::vector<ServiceWorkerRouterRule> router_rules;
+  router_rules.reserve(rules_.rules.size());
+  for (size_t idx = 0; idx < rules_.rules.size(); ++idx) {
+    const auto& r = rules_.rules[idx];
+    router_rules.push_back(
+        {.condition = r.condition,
+         // `sources` is always a singleton per the current spec.
+         // TODO(crbug.com/545781129): Refactor to a single source field.
+         .source = r.sources[0],
+         .id = base::checked_cast<int>(compiled_rules_[idx]->id())});
+  }
+  return router_rules;
+}
+
 void ServiceWorkerRouterEvaluator::RecordRouterRuleInfo() const {
   base::UmaHistogramCounts1000("ServiceWorker.RouterEvaluator.RuleCount",
                                compiled_rules_.size());
-  size_t depth, width;
-  std::tie(depth, width) = GetMaxDepthAndWidth();
-  base::UmaHistogramCounts1000("ServiceWorker.RouterEvaluator.ConditionDepth",
-                               depth);
-  base::UmaHistogramCounts1000("ServiceWorker.RouterEvaluator.OrConditionWidth",
-                               width);
-}
-
-std::tuple<size_t, size_t> ServiceWorkerRouterEvaluator::GetMaxDepthAndWidth()
-    const {
-  size_t depth = 0, width = 0;
-  for (const auto& r : rules_.rules) {
-    UpdateMaxConditionDepthAndWidth(r.condition, depth, width);
-  }
-  return {depth, width};
 }
 
 }  // namespace content

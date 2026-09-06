@@ -12,12 +12,13 @@
 #include <vector>
 
 #include "base/memory/raw_ptr.h"
+#include "chrome/browser/tab_list/tab_removed_reason.h"
 #include "chrome/browser/ui/tabs/tab_change_type.h"
 #include "components/sessions/core/session_id.h"
+#include "components/split_tabs/split_tab_id.h"
+#include "components/split_tabs/split_tab_visual_data.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "components/tab_groups/tab_group_visual_data.h"
-#include "components/tabs/public/split_tab_id.h"
-#include "components/tabs/public/split_tab_visual_data.h"
 #include "components/tabs/public/tab_interface.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
 #include "ui/base/models/list_selection_model.h"
@@ -55,22 +56,10 @@ class TabStripModelChange {
  public:
   enum Type { kSelectionOnly, kInserted, kRemoved, kMoved, kReplaced };
 
-  // Used to specify what will happen with the tab after it is removed.
-  enum class RemoveReason {
-    // Tab will be deleted.
-    kDeleted,
-
-    // Tab got detached from a TabStrip and inserted into another TabStrip.
-    kInsertedIntoOtherTabStrip,
-
-    // Insert the WebContents into side panel.
-    kInsertedIntoSidePanel
-  };
-
   struct RemovedTab {
     RemovedTab(tabs::TabInterface* tab,
                int index,
-               RemoveReason remove_reason,
+               TabRemovedReason remove_reason,
                tabs::TabInterface::DetachReason tab_detach_reason,
                std::optional<SessionID> session_id);
     virtual ~RemovedTab();
@@ -81,7 +70,7 @@ class TabStripModelChange {
     raw_ptr<tabs::TabInterface> tab = nullptr;
     raw_ptr<content::WebContents> contents = nullptr;
     int index;
-    RemoveReason remove_reason;
+    TabRemovedReason remove_reason;
     tabs::TabInterface::DetachReason tab_detach_reason;
     std::optional<SessionID> session_id;
   };
@@ -129,7 +118,7 @@ class TabStripModelChange {
     void WriteIntoTrace(perfetto::TracedValue context) const;
   };
 
-  // Tabs were removed at |indices_before_removal|. This implicitly
+  // Tabs were removed at `indices_before_removal`. This implicitly
   // changes the existing selection model by calling DecrementFrom(index).
   struct Remove {
     Remove();
@@ -157,7 +146,7 @@ class TabStripModelChange {
     // { F, 5 }, { C, 2 }, { B, 1 }
     //
     // Therefore all observers which store indices of tabs should update them
-    // in the order the tabs appear in `contents`. Observers should  not do
+    // in the order the tabs appear in `contents`. Observers should not do
     // index-based queries based on their own internally-stored indices until
     // after processing all of `contents`.
     std::vector<RemovedTab> contents;
@@ -223,8 +212,8 @@ struct TabStripSelectionChange {
 
   TabStripSelectionChange& operator=(const TabStripSelectionChange& other);
 
-  // Fill TabStripSelectionChange with given |contents| and |selection_model|.
-  // note that |new_contents| and |new_model| will be filled too so that
+  // Fill TabStripSelectionChange with given `contents` and `selection_model`.
+  // note that `new_contents` and `new_model` will be filled too so that
   // selection_changed() and active_tab_changed() won't return true.
   TabStripSelectionChange(tabs::TabInterface* tab,
                           const ui::ListSelectionModel& model);
@@ -395,7 +384,8 @@ struct SplitTabChange {
   struct VisualsChange : public Delta {
     VisualsChange(const split_tabs::SplitTabVisualData& old_visual_data,
                   const split_tabs::SplitTabVisualData& new_visual_data,
-                  SplitVisualChangeReason reason);
+                  SplitVisualChangeReason reason,
+                  bool is_intermediate = false);
     ~VisualsChange() override;
 
     const split_tabs::SplitTabVisualData& old_visual_data() const {
@@ -406,11 +396,16 @@ struct SplitTabChange {
     }
 
     SplitVisualChangeReason reason() const { return reason_; }
+    bool is_intermediate() const { return is_intermediate_; }
 
    private:
     split_tabs::SplitTabVisualData old_visual_data_;
     split_tabs::SplitTabVisualData new_visual_data_;
     SplitVisualChangeReason reason_;
+
+    // True if the visual change is the result of a user drag-resizing the split
+    // group. False once the drag-resizing operation has finished.
+    bool is_intermediate_;
   };
 
   struct ContentsChange : public Delta {
@@ -517,12 +512,12 @@ class TabStripModelObserver {
   TabStripModelObserver(const TabStripModelObserver&) = delete;
   TabStripModelObserver& operator=(const TabStripModelObserver&) = delete;
 
-  // |change| is a series of changes in tabstrip model. |change| consists
+  // `change` is a series of changes in tabstrip model. `change` consists
   // of changes with same type and those changes may have caused selection or
-  // activation changes. |selection| is determined by comparing the state of
-  // TabStripModel before the |change| and after the |change| are applied.
+  // activation changes. `selection` is determined by comparing the state of
+  // TabStripModel before the `change` and after the `change` are applied.
   // When only selection/activation was changed without any change about
-  // the Tab, |change| can be empty.
+  // the Tab, `change` can be empty.
   virtual void OnTabStripModelChanged(TabStripModel* tab_strip_model,
                                       const TabStripModelChange& change,
                                       const TabStripSelectionChange& selection);
@@ -533,39 +528,26 @@ class TabStripModelObserver {
   // cancelling/completing a the drag before a tab is added during header drag.
   virtual void OnTabWillBeAdded();
 
-  // Notification that the tab at |index| will be removed from the
+  // Notification that the tab at `index` will be removed from the
   // TabStripModel, which allows an observer to react to an impending change to
   // the TabStripModel. The only use case of this signal that is currently
   // supported is the drag controller completing a drag before a tab is removed.
-  // TODO(crbug.com/40838330): Unify and generalize this and OnTabWillBeAdded,
-  // e.g. via OnTabStripModelWillChange().
   virtual void OnTabWillBeRemoved(tabs::TabInterface* tab, int index);
 
   // Called when a tab is attempted to be closed but the closure is not
   // permitted by the `TabStripModel::IsTabClosable` oracle.
   virtual void OnTabCloseCancelled(const tabs::TabInterface* tab);
 
-  // The specified Tab at |index| changed in some way. |tab|
+  // The specified Tab changed in some way. `tab`
   // may be an entirely different object and the old value is no longer
   // available by the time this message is delivered.
   //
-  // See tab_change_type.h for a description of |change_type|.
+  // See tab_change_type.h for a description of `change_type`.
   virtual void OnTabChangedAt(tabs::TabInterface* tab,
-                              int index,
                               TabChangeType change_type);
 
   // Invoked when the pinned state of a tab changes.
   virtual void OnTabPinnedStateChanged(tabs::TabInterface* tab, int index);
-
-  // Invoked when the blocked state of a tab changes.
-  // NOTE: This is invoked when a tab becomes blocked/unblocked by a tab modal
-  // window.
-  virtual void OnTabBlockedStateChanged(tabs::TabInterface* tab, int index);
-
-  // The specified tab at `index` requires the display of a UI indication to the
-  // user that it needs their attention. The UI indication is set iff
-  // `attention` is true.
-  virtual void OnTabNeedsAttentionChanged(int index, bool attention);
 
   // Called when the tab at `index` is added to the group with id `new_group` or
   // removed from a group with id `old_group`.
@@ -576,7 +558,7 @@ class TabStripModelObserver {
       tabs::TabInterface* tab,
       int index);
 
-  // |change| is a change in the Tab Group model or metadata. These
+  // `change` is a change in the Tab Group model or metadata. These
   // changes may cause repainting of some Tab Group UI. They are
   // independent of the tabstrip model and do not affect any tab state.
   virtual void OnTabGroupChanged(const TabGroupChange& change);
@@ -587,12 +569,6 @@ class TabStripModelObserver {
       std::optional<tab_groups::TabGroupId> new_focused_group_id,
       std::optional<tab_groups::TabGroupId> old_focused_group_id);
 
-  // Similar to OnTabNeedsAttentionChanged but for Tab Groups. The UI indication
-  // is set iff `attention` is true.
-  virtual void OnTabGroupNeedsAttentionChanged(
-      const tab_groups::TabGroupId& group,
-      bool attention);
-
   // Notfies us when a Tab Group is added to the Tab Group Model.
   virtual void OnTabGroupAdded(const tab_groups::TabGroupId& group_id);
 
@@ -600,7 +576,7 @@ class TabStripModelObserver {
   virtual void OnTabGroupWillBeRemoved(const tab_groups::TabGroupId& group_id);
 
   // Notifies us when there is a change to split tab state in the TabStripModel.
-  // The |change| provides details of the change to split tab.
+  // The `change` provides details of the change to split tab.
   virtual void OnSplitTabChanged(const SplitTabChange& change);
 
   // The TabStripModel now no longer has any tabs. The implementer may

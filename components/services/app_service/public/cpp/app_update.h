@@ -226,7 +226,7 @@ class COMPONENT_EXPORT(APP_UPDATE) AppUpdate {
   std::optional<std::string> SelectedLocale() const;
   bool SelectedLocaleChanged() const;
 
-  std::optional<base::Value::Dict> Extra() const;
+  std::optional<base::DictValue> Extra() const;
   bool ExtraChanged() const;
 
   const App* State() const { return state_.get(); }
@@ -235,8 +235,10 @@ class COMPONENT_EXPORT(APP_UPDATE) AppUpdate {
  private:
   friend class AppRegistryCacheTest;
 
-  raw_ptr<const apps::App, DanglingUntriaged> state_ = nullptr;
-  raw_ptr<const apps::App, DanglingUntriaged> delta_ = nullptr;
+  // Pointed-to App instances are ephemeral and guaranteed to outlive this
+  // update wrapper during notification dispatch.
+  raw_ptr<const apps::App> state_ = nullptr;
+  raw_ptr<const apps::App> delta_ = nullptr;
 
   raw_ref<const ::AccountId> account_id_;
 };

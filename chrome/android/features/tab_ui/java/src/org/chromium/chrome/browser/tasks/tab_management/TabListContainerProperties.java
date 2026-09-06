@@ -10,9 +10,12 @@ import androidx.core.util.Function;
 import androidx.core.util.Pair;
 
 import org.chromium.base.Callback;
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
+import org.chromium.base.supplier.NonNullObservableSupplier;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
+import org.chromium.chrome.browser.tab_ui.TabListMode;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModel.ReadableObjectPropertyKey;
@@ -35,9 +38,8 @@ class TabListContainerProperties {
     public static final PropertyModel.WritableObjectPropertyKey<Integer> INITIAL_SCROLL_INDEX =
             new PropertyModel.WritableObjectPropertyKey<>(true);
 
-    /** Same as {@link TabListCoordinator.TabListMode}. */
-    public static final PropertyModel.WritableIntPropertyKey MODE =
-            new PropertyModel.WritableIntPropertyKey();
+    public static final PropertyModel.WritableIntDefPropertyKey<TabListMode> MODE =
+            new PropertyModel.WritableIntDefPropertyKey<>(TabListMode.GRID);
 
     /**
      * A property which is set to focus on the passed tab index for accessibility. Integer, but not
@@ -65,7 +67,7 @@ class TabListContainerProperties {
             GET_VISIBLE_RANGE_CALLBACK = new ReadableObjectPropertyKey<>();
 
     /** Whether the recycler view is currently being scrolled. */
-    public static final ReadableObjectPropertyKey<Callback<ObservableSupplier<Boolean>>>
+    public static final ReadableObjectPropertyKey<Callback<MonotonicObservableSupplier<Boolean>>>
             IS_SCROLLING_SUPPLIER_CALLBACK = new WritableObjectPropertyKey<>();
 
     /** Whether the tab switcher pane has sensitive content. */
@@ -84,8 +86,38 @@ class TabListContainerProperties {
     public static final PropertyModel.WritableBooleanPropertyKey IS_NON_ZERO_Y_OFFSET =
             new PropertyModel.WritableBooleanPropertyKey();
 
-    public static final WritableObjectPropertyKey<ObservableSupplier<Boolean>>
+    public static final WritableObjectPropertyKey<NonNullObservableSupplier<Boolean>>
             IS_PINNED_TAB_STRIP_ANIMATING_SUPPLIER = new WritableObjectPropertyKey<>();
+
+    public static final WritableObjectPropertyKey<SettableNonNullObservableSupplier<Boolean>>
+            MANUAL_SEARCH_BOX_ANIMATION_SUPPLIER = new WritableObjectPropertyKey<>();
+
+    public static final WritableObjectPropertyKey<SettableNonNullObservableSupplier<Boolean>>
+            HUB_SEARCH_BOX_VISIBILITY_SUPPLIER = new WritableObjectPropertyKey<>();
+
+    public static final WritableObjectPropertyKey<SettableNonNullObservableSupplier<Float>>
+            SEARCH_BOX_VISIBILITY_FRACTION_SUPPLIER = new WritableObjectPropertyKey<>();
+
+    /**
+     * A holder for supplementary container animation metadata, used with {@link
+     * #ANIMATE_SUPPLEMENTARY_CONTAINER}.
+     */
+    public static final class SupplementaryContainerAnimationMetadata {
+        /** Whether the search box should be shown. */
+        public final boolean shouldShowSearchBox;
+
+        /** Whether to force the animation even if the view is already in the target state. */
+        public final boolean forced;
+
+        public SupplementaryContainerAnimationMetadata(
+                boolean shouldShowSearchBox, boolean forced) {
+            this.shouldShowSearchBox = shouldShowSearchBox;
+            this.forced = forced;
+        }
+    }
+
+    public static final WritableObjectPropertyKey<SupplementaryContainerAnimationMetadata>
+            ANIMATE_SUPPLEMENTARY_CONTAINER = new WritableObjectPropertyKey<>();
 
     /** Keys for {@link TabSwitcherPaneCoordinator}. */
     public static final PropertyKey[] ALL_KEYS =
@@ -105,6 +137,10 @@ class TabListContainerProperties {
                 SUPPRESS_ACCESSIBILITY,
                 IS_TABLET_OR_LANDSCAPE,
                 IS_NON_ZERO_Y_OFFSET,
-                IS_PINNED_TAB_STRIP_ANIMATING_SUPPLIER
+                IS_PINNED_TAB_STRIP_ANIMATING_SUPPLIER,
+                ANIMATE_SUPPLEMENTARY_CONTAINER,
+                MANUAL_SEARCH_BOX_ANIMATION_SUPPLIER,
+                HUB_SEARCH_BOX_VISIBILITY_SUPPLIER,
+                SEARCH_BOX_VISIBILITY_FRACTION_SUPPLIER
             };
 }

@@ -17,9 +17,9 @@
 
 #if BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
 #include "chrome/browser/enterprise/connectors/analysis/content_analysis_sdk_manager.h"  // nogncheck
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #endif  // BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
 
@@ -45,11 +45,12 @@ ConnectorsManager::ConnectorsManager(PrefService* pref_service,
 #if BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
   // Start observing tab strip models for all browsers.
   ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
-      [this](BrowserWindowInterface* browser_window_interface) {
-        OnBrowserAdded(browser_window_interface->GetBrowserForMigrationOnly());
+      [this](BrowserWindowInterface* browser) {
+        OnBrowserCreated(browser);
         return true;
       });
-  BrowserList::GetInstance()->AddObserver(this);
+  browser_collection_observation_.Observe(
+      GlobalBrowserCollection::GetInstance());
 #endif  // BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
 
   if (observe_prefs) {
@@ -60,19 +61,7 @@ ConnectorsManager::ConnectorsManager(PrefService* pref_service,
   }
 }
 
-#if BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
-ConnectorsManager::~ConnectorsManager() {
-  BrowserList::GetInstance()->RemoveObserver(this);
-  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
-      [this](BrowserWindowInterface* browser_window_interface) {
-        OnBrowserRemoved(
-            browser_window_interface->GetBrowserForMigrationOnly());
-        return true;
-      });
-}
-#else
 ConnectorsManager::~ConnectorsManager() = default;
-#endif  // BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
 
 #if BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
 bool ConnectorsManager::IsConnectorEnabledForLocalAgent(
@@ -113,12 +102,9 @@ std::optional<AnalysisSettings> ConnectorsManager::GetAnalysisSettings(
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
-void ConnectorsManager::OnBrowserAdded(Browser* browser) {
-  browser->tab_strip_model()->AddObserver(this);
-}
-
-void ConnectorsManager::OnBrowserRemoved(Browser* browser) {
-  browser->tab_strip_model()->RemoveObserver(this);
+void ConnectorsManager::OnBrowserCreated(BrowserWindowInterface* browser) {
+  // TODO(crbug.com/452120900): TabStripModel auto-unregistered by dtor
+  browser->GetTabStripModel()->AddObserver(this);
 }
 
 void ConnectorsManager::OnTabStripModelChanged(
@@ -144,22 +130,6 @@ void ConnectorsManager::OnTabStripModelChanged(
 }
 #endif  // BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
 
-void ConnectorsManager::CacheAnalysisConnectorPolicy(
-    AnalysisConnector connector) const {
-  analysis_connector_settings_.erase(connector);
-
-  // Connectors with non-existing policies should not reach this code.
-  const char* pref = AnalysisConnectorPref(connector);
-  DCHECK(pref);
-
-  const base::Value::List& policy_value = prefs()->GetList(pref);
-  for (const base::Value& service_settings : policy_value) {
-    analysis_connector_settings_[connector].push_back(
-        std::make_unique<AnalysisServiceSettings>(service_settings,
-                                                  *service_provider_config_));
-  }
-}
-
 #if BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
 void ConnectorsManager::MaybeCloseLocalContentAnalysisAgentConnection() {
   for (auto connector : kLocalAnalysisConnectors) {
@@ -174,7 +144,7 @@ void ConnectorsManager::MaybeCloseLocalContentAnalysisAgentConnection() {
 }
 #endif  // BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
 
-void ConnectorsManager::OnPrefChanged(AnalysisConnector connector) {
+void ConnectorsManager::OnAnalysisPrefChanged(AnalysisConnector connector) {
   CacheAnalysisConnectorPolicy(connector);
 #if BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
   MaybeCloseLocalContentAnalysisAgentConnection();
@@ -182,9 +152,6 @@ void ConnectorsManager::OnPrefChanged(AnalysisConnector connector) {
 }
 
 DataRegion ConnectorsManager::GetDataRegion(AnalysisConnector connector) const {
-#if BUILDFLAG(IS_ANDROID)
-  return DataRegion::NO_PREFERENCE;
-#else
   // Connector's policy scope determines the DRZ policy scope to use.
   policy::PolicyScope scope = static_cast<policy::PolicyScope>(
       prefs()->GetInteger(AnalysisConnectorScopePref(connector)));
@@ -201,31 +168,14 @@ DataRegion ConnectorsManager::GetDataRegion(AnalysisConnector connector) const {
 
   return ChromeDataRegionSettingToEnum(
       pref_service->GetInteger(prefs::kChromeDataRegionSetting));
-#endif
 }
 
-void ConnectorsManager::StartObservingPrefs(PrefService* pref_service) {
-  pref_change_registrar_.Init(pref_service);
-  StartObservingPref(AnalysisConnector::FILE_ATTACHED);
-  StartObservingPref(AnalysisConnector::FILE_DOWNLOADED);
-  StartObservingPref(AnalysisConnector::BULK_DATA_ENTRY);
-  StartObservingPref(AnalysisConnector::PRINT);
-#if BUILDFLAG(IS_CHROMEOS)
-  StartObservingPref(AnalysisConnector::FILE_TRANSFER);
-#endif
-  ConnectorsManagerBase::StartObservingPref();
-}
-
-void ConnectorsManager::StartObservingPref(AnalysisConnector connector) {
-  const char* pref = AnalysisConnectorPref(connector);
-  DCHECK(pref);
-  if (!pref_change_registrar_.IsObserved(pref)) {
-    pref_change_registrar_.Add(
-        pref, base::BindRepeating(
-                  static_cast<void (ConnectorsManager::*)(AnalysisConnector)>(
-                      &ConnectorsManager::OnPrefChanged),
-                  base::Unretained(this), connector));
-  }
+std::unique_ptr<AnalysisServiceSettingsBase>
+ConnectorsManager::MakeAnalysisServiceSettings(
+    const base::Value& settings_value,
+    const ServiceProviderConfig& service_provider_config) const {
+  return std::make_unique<AnalysisServiceSettings>(settings_value,
+                                                   service_provider_config);
 }
 
 }  // namespace enterprise_connectors

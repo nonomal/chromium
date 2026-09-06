@@ -15,7 +15,11 @@
             },
             "blink_perf.dom": {
                 "abridged": false
-            },
+            }
+        }
+    },
+    "1": {
+        "benchmarks": {
             "blink_perf.events": {
                 "abridged": false
             },
@@ -23,21 +27,21 @@
                 "abridged": false
             },
             "blink_perf.layout": {
-                "end": 75,
-                "abridged": false
-            }
-        }
-    },
-    "1": {
-        "benchmarks": {
-            "blink_perf.layout": {
-                "begin": 75,
                 "abridged": false
             },
             "blink_perf.owp_storage": {
                 "abridged": false
             },
             "blink_perf.parser": {
+                "end": 27,
+                "abridged": false
+            }
+        }
+    },
+    "2": {
+        "benchmarks": {
+            "blink_perf.parser": {
+                "begin": 27,
                 "abridged": false
             },
             "blink_perf.shadow_dom": {
@@ -55,6 +59,9 @@
             "blink_perf.webgpu": {
                 "abridged": false
             },
+            "blink_perf.webgpu_compat": {
+                "abridged": false
+            },
             "dummy_benchmark.noisy_benchmark_1": {
                 "abridged": false
             },
@@ -62,9 +69,6 @@
                 "abridged": false
             },
             "jetstream2": {
-                "abridged": false
-            },
-            "jetstream2-minorms": {
                 "abridged": false
             }
         },
@@ -75,108 +79,80 @@
                 ],
                 "path": "components_perftests"
             }
-        },
-        "crossbench": {
-            "loadline-tablet-fast": {
-                "display_name": "loadline_tablet.crossbench",
-                "arguments": [
-                    "--cool-down-threshold=moderate"
-                ]
-            }
         }
     },
-    "2": {
+    "3": {
+        "crossbench": {
+            "loadline_tablet.crossbench": {
+                "crossbench_name": "loadline-tablet-fast",
+                "arguments": [
+                    "--cool-down-threshold=moderate",
+                    "--enable-field-trials=benchmarking"
+                ]
+            }
+        },
+        "benchmarks": {}
+    },
+    "4": {
         "benchmarks": {
             "media.mobile": {
-                "abridged": false
-            },
-            "octane": {
                 "abridged": false
             },
             "rasterize_and_record_micro.top_25": {
                 "abridged": false
             },
             "rendering.mobile": {
-                "end": 117,
-                "abridged": false
-            }
-        }
-    },
-    "3": {
-        "benchmarks": {
-            "rendering.mobile": {
-                "begin": 117,
-                "end": 277,
-                "abridged": false
-            }
-        }
-    },
-    "4": {
-        "benchmarks": {
-            "rendering.mobile": {
-                "begin": 277,
-                "abridged": false
-            },
-            "rendering.mobile.notracing": {
-                "abridged": false
-            },
-            "speedometer": {
-                "abridged": false
-            },
-            "speedometer-future": {
-                "abridged": false
-            },
-            "speedometer2": {
-                "abridged": false
-            },
-            "speedometer2-future": {
-                "abridged": false
-            },
-            "speedometer2-minorms": {
+                "end": 116,
                 "abridged": false
             }
         }
     },
     "5": {
         "benchmarks": {
-            "speedometer3": {
-                "abridged": false
-            },
-            "speedometer3-future": {
-                "abridged": false
-            },
-            "speedometer3-minorms": {
-                "abridged": false
-            },
-            "startup.mobile": {
-                "abridged": false
-            },
-            "system_health.common_mobile": {
-                "abridged": false
-            },
-            "system_health.memory_mobile": {
-                "end": 14,
+            "rendering.mobile": {
+                "begin": 116,
+                "end": 273,
                 "abridged": false
             }
         }
     },
     "6": {
         "benchmarks": {
-            "system_health.memory_mobile": {
-                "begin": 14,
-                "end": 63,
+            "rendering.mobile": {
+                "begin": 273,
+                "abridged": false
+            },
+            "rendering.mobile.notracing": {
+                "abridged": false
+            },
+            "speedometer3": {
+                "abridged": false
+            },
+            "speedometer3-future": {
+                "abridged": false
+            },
+            "startup.mobile": {
+                "abridged": false
+            },
+            "system_health.common_mobile": {
+                "end": 37,
                 "abridged": false
             }
         }
     },
     "7": {
         "benchmarks": {
-            "system_health.memory_mobile": {
-                "begin": 63,
+            "system_health.common_mobile": {
+                "begin": 37,
                 "abridged": false
             },
+            "system_health.memory_mobile": {
+                "abridged": false,
+                "pageset_repeat": 3
+            },
             "system_health.webview_startup": {
-                "abridged": false
+                "abridged": false,
+                "pageset_repeat": 20
             },
             "v8.browsing_mobile": {
                 "abridged": false
@@ -193,18 +169,18 @@
         }
     },
     "extra_infos": {
-        "num_stories": 1125,
-        "predicted_min_shard_time": 3797.0,
-        "predicted_min_shard_index": 7,
-        "predicted_max_shard_time": 5752.0,
-        "predicted_max_shard_index": 1,
-        "shard #0": 4116.0,
-        "shard #1": 5752.0,
-        "shard #2": 3860.0,
-        "shard #3": 3837.0,
-        "shard #4": 3826.0,
-        "shard #5": 3929.0,
-        "shard #6": 3851.0,
-        "shard #7": 3797.0
+        "num_stories": 1138,
+        "predicted_min_shard_time": 918.0,
+        "predicted_min_shard_index": 2,
+        "predicted_max_shard_time": 3600,
+        "predicted_max_shard_index": 3,
+        "shard #0": 1794.0,
+        "shard #1": 1792.0,
+        "shard #2": 918.0,
+        "shard #3": 3600,
+        "shard #4": 1562.0,
+        "shard #5": 1570,
+        "shard #6": 1564.0,
+        "shard #7": 1569.0
     }
 }

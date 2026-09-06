@@ -43,11 +43,7 @@ class AnalysisServiceSettings : public AnalysisServiceSettingsBase {
   AnalysisServiceSettings& operator=(AnalysisServiceSettings&&);
   ~AnalysisServiceSettings() override;
 
-  // This method extends the result of the base class's GetAnalysisSettings with
-  // local analysis settings if applicable.
-  std::optional<AnalysisSettings> GetAnalysisSettings(
-      const GURL& url,
-      DataRegion data_region) const override;
+  using AnalysisServiceSettingsBase::GetAnalysisSettings;
 
 #if BUILDFLAG(IS_CHROMEOS)
   std::optional<AnalysisSettings> GetAnalysisSettings(
@@ -58,23 +54,16 @@ class AnalysisServiceSettings : public AnalysisServiceSettingsBase {
 #endif
 
  private:
-  LocalAnalysisSettings GetLocalAnalysisSettings() const;
-
-  // Helper methods for parsing the raw policy settings input
-#if BUILDFLAG(ENTERPRISE_LOCAL_CONTENT_ANALYSIS)
-  void ParseVerificationSignatures(const base::Value::Dict& settings_dict);
-#endif
-
 #if BUILDFLAG(IS_CHROMEOS)
   void ParseSourceDestinationPatternSettings(
-      const base::Value::List* pattern_settings_list,
+      const base::ListValue* pattern_settings_list,
       bool is_enabled_pattern);
 
   // Updates the states of `source_destination_matcher_`,
   // `enabled_patterns_settings_` and/or `disabled_patterns_settings_` from a
   // policy value.
   void AddSourceDestinationSettings(
-      const base::Value::Dict& source_destination_settings_value,
+      const base::DictValue& source_destination_settings_value,
       bool enabled);
 
   // A matcher to identify matching pairs of sources and destinations.
@@ -82,10 +71,6 @@ class AnalysisServiceSettings : public AnalysisServiceSettingsBase {
   std::unique_ptr<SourceDestinationMatcherAsh> source_destination_matcher_ =
       std::make_unique<SourceDestinationMatcherAsh>();
 #endif  // BUILDFLAG(IS_CHROMEOS)
-
-  // Arrays of base64 encoded signing key signatures used to verify the
-  // authenticity of the service provider.
-  std::vector<std::string> verification_signatures_;
 };
 
 }  // namespace enterprise_connectors

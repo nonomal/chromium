@@ -13,9 +13,10 @@ import org.chromium.base.Callback;
 import org.chromium.base.ResettersForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.shared_preferences.SharedPreferencesManager;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.base.supplier.NullableObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.blink.mojom.DisplayMode;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
@@ -55,12 +56,14 @@ class WebAppHeaderLayoutMediator
     private final NullableObservableSupplier<Tab> mTabSupplier;
     private final ScrimManager mScrimManager;
     private final Supplier<List<Rect>> mHeaderControlPositionSupplier;
-    private final ObservableSupplierImpl<Integer> mWidthSupplier;
+    private int mWidth;
+
     private final ThemeColorProvider mThemeColorProvider;
     private final int mWebAppMinHeaderHeight;
-    private final int mHeaderButtonHeight;
+    private final int mHeaderButtonSize;
     private @Nullable AppHeaderState mCurrentHeaderState;
-    private final ObservableSupplierImpl<Integer> mAppHeaderUnoccludedWidthSupplier;
+    private final SettableMonotonicObservableSupplier<Integer> mAppHeaderUnoccludedWidthSupplier =
+            ObservableSuppliers.createMonotonic();
     private final Callback<Boolean> mScrimVisibilityObserver;
     private @Nullable Callback<Integer> mOnButtonBottomInsetChanged;
     private final Callback<Boolean> mSetHeaderAsOverlayCallback;
@@ -98,7 +101,7 @@ class WebAppHeaderLayoutMediator
             Supplier<List<Rect>> headerControlPositionSupplier,
             ThemeColorProvider themeColorProvider,
             int webAppHeaderMinHeightFromResources,
-            int headerButtonHeight,
+            int headerButtonSize,
             int displayMode,
             Callback<Boolean> setHeaderAsOverlayCallback,
             @Nullable String clientPackageName) {
@@ -108,12 +111,12 @@ class WebAppHeaderLayoutMediator
         mDesktopWindowStateManager = desktopWindowStateManager;
         mTabSupplier = tabSupplier;
         mHeaderControlPositionSupplier = headerControlPositionSupplier;
-        mHeaderButtonHeight = headerButtonHeight;
+        mHeaderButtonSize = headerButtonSize;
         mDisplayMode = displayMode;
         mSetHeaderAsOverlayCallback = setHeaderAsOverlayCallback;
         mHeaderAsOverlay = mDisplayMode == DisplayMode.WINDOW_CONTROLS_OVERLAY;
         mOnTabUpdate = this::onTabUpdate;
-        mTabSupplier.addObserver(mOnTabUpdate);
+        mTabSupplier.addSyncObserverAndPostIfNonNull(mOnTabUpdate);
         mClientPackageName = clientPackageName;
 
         mScrimVisibilityObserver =
@@ -127,10 +130,9 @@ class WebAppHeaderLayoutMediator
                     }
                 };
         mScrimManager = scrimManager;
-        mScrimManager.getScrimVisibilitySupplier().addObserver(mScrimVisibilityObserver);
-
-        mWidthSupplier = new ObservableSupplierImpl<>();
-        mAppHeaderUnoccludedWidthSupplier = new ObservableSupplierImpl<>();
+        mScrimManager
+                .getScrimVisibilitySupplier()
+                .addSyncObserverAndPostIfNonNull(mScrimVisibilityObserver);
 
         mModel = model;
         // View should notify us about initial width.
@@ -208,7 +210,7 @@ class WebAppHeaderLayoutMediator
     }
 
     private void onLayoutWidthUpdated(int width) {
-        mWidthSupplier.set(width);
+        mWidth = width;
 
         // Update background bars and draggable areas even if width hasn't changed, because
         // children might've changed.
@@ -219,7 +221,7 @@ class WebAppHeaderLayoutMediator
     private void onVisibilityChanged(int visibility) {
         // If the web app header view is GONE, we should update the width to reflect this.
         if (visibility == View.GONE) {
-            mWidthSupplier.set(0);
+            mWidth = 0;
         }
     }
 
@@ -254,7 +256,7 @@ class WebAppHeaderLayoutMediator
         }
 
         final int headerHeight =
-                Math.min(mCurrentHeaderState.getCaptionControlsHeight(), mHeaderButtonHeight);
+                Math.min(mCurrentHeaderState.getCaptionControlsHeight(), mHeaderButtonSize);
 
         Rect cutoutRect =
                 new Rect(
@@ -276,7 +278,7 @@ class WebAppHeaderLayoutMediator
 
     @Override
     public void onThemeColorChanged(int color, boolean shouldAnimate) {
-        mDesktopWindowStateManager.updateForegroundColor(color);
+        mDesktopWindowStateManager.onBackgroundColorChanged(color);
         mModel.set(WebAppHeaderLayoutProperties.BACKGROUND_COLOR, color);
     }
 
@@ -296,16 +298,18 @@ class WebAppHeaderLayoutMediator
 
         if (mIsFirstAppHeaderStateUpdate && mCurrentHeaderState.isInDesktopWindow()) {
             RecordHistogram.recordEnumeratedHistogram(
-                    "CustomTabs.WebAppHeader.DisplayMode2", mDisplayMode, DisplayMode.MAX_VALUE);
+                    "CustomTabs.WebAppHeader.DisplayMode2",
+                    mDisplayMode,
+                    DisplayMode.MAX_VALUE + 1);
             mIsFirstAppHeaderStateUpdate = false;
         }
     }
 
     /**
-     * @return {@link ObservableSupplier} that signal current width of the flexible area in which
+     * @return {@link MonotonicObservableSupplier} that signal current width of the flexible area in which
      *     the header lays out controls.
      */
-    public ObservableSupplier<Integer> getUnoccludedWidthSupplier() {
+    public MonotonicObservableSupplier<Integer> getUnoccludedWidthSupplier() {
         return mAppHeaderUnoccludedWidthSupplier;
     }
 
@@ -318,8 +322,8 @@ class WebAppHeaderLayoutMediator
         int controlsTopOffset = mCurrentHeaderState.getCaptionControlsTopOffset();
         int captionControlsHeight = mCurrentHeaderState.getCaptionControlsHeight();
 
-        if (captionControlsHeight < mHeaderButtonHeight) {
-            mButtonBottomInset = mHeaderButtonHeight - captionControlsHeight;
+        if (captionControlsHeight < mHeaderButtonSize) {
+            mButtonBottomInset = mHeaderButtonSize - captionControlsHeight;
         } else {
             mButtonBottomInset = 0;
         }
@@ -433,8 +437,8 @@ class WebAppHeaderLayoutMediator
         return mWebAppMinHeaderHeight;
     }
 
-    public ObservableSupplierImpl<Integer> getWidthSupplierForTesting() {
-        return mWidthSupplier;
+    public int getWidthForTesting() {
+        return mWidth;
     }
 
     static void setMinHeightForTesting(final int height) {

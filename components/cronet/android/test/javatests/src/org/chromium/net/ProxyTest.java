@@ -29,6 +29,7 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.RuleChain;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
@@ -37,7 +38,7 @@ import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.net.CronetTestFramework.CronetImplementation;
 import org.chromium.net.CronetTestRule.IgnoreFor;
-import org.chromium.net.CronetTestRule.RequiresMinAndroidApi;
+import org.chromium.net.impl.TestLogger;
 import org.chromium.net.test.ServerCertificate;
 
 import java.util.AbstractMap;
@@ -54,7 +55,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ProxyTest {
     private static final int HTTPENGINE_PROXY_API_SDK_EXTENSION = 21;
 
-    @Rule public final CronetTestRule mTestRule = CronetTestRule.withManualEngineStartup();
+    private final CronetTestRule mTestRule = CronetTestRule.withManualEngineStartup();
+    private final CronetLoggerTestRule<TestLogger> mLoggerTestRule =
+            new CronetLoggerTestRule<>(TestLogger.class);
+
+    @Rule public final RuleChain chain = RuleChain.outerRule(mLoggerTestRule).around(mTestRule);
 
     private NativeTestServer mNativeTestServer;
 
@@ -79,7 +84,7 @@ public class ProxyTest {
                                 /* scheme= */ Proxy.SCHEME_HTTPS,
                                 /* host= */ "this-hostname-does-not-exist.com",
                                 /* port= */ 8080,
-                                Executors.newSingleThreadExecutor(),
+                                Runnable::run,
                                 /* callback= */ null));
     }
 
@@ -95,7 +100,7 @@ public class ProxyTest {
                                 /* scheme= */ Proxy.SCHEME_HTTP,
                                 /* host= */ null,
                                 /* port= */ 8080,
-                                Executors.newSingleThreadExecutor(),
+                                Runnable::run,
                                 /* callback= */ proxyCallbackMock));
     }
 
@@ -127,7 +132,7 @@ public class ProxyTest {
                                 /* scheme= */ -1,
                                 /* host= */ "localhost",
                                 /* port= */ 8080,
-                                Executors.newSingleThreadExecutor(),
+                                Runnable::run,
                                 /* callback= */ proxyCallbackMock));
         assertThrows(
                 IllegalArgumentException.class,
@@ -136,37 +141,14 @@ public class ProxyTest {
                                 /* scheme= */ 2,
                                 /* host= */ "localhost",
                                 /* port= */ 8080,
-                                Executors.newSingleThreadExecutor(),
+                                Runnable::run,
                                 /* callback= */ proxyCallbackMock));
     }
 
     @Test
     @SmallTest
     public void testProxyOptions_nullProxyList_throws() {
-        assertThrows(NullPointerException.class, () -> ProxyOptions.fromProxyList(null));
-    }
-
-    @Test
-    @SmallTest
-    public void testProxyOptions_nullProxyIsNotLastElement_throws() {
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> ProxyOptions.fromProxyList(Arrays.asList(null, null)));
-        Proxy.HttpConnectCallback proxyCallback =
-                Mockito.mock(Proxy.HttpConnectCallback.class, Mockito.CALLS_REAL_METHODS);
-        Proxy proxy =
-                Proxy.createHttpProxy(
-                        /* scheme= */ Proxy.SCHEME_HTTPS,
-                        /* host= */ "this-hostname-does-not-exist.com",
-                        /* port= */ 8080,
-                        Executors.newSingleThreadExecutor(),
-                        /* callback= */ proxyCallback);
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> ProxyOptions.fromProxyList(Arrays.asList(null, proxy)));
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> ProxyOptions.fromProxyList(Arrays.asList(proxy, null, proxy)));
+        assertThrows(NullPointerException.class, () -> ProxyOptions.fromProxyList(null, ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_ALLOW_DIRECT));
     }
 
     @Test
@@ -174,38 +156,18 @@ public class ProxyTest {
     public void testProxyOptions_emptyProxyList_throws() {
         assertThrows(
                 IllegalArgumentException.class,
-                () -> ProxyOptions.fromProxyList(Collections.emptyList()));
+                () -> ProxyOptions.fromProxyList(Collections.emptyList(), ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT));
     }
 
     @Test
     @SmallTest
-    @IgnoreFor(
-            implementations = {CronetImplementation.AOSP_PLATFORM, CronetImplementation.FALLBACK},
-            reason =
-                    "This feature flag has not reached platform Cronet yet. Fallback provides no"
-                            + " ProxyOptions support.",
-            requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
-    public void testDirectProxy_requestSucceeds() {
-        mNativeTestServer.start();
-        mTestRule
-                .getTestFramework()
-                .applyEngineBuilderPatch(
-                        (builder) ->
-                                builder.setProxyOptions(
-                                        ProxyOptions.fromProxyList(Arrays.asList((Proxy) null))));
-        ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
-        TestUrlRequestCallback callback = new TestUrlRequestCallback();
-        UrlRequest.Builder urlRequestBuilder =
-                cronetEngine.newUrlRequestBuilder(
-                        mNativeTestServer.getSuccessURL(), callback, callback.getExecutor());
-        urlRequestBuilder.build().start();
-        callback.blockForDone();
-        assertThat(callback.getResponseInfoWithChecks()).hasHttpStatusCodeThat().isEqualTo(200);
-        // This cannot be tested when HttpEngine is used under the hood:
-        // android.net.http.UrlResponseInfo does not expose the proxy used for a request.
-        if (mTestRule.implementationUnderTest() != CronetImplementation.AOSP_PLATFORM) {
-            assertThat(callback.getResponseInfoWithChecks()).hasProxyServerThat().isEqualTo(":0");
-        }
+    public void testProxyOptions_nullElementInProxyList_throws() {
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ProxyOptions.fromProxyList(Arrays.asList((Proxy) null), ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ProxyOptions.fromProxyList(Arrays.asList((Proxy) null), ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_ALLOW_DIRECT));
     }
 
     @Test
@@ -218,7 +180,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito#verify implementations makes use of java.util.stream.Stream, which is available
     // starting from Nougat/API level 24.
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testUnreachableProxyWithDirectFallback_requestSucceeds() {
         mNativeTestServer.start();
         Proxy.HttpConnectCallback proxyCallback =
@@ -235,8 +196,9 @@ public class ProxyTest {
                                                                 /* host= */ "this-hostname-does-not-exist.com",
                                                                 /* port= */ 8080,
                                                                 Executors.newSingleThreadExecutor(),
-                                                                /* callback= */ proxyCallback),
-                                                        null))));
+                                                                /* callback= */ proxyCallback)),
+                                                ProxyOptions
+                                                        .ALL_PROXIES_FAILED_BEHAVIOR_ALLOW_DIRECT)));
         ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
         TestUrlRequestCallback callback = new TestUrlRequestCallback();
         UrlRequest.Builder urlRequestBuilder =
@@ -252,6 +214,14 @@ public class ProxyTest {
         }
         Mockito.verify(proxyCallback, never()).onBeforeRequest(any());
         Mockito.verify(proxyCallback, never()).onResponseReceived(any(), anyInt());
+
+            // CronetTrafficInfo is logged starting from Oreo. AOSP_PLATFORM does not support test
+        // logger injection.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && mTestRule.implementationUnderTest() != CronetImplementation.AOSP_PLATFORM) {
+            mLoggerTestRule.mTestLogger.waitForLogCronetTrafficInfo();
+            assertThat(mLoggerTestRule.mTestLogger.getLastCronetTrafficInfo().isProxied())
+                    .isFalse();
+        }
     }
 
     @Test
@@ -264,7 +234,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito#verify implementations makes use of java.util.stream.Stream, which is available
     // starting from Nougat/API level 24.
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testUnreachableProxy_requestFails() {
         mNativeTestServer.start();
         Proxy.HttpConnectCallback proxyCallback =
@@ -281,7 +250,9 @@ public class ProxyTest {
                                                                 /* host= */ "this-hostname-does-not-exist.com",
                                                                 /* port= */ 8080,
                                                                 Executors.newSingleThreadExecutor(),
-                                                                /* callback= */ proxyCallback)))));
+                                                                /* callback= */ proxyCallback)),
+                                                ProxyOptions
+                                                        .ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
         ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
         TestUrlRequestCallback callback = new TestUrlRequestCallback();
         UrlRequest.Builder urlRequestBuilder =
@@ -292,6 +263,17 @@ public class ProxyTest {
         assertThat(callback.mError).isNotNull();
         Mockito.verify(proxyCallback, never()).onBeforeRequest(any());
         Mockito.verify(proxyCallback, never()).onResponseReceived(any(), anyInt());
+        // CronetTrafficInfo is logged starting from Oreo. AOSP_PLATFORM does not support test
+        // logger injection.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && mTestRule.implementationUnderTest() != CronetImplementation.AOSP_PLATFORM) {
+            mLoggerTestRule.mTestLogger.waitForLogCronetTrafficInfo();
+            // The request failed before we received the response headers from the destination. In
+            // this scenario we don't know whether //net would have proxied the request. We report
+            // null to differentiate against the scenario where we received response headers but the
+            // request failed (in which case we definitely do know whether the request has been
+            // proxied or not).
+            assertThat(mLoggerTestRule.mTestLogger.getLastCronetTrafficInfo().isProxied()).isNull();
+        }
     }
 
     @Test
@@ -304,7 +286,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito#verify implementations makes use of java.util.stream.Stream, which is available
     // starting from Nougat/API level 24.
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testBrokenProxyWithWorkingFallback_brokenProxyIsDeprioritized() {
         try (NativeTestServer brokenProxyServer = mNativeTestServer;
                 NativeTestServer workingProxyServer =
@@ -372,7 +353,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ workingProxyCallback)))));
+                                                                    /* callback= */ workingProxyCallback)),
+                                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
 
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
@@ -387,6 +369,13 @@ public class ProxyTest {
             Mockito.verify(brokenProxyCallback, times(1)).onResponseReceived(any(), anyInt());
             Mockito.verify(workingProxyCallback, times(1)).onBeforeRequest(any());
             Mockito.verify(workingProxyCallback, times(1)).onResponseReceived(any(), anyInt());
+            // CronetTrafficInfo is logged starting from Oreo. AOSP_PLATFORM does not support test
+        // logger injection.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && mTestRule.implementationUnderTest() != CronetImplementation.AOSP_PLATFORM) {
+                mLoggerTestRule.mTestLogger.waitForLogCronetTrafficInfo();
+                assertThat(mLoggerTestRule.mTestLogger.getLastCronetTrafficInfo().isProxied())
+                        .isTrue();
+            }
 
             callback = new TestUrlRequestCallback();
             urlRequestBuilder =
@@ -403,6 +392,13 @@ public class ProxyTest {
             Mockito.verify(brokenProxyCallback, times(1)).onResponseReceived(any(), anyInt());
             Mockito.verify(workingProxyCallback, times(2)).onBeforeRequest(any());
             Mockito.verify(workingProxyCallback, times(2)).onResponseReceived(any(), anyInt());
+            // CronetTrafficInfo is logged starting from Oreo. AOSP_PLATFORM does not support test
+        // logger injection.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && mTestRule.implementationUnderTest() != CronetImplementation.AOSP_PLATFORM) {
+                mLoggerTestRule.mTestLogger.waitForLogCronetTrafficInfo();
+                assertThat(mLoggerTestRule.mTestLogger.getLastCronetTrafficInfo().isProxied())
+                        .isTrue();
+            }
         }
     }
 
@@ -416,7 +412,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito#verify implementations makes use of java.util.stream.Stream, which is available
     // starting from Nougat/API level 24.
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testHttpResource_sendsGetWithFullPathToProxy() {
         var requestHandler =
                 new NativeTestServer.HandleRequestCallback() {
@@ -448,7 +443,8 @@ public class ProxyTest {
                                                                 /* port= */ mNativeTestServer
                                                                         .getPort(),
                                                                 Executors.newSingleThreadExecutor(),
-                                                                /* callback= */ proxyCallback)))));
+                                                                /* callback= */ proxyCallback)),
+                                                                ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
         ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
         TestUrlRequestCallback callback = new TestUrlRequestCallback();
         UrlRequest.Builder urlRequestBuilder =
@@ -476,7 +472,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito#when implementation makes use of java.util.Map#computeIfAbsent, which is available
     // starting from Nougat/API level 24.
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testHttpsResource_sendsConnectWithRelativePathToProxy() {
         var requestHandler =
                 new NativeTestServer.HandleRequestCallback() {
@@ -519,7 +514,8 @@ public class ProxyTest {
                                                                 /* port= */ mNativeTestServer
                                                                         .getPort(),
                                                                 Executors.newSingleThreadExecutor(),
-                                                                /* callback= */ proxyCallback)))));
+                                                                /* callback= */ proxyCallback)),
+                                                                ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
         ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
         TestUrlRequestCallback callback = new TestUrlRequestCallback();
         UrlRequest.Builder urlRequestBuilder =
@@ -545,7 +541,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito#when implementation makes use of java.util.Map#computeIfAbsent, which is available
     // starting from Nougat/API level 24.
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_ExtraRequestHeadersAreSent() {
         var requestHandler =
                 new NativeTestServer.HandleRequestCallback() {
@@ -589,7 +584,8 @@ public class ProxyTest {
                                                                 /* port= */ mNativeTestServer
                                                                         .getPort(),
                                                                 Executors.newSingleThreadExecutor(),
-                                                                /* callback= */ proxyCallback)))));
+                                                                /* callback= */ proxyCallback)),
+                                                                ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
         ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
         TestUrlRequestCallback callback = new TestUrlRequestCallback();
         UrlRequest.Builder urlRequestBuilder =
@@ -617,7 +613,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito#when implementation makes use of java.util.Map#computeIfAbsent, which is available
     // starting from Nougat/API level 24.
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testProxyAuthChallenge_urlRequestFails() {
         var requestHandler =
                 new NativeTestServer.HandleRequestCallback() {
@@ -660,7 +655,8 @@ public class ProxyTest {
                                                             /* host= */ "localhost",
                                                             /* port= */ mNativeTestServer.getPort(),
                                                             Executors.newSingleThreadExecutor(),
-                                                            /* callback= */ proxyCallback))));
+                                                            /* callback= */ proxyCallback)),
+                                                            ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT));
                         });
         ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
         TestUrlRequestCallback callback = new TestUrlRequestCallback();
@@ -702,7 +698,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito#verify implementations makes use of java.util.stream.Stream, which is available
     // starting from Nougat/API level 24.
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_proxyResponseFailureIsReported() {
         // See net::test_server::EmbeddedTestServer::EnableConnectProxy: sending requests to
         // destinations other than the one passed will result in 502 responses.
@@ -734,7 +729,8 @@ public class ProxyTest {
                                                                 /* port= */ mNativeTestServer
                                                                         .getPort(),
                                                                 Executors.newSingleThreadExecutor(),
-                                                                /* callback= */ proxyCallback)))));
+                                                                /* callback= */ proxyCallback)),
+                                                                ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
         ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
         TestUrlRequestCallback callback = new TestUrlRequestCallback();
         UrlRequest.Builder urlRequestBuilder =
@@ -760,7 +756,8 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
+    @SuppressWarnings(
+            "unchecked") // ArgumentCaptor.forClass(List.class): no @Captor infra in this file.
     public void testCallback_proxyResponseSuccessIsReported() {
         try (NativeTestServer proxyServer = mNativeTestServer;
                 NativeTestServer originServer =
@@ -798,7 +795,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ proxyCallback)))));
+                                                                    /* callback= */ proxyCallback)),
+                                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
             UrlRequest.Builder urlRequestBuilder =
@@ -846,6 +844,12 @@ public class ProxyTest {
                                     new Pair<>("Content-Length", "0"),
                                     new Pair<>("Content-Type", "")));
         }
+        // CronetTrafficInfo is logged starting from Oreo. AOSP_PLATFORM does not support test
+        // logger injection.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && mTestRule.implementationUnderTest() != CronetImplementation.AOSP_PLATFORM) {
+            mLoggerTestRule.mTestLogger.waitForLogCronetTrafficInfo();
+            assertThat(mLoggerTestRule.mTestLogger.getLastCronetTrafficInfo().isProxied()).isTrue();
+        }
     }
 
     @Test
@@ -858,7 +862,8 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
+    @SuppressWarnings(
+            "unchecked") // ArgumentCaptor.forClass(List.class): no @Captor infra in this file.
     public void testCallback_bidiStream_isSuccessfullyProxied() throws Exception {
         try (NativeTestServer proxyServer = mNativeTestServer) {
             assertThat(
@@ -895,7 +900,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ proxyCallback)))));
+                                                                    /* callback= */ proxyCallback)),
+                                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestBidirectionalStreamCallback callback = new TestBidirectionalStreamCallback();
             BidirectionalStream stream =
@@ -921,9 +927,9 @@ public class ProxyTest {
             // This cannot be tested when HttpEngine is used under the hood:
             // android.net.http.UrlResponseInfo does not expose the proxy used for a request.
             if (mTestRule.implementationUnderTest() != CronetImplementation.AOSP_PLATFORM) {
-                // TODO(https://crbug.com/460426595): Change this to check for the correct proxy
-                // server value once BidirectionalStream correctly reports proxy servers.
-                assertThat(callback.getResponseInfoWithChecks()).hasProxyServerThat().isNull();
+                assertThat(callback.getResponseInfoWithChecks())
+                        .hasProxyServerThat()
+                        .isEqualTo("localhost:" + proxyServer.getPort());
             }
 
             assertThat(callback.mResponseAsString).isEqualTo("GET");
@@ -943,6 +949,12 @@ public class ProxyTest {
         } finally {
             Http2TestServer.shutdownHttp2TestServer();
         }
+        // CronetTrafficInfo is logged starting from Oreo. AOSP_PLATFORM does not support test
+        // logger injection.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && mTestRule.implementationUnderTest() != CronetImplementation.AOSP_PLATFORM) {
+            mLoggerTestRule.mTestLogger.waitForLogCronetTrafficInfo();
+            assertThat(mLoggerTestRule.mTestLogger.getLastCronetTrafficInfo().isProxied()).isTrue();
+        }
     }
 
     @Test
@@ -955,7 +967,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_proxyResponse_returningFalseFailsUrlRequest() {
         try (NativeTestServer proxyServer = mNativeTestServer;
                 NativeTestServer originServer =
@@ -993,7 +1004,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ proxyCallback)))));
+                                                                    /* callback= */ proxyCallback)),
+                                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
             UrlRequest.Builder urlRequestBuilder =
@@ -1030,7 +1042,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_proxyResponse_throwingFailsUrlRequest() {
         try (NativeTestServer proxyServer = mNativeTestServer;
                 NativeTestServer originServer =
@@ -1077,7 +1088,8 @@ public class ProxyTest {
                     .applyEngineBuilderPatch(
                             (builder) ->
                                     builder.setProxyOptions(
-                                            ProxyOptions.fromProxyList(Arrays.asList(proxy))));
+                                            ProxyOptions.fromProxyList(Arrays.asList(proxy),
+                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
             UrlRequest.Builder urlRequestBuilder =
@@ -1114,7 +1126,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_proxyRequestHangs_urlRequestTimesOut() {
         try (NativeTestServer proxyServer = mNativeTestServer;
                 NativeTestServer originServer =
@@ -1147,7 +1158,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ proxyCallback)))));
+                                                                    /* callback= */ proxyCallback)),
+                                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
             UrlRequest.Builder urlRequestBuilder =
@@ -1181,7 +1193,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_proxyRequestProceedAfterEngineShutdown_doesNotCrash()
             throws Exception {
         try (NativeTestServer proxyServer = mNativeTestServer;
@@ -1219,7 +1230,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ proxyCallback)))));
+                                                                    /* callback= */ proxyCallback)),
+                                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
 
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
@@ -1255,7 +1267,6 @@ public class ProxyTest {
     @DisabledTest(message = "TODO(https://crbug.com/442024094): Reenable after flakiness is fixed")
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_proxyRequestProceedAfterUrlRequestCancel_doesNotCrash()
             throws Exception {
         try (NativeTestServer proxyServer = mNativeTestServer;
@@ -1293,7 +1304,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ proxyCallback)))));
+                                                                    /* callback= */ proxyCallback)),
+                                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
             UrlRequest.Builder urlRequestBuilder =
@@ -1325,7 +1337,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_proxyRequestCloseCalledMultipleTimes_doesNotThrow() throws Exception {
         try (NativeTestServer proxyServer = mNativeTestServer;
                 NativeTestServer originServer =
@@ -1362,7 +1373,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ proxyCallback)))));
+                                                                    /* callback= */ proxyCallback)),
+                                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
             UrlRequest.Builder urlRequestBuilder =
@@ -1402,7 +1414,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_proxyRequestProceedWithInvalidHeader_throwsButRequestRemainsValid()
             throws Exception {
         try (NativeTestServer proxyServer = mNativeTestServer;
@@ -1443,7 +1454,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ proxyCallback)))));
+                                                                    /* callback= */ proxyCallback)),
+                                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
             UrlRequest.Builder urlRequestBuilder =
@@ -1454,16 +1466,12 @@ public class ProxyTest {
 
             try (Proxy.HttpConnectCallback.Request proxyRequest =
                     proxyRequestExchanger.exchange(null)) {
+                var extraHeaders = Arrays.asList(new Pair<>(":", "valid header value"));
                 assertThrows(
-                        IllegalArgumentException.class,
-                        () ->
-                                proxyRequest.proceed(
-                                        Arrays.asList(new Pair<>(":", "valid header value"))));
+                        IllegalArgumentException.class, () -> proxyRequest.proceed(extraHeaders));
+                var extraHeaders2 = Arrays.asList(new Pair<>("Authorization", "\r"));
                 assertThrows(
-                        IllegalArgumentException.class,
-                        () ->
-                                proxyRequest.proceed(
-                                        Arrays.asList(new Pair<>("Authorization", "\r"))));
+                        IllegalArgumentException.class, () -> proxyRequest.proceed(extraHeaders2));
                 proxyRequest.proceed(Collections.emptyList());
             }
 
@@ -1485,7 +1493,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_proxyRequestProceedCalledMultipleTimes_throws() throws Exception {
         try (NativeTestServer proxyServer = mNativeTestServer;
                 NativeTestServer originServer =
@@ -1525,7 +1532,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ proxyCallback)))));
+                                                                    /* callback= */ proxyCallback)),
+                                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
             UrlRequest.Builder urlRequestBuilder =
@@ -1560,7 +1568,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_proxyRequestProceedAfterClose_throws() throws Exception {
         try (NativeTestServer proxyServer = mNativeTestServer;
                 NativeTestServer originServer =
@@ -1600,7 +1607,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ proxyCallback)))));
+                                                                    /* callback= */ proxyCallback)),
+                                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
             UrlRequest.Builder urlRequestBuilder =
@@ -1642,7 +1650,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_proxyRequestCloseAfterProceed_throws() throws Exception {
         try (NativeTestServer proxyServer = mNativeTestServer;
                 NativeTestServer originServer =
@@ -1682,7 +1689,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ proxyCallback)))));
+                                                                    /* callback= */ proxyCallback)),
+                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
             UrlRequest.Builder urlRequestBuilder =
@@ -1713,7 +1721,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_fallbackSucceedsAfterProxyRequestCancel_proxyIsDeprioritized() {
         try (NativeTestServer proxyServer = mNativeTestServer;
                 NativeTestServer originServer =
@@ -1773,7 +1780,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ proceedProxyCallback)))));
+                                                                    /* callback= */ proceedProxyCallback)),
+                                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
 
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
@@ -1820,7 +1828,6 @@ public class ProxyTest {
             requiredSdkExtensionForPlatform = HTTPENGINE_PROXY_API_SDK_EXTENSION)
     // Mockito fails on Marshmallow with NoClassDefFoundError:
     // org.mockito.internal.invocation.TypeSafeMatching$$ExternalSyntheticLambda0
-    @RequiresMinAndroidApi(Build.VERSION_CODES.N)
     public void testCallback_fallbackSucceedsAfterProxyResponseCancel_proxyIsDeprioritized() {
         try (NativeTestServer proxyServer = mNativeTestServer;
                 NativeTestServer originServer =
@@ -1883,7 +1890,8 @@ public class ProxyTest {
                                                                             .getPort(),
                                                                     Executors
                                                                             .newSingleThreadExecutor(),
-                                                                    /* callback= */ proceedProxyCallback)))));
+                                                                    /* callback= */ proceedProxyCallback)),
+                                                                    ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
 
             ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
             TestUrlRequestCallback callback = new TestUrlRequestCallback();
@@ -1989,7 +1997,8 @@ public class ProxyTest {
                                                                 /* port= */ mNativeTestServer
                                                                         .getPort(),
                                                                 Executors.newSingleThreadExecutor(),
-                                                                /* callback= */ proxyCallback)))));
+                                                                /* callback= */ proxyCallback)),
+                                                                ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
         ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
         TestUrlRequestCallback callback = new TestUrlRequestCallback();
         UrlRequest.Builder urlRequestBuilder =
@@ -2086,7 +2095,8 @@ public class ProxyTest {
                                                                 /* port= */ mNativeTestServer
                                                                         .getPort(),
                                                                 Executors.newSingleThreadExecutor(),
-                                                                /* callback= */ closeDuringResponseProxyCallback)))));
+                                                                /* callback= */ closeDuringResponseProxyCallback)),
+                                                                ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
         ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
         TestUrlRequestCallback callback = new TestUrlRequestCallback();
         UrlRequest.Builder urlRequestBuilder =
@@ -2160,7 +2170,8 @@ public class ProxyTest {
                                                                 /* port= */ mNativeTestServer
                                                                         .getPort(),
                                                                 Executors.newSingleThreadExecutor(),
-                                                                /* callback= */ proxyCallback)))));
+                                                                /* callback= */ proxyCallback)),
+                                                                ProxyOptions.ALL_PROXIES_FAILED_BEHAVIOR_DISALLOW_DIRECT)));
         ExperimentalCronetEngine cronetEngine = mTestRule.getTestFramework().startEngine();
         TestUrlRequestCallback callback = new TestUrlRequestCallback();
         UrlRequest.Builder urlRequestBuilder =

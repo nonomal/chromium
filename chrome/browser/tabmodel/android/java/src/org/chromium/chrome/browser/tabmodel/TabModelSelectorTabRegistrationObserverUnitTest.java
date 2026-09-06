@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.tabmodel;
 
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -20,7 +19,6 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
-import org.robolectric.annotation.Config;
 
 import org.chromium.base.Callback;
 import org.chromium.base.test.BaseRobolectricTestRunner;
@@ -35,7 +33,6 @@ import org.chromium.chrome.test.util.browser.tabmodel.MockTabModel;
 
 /** Tests for the TabModelSelectorTabRegistrationObserver. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
 public class TabModelSelectorTabRegistrationObserverUnitTest {
     private static final long FAKE_NATIVE_ADDRESS = 123L;
 
@@ -53,7 +50,11 @@ public class TabModelSelectorTabRegistrationObserverUnitTest {
     public void setUp() {
         TabModelJniBridgeJni.setInstanceForTesting(mTabModelJniBridge);
         when(mTabModelJniBridge.init(
-                        any(TabModelJniBridge.class), any(Profile.class), anyInt(), anyBoolean()))
+                        any(TabModelJniBridge.class),
+                        any(Profile.class),
+                        anyInt(),
+                        any(),
+                        anyInt()))
                 .thenReturn(FAKE_NATIVE_ADDRESS);
 
         when(mIncognitoProfile.isOffTheRecord()).thenReturn(true);
@@ -100,12 +101,6 @@ public class TabModelSelectorTabRegistrationObserverUnitTest {
 
     private TabModelSelector createTabModelSelector() {
         TestTabModelSelector selector = new TestTabModelSelector(mTabCreatorManager);
-        TabModelOrderControllerImpl orderController = new TabModelOrderControllerImpl(selector);
-
-        AsyncTabParamsManager realAsyncTabParamsManager =
-                AsyncTabParamsManagerFactory.createAsyncTabParamsManager();
-        NextTabPolicy.NextTabPolicySupplier nextTabPolicySupplier =
-                () -> NextTabPolicy.HIERARCHICAL;
 
         MockTabModel normalTabModel = new MockTabModel(mProfile, null);
         normalTabModel.setTabRemoverForTesting(createTabRemover(normalTabModel));
@@ -113,9 +108,7 @@ public class TabModelSelectorTabRegistrationObserverUnitTest {
         MockTabModel incognitoTabModel = new MockTabModel(mIncognitoProfile, null);
         incognitoTabModel.setTabRemoverForTesting(createTabRemover(incognitoTabModel));
 
-        selector.initialize(
-                TabModelHolderFactory.createTabModelHolderForTesting(normalTabModel),
-                TabModelHolderFactory.createIncognitoTabModelHolderForTesting(incognitoTabModel));
+        selector.initialize(normalTabModel, incognitoTabModel);
 
         return selector;
     }
@@ -386,6 +379,11 @@ public class TabModelSelectorTabRegistrationObserverUnitTest {
         @Override
         public boolean isTabModelRestored() {
             return true;
+        }
+
+        @Override
+        public @Nullable Profile getProfile(boolean offTheRecord) {
+            return null;
         }
     }
 }

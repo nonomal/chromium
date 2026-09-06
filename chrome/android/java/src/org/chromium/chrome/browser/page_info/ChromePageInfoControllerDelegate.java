@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.page_info;
 
+import static org.chromium.build.NullUtil.assertNonNull;
 import static org.chromium.components.browser_ui.site_settings.SingleWebsiteSettings.EXTRA_SITE;
 
 import android.app.Activity;
@@ -22,12 +23,16 @@ import androidx.fragment.app.FragmentActivity;
 import androidx.fragment.app.FragmentManager;
 
 import org.chromium.base.Callback;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
+import org.chromium.base.supplier.SupplierUtils;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ephemeraltab.EphemeralTabCoordinator;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
+import org.chromium.chrome.browser.feedback.FeedbackPolicyManager;
 import org.chromium.chrome.browser.feedback.HelpAndFeedbackLauncherImpl;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.merchant_viewer.PageInfoStoreInfoController;
 import org.chromium.chrome.browser.merchant_viewer.PageInfoStoreInfoController.StoreInfoActionHandler;
 import org.chromium.chrome.browser.offlinepages.OfflinePageItem;
@@ -37,8 +42,6 @@ import org.chromium.chrome.browser.omnibox.ChromeAutocompleteSchemeClassifier;
 import org.chromium.chrome.browser.paint_preview.TabbedPaintPreview;
 import org.chromium.chrome.browser.pdf.PdfUtils;
 import org.chromium.chrome.browser.pdf.PdfUtils.PdfPageType;
-import org.chromium.chrome.browser.privacy_sandbox.PrivacySandboxReferrer;
-import org.chromium.chrome.browser.privacy_sandbox.PrivacySandboxSettingsBaseFragment;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.settings.SettingsNavigationFactory;
 import org.chromium.chrome.browser.site_settings.ChromeSiteSettingsDelegate;
@@ -57,7 +60,6 @@ import org.chromium.components.content_settings.CookieControlsBridge;
 import org.chromium.components.content_settings.CookieControlsObserver;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.components.feature_engagement.EventConstants;
-import org.chromium.components.page_info.PageInfoAdPersonalizationController;
 import org.chromium.components.page_info.PageInfoController;
 import org.chromium.components.page_info.PageInfoControllerDelegate;
 import org.chromium.components.page_info.PageInfoMainController;
@@ -84,11 +86,13 @@ import java.util.function.Supplier;
 @NullMarked
 public class ChromePageInfoControllerDelegate extends PageInfoControllerDelegate {
     private final WebContents mWebContents;
-    private final Supplier<ModalDialogManager> mModalDialogManagerSupplier;
-    private final @Nullable Supplier<EphemeralTabCoordinator> mEphemeralTabCoordinatorSupplier;
+    private final Supplier<@Nullable ModalDialogManager> mModalDialogManagerSupplier;
+    private final @Nullable Supplier<@Nullable EphemeralTabCoordinator>
+            mEphemeralTabCoordinatorSupplier;
     private final Context mContext;
     private final Profile mProfile;
-    private final @Nullable Supplier<StoreInfoActionHandler> mStoreInfoActionHandlerSupplier;
+    private final @Nullable MonotonicObservableSupplier<StoreInfoActionHandler>
+            mStoreInfoActionHandlerSupplier;
     private final ChromePageInfoHighlight mPageInfoHighlight;
     private final OfflinePageLoadUrlDelegate mOfflinePageLoadUrlDelegate;
     private @Nullable String mOfflinePageCreationDate;
@@ -101,10 +105,11 @@ public class ChromePageInfoControllerDelegate extends PageInfoControllerDelegate
     public ChromePageInfoControllerDelegate(
             Context context,
             WebContents webContents,
-            Supplier<ModalDialogManager> modalDialogManagerSupplier,
+            Supplier<@Nullable ModalDialogManager> modalDialogManagerSupplier,
             OfflinePageLoadUrlDelegate offlinePageLoadUrlDelegate,
-            @Nullable Supplier<StoreInfoActionHandler> storeInfoActionHandlerSupplier,
-            @Nullable Supplier<EphemeralTabCoordinator> ephemeralTabCoordinatorSupplier,
+            @Nullable MonotonicObservableSupplier<StoreInfoActionHandler>
+                    storeInfoActionHandlerSupplier,
+            @Nullable Supplier<@Nullable EphemeralTabCoordinator> ephemeralTabCoordinatorSupplier,
             ChromePageInfoHighlight pageInfoHighlight,
             @Nullable TabCreator tabCreator,
             @Nullable String packageName) {
@@ -155,7 +160,7 @@ public class ChromePageInfoControllerDelegate extends PageInfoControllerDelegate
     /** {@inheritDoc} */
     @Override
     public ModalDialogManager getModalDialogManager() {
-        return mModalDialogManagerSupplier.get();
+        return assertNonNull(mModalDialogManagerSupplier.get());
     }
 
     /** {@inheritDoc} */
@@ -164,17 +169,18 @@ public class ChromePageInfoControllerDelegate extends PageInfoControllerDelegate
             PageInfoView.Params viewParams, Consumer<Runnable> runAfterDismiss) {
         if (isShowingOfflinePage() && OfflinePageUtils.isConnected()) {
             viewParams.openOnlineButtonClickCallback =
-                    () -> {
-                        runAfterDismiss.accept(
-                                () -> {
-                                    // Attempt to reload to an online version of the viewed offline
-                                    // web page.
-                                    // This attempt might fail if the user is offline, in which case
-                                    // an offline copy will be reloaded.
-                                    OfflinePageUtils.reload(
-                                            mWebContents, mOfflinePageLoadUrlDelegate);
-                                });
-                    };
+                    () ->
+                            runAfterDismiss.accept(
+                                    () -> {
+                                        // Attempt to reload to an online version of the viewed
+                                        // offline
+                                        // web page.
+                                        // This attempt might fail if the user is offline, in which
+                                        // case
+                                        // an offline copy will be reloaded.
+                                        OfflinePageUtils.reload(
+                                                mWebContents, mOfflinePageLoadUrlDelegate);
+                                    });
         } else {
             viewParams.openOnlineButtonShown = false;
         }
@@ -261,7 +267,11 @@ public class ChromePageInfoControllerDelegate extends PageInfoControllerDelegate
 
     @Override
     public void showCookieFeedback(Activity activity) {
+        if (!FeedbackPolicyManager.getInstance().isUserFeedbackAllowed()) {
+            return;
+        }
         Tab tab = TabUtils.fromWebContents(mWebContents);
+        assert tab != null;
 
         // FEEDBACK_REPORT_TYPE: Reports for Chrome mobile must have a contextTag of the form
         // com.chrome.feed.USER_INITIATED_FEEDBACK_REPORT, or they will be discarded for not
@@ -271,21 +281,9 @@ public class ChromePageInfoControllerDelegate extends PageInfoControllerDelegate
     }
 
     @Override
-    public void showAdPersonalizationSettings() {
-        PrivacySandboxSettingsBaseFragment.launchPrivacySandboxSettings(
-                mContext, PrivacySandboxReferrer.PAGE_INFO_AD_PRIVACY_SECTION);
-    }
-
-    @Override
     public Collection<PageInfoSubpageController> createAdditionalRowViews(
             PageInfoMainController mainController, ViewGroup rowWrapper) {
         Collection<PageInfoSubpageController> controllers = new ArrayList<>();
-        var adPersonalizationRow = new PageInfoRowView(rowWrapper.getContext(), null);
-        adPersonalizationRow.setId(PageInfoAdPersonalizationController.ROW_ID);
-        rowWrapper.addView(adPersonalizationRow);
-        controllers.add(
-                new PageInfoAdPersonalizationController(
-                        mainController, adPersonalizationRow, this));
 
         // Add history row.
         final Tab tab = TabUtils.fromWebContents(mWebContents);
@@ -294,14 +292,10 @@ public class ChromePageInfoControllerDelegate extends PageInfoControllerDelegate
         rowWrapper.addView(historyRow);
         controllers.add(
                 new PageInfoHistoryController(
-                        mainController,
-                        historyRow,
-                        this,
-                        () -> {
-                            return tab;
-                        }));
+                        mainController, historyRow, this, SupplierUtils.of(tab)));
 
-        if (PageInfoAboutThisSiteController.isFeatureEnabled()) {
+        if (PageInfoAboutThisSiteController.isFeatureEnabled()
+                && (mEphemeralTabCoordinatorSupplier != null || mTabCreator != null)) {
             var aboutThisSiteRow = new PageInfoRowView(rowWrapper.getContext(), null);
             aboutThisSiteRow.setId(PageInfoAboutThisSiteController.ROW_ID);
             rowWrapper.addView(aboutThisSiteRow);
@@ -369,6 +363,7 @@ public class ChromePageInfoControllerDelegate extends PageInfoControllerDelegate
                 mProfile,
                 url,
                 size,
+                /* fallbackToHost= */ true,
                 (image, iconUrl) -> {
                     if (image != null) {
                         callback.onResult(new BitmapDrawable(resources, image));
@@ -399,6 +394,12 @@ public class ChromePageInfoControllerDelegate extends PageInfoControllerDelegate
     @Override
     public boolean isIncognito() {
         return mProfile.isOffTheRecord();
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public boolean isHttpsFirstDialogUiEnabled() {
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.HTTPS_FIRST_DIALOG_UI);
     }
 
     private PageInfoRowView.ViewParams getAppInfoRowParams(

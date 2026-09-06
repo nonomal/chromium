@@ -52,7 +52,6 @@
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/auto_reset.h"
-#include "base/containers/contains.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
@@ -62,7 +61,7 @@
 #include "base/trace_event/trace_event.h"
 #include "chromeos/utils/haptics_util.h"
 #include "ui/aura/client/aura_constants.h"
-#include "ui/compositor/layer.h"
+#include "ui/compositor/layer_solid_color.h"
 #include "ui/display/screen.h"
 #include "ui/display/tablet_state.h"
 #include "ui/events/devices/haptic_touchpad_effects.h"
@@ -103,7 +102,7 @@ aura::Window* GetWindowForSelection(
   // When the given `overview_item` is a group item, return the first window in
   // the `window_list` that is contained in `item_windows`.
   for (aura::Window* window : window_list) {
-    if (base::Contains(item_windows, window)) {
+    if (std::ranges::contains(item_windows, window)) {
       return window;
     }
   }
@@ -183,7 +182,7 @@ OverviewSession::~OverviewSession() {
 void OverviewSession::Init(
     const aura::Window::Windows& windows,
     const aura::Window::Windows& hide_windows,
-    base::WeakPtr<WindowOcclusionCalculator> window_occlusion_calculator) {
+    base::WeakPtr<DesksWindowOcclusionCalculator> window_occlusion_calculator) {
   TRACE_EVENT0("ui", "OverviewSession::Init");
 
   Shell::Get()->AddShellObserver(this);
@@ -1065,7 +1064,8 @@ void OverviewSession::RestoreWindowActivation(bool restore) {
     return;
 
   // Do not restore focus to a window that exists on an inactive desk.
-  restore &= base::Contains(DesksController::Get()->active_desk()->windows(),
+  restore &=
+      std::ranges::contains(DesksController::Get()->active_desk()->windows(),
                             active_window_before_overview_);
 
   // Ensure the window is still in the window hierarchy and not in the middle

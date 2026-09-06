@@ -4,7 +4,9 @@
 
 #include "net/reporting/reporting_header_parser.h"
 
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -86,7 +88,7 @@ bool ProcessEndpoint(ReportingDelegate* delegate,
                      const ReportingEndpointGroupKey& group_key,
                      const base::Value& value,
                      ReportingEndpoint::EndpointInfo* endpoint_info_out) {
-  const base::Value::Dict* dict = value.GetIfDict();
+  const base::DictValue* dict = value.GetIfDict();
   if (!dict)
     return false;
 
@@ -141,7 +143,7 @@ bool ProcessEndpointGroup(
     const url::Origin& origin,
     const base::Value& value,
     ReportingEndpointGroup* parsed_endpoint_group_out) {
-  const base::Value::Dict* dict = value.GetIfDict();
+  const base::DictValue* dict = value.GetIfDict();
   if (!dict)
     return false;
 
@@ -171,17 +173,17 @@ bool ProcessEndpointGroup(
   std::optional<bool> subdomains_bool = dict->FindBool(kIncludeSubdomainsKey);
   if (subdomains_bool && subdomains_bool.value()) {
     // Disallow eTLDs from setting include_subdomains endpoint groups.
-    if (registry_controlled_domains::GetRegistryLength(
-            origin.GetURL(),
-            registry_controlled_domains::INCLUDE_UNKNOWN_REGISTRIES,
-            registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES) == 0) {
+    GURL gurl = origin.GetURL();
+    if (registry_controlled_domains::GetRegistry(
+            gurl, registry_controlled_domains::INCLUDE_UNKNOWN_REGISTRIES,
+            registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES) == "") {
       return false;
     }
 
     parsed_endpoint_group_out->include_subdomains = OriginSubdomains::INCLUDE;
   }
 
-  const base::Value::List* endpoint_list = dict->FindList(kEndpointsKey);
+  const base::ListValue* endpoint_list = dict->FindList(kEndpointsKey);
   if (!endpoint_list)
     return false;
 
@@ -279,16 +281,17 @@ std::optional<base::flat_map<std::string, std::string>> ParseReportingEndpoints(
   }
   base::flat_map<std::string, std::string> parsed_header;
   for (const structured_headers::DictionaryMember& entry : *header_dict) {
-    if (entry.second.member_is_inner_list ||
-        !entry.second.member.front().item.is_string()) {
+    const auto item_and_params = entry.second.GetWithParamsIfItem();
+    const std::string* endpoint_url_string =
+        item_and_params.has_value() ? item_and_params->first.GetIfString()
+                                    : nullptr;
+    if (!endpoint_url_string) {
       ReportingHeaderParser::RecordReportingHeaderType(
           ReportingHeaderParser::ReportingHeaderType::
               kReportingEndpointsInvalid);
       return std::nullopt;
     }
-    const std::string& endpoint_url_string =
-        entry.second.member.front().item.GetString();
-    parsed_header[entry.first] = endpoint_url_string;
+    parsed_header[entry.first] = *endpoint_url_string;
   }
   return parsed_header;
 }
@@ -304,7 +307,7 @@ void ReportingHeaderParser::ParseReportToHeader(
     ReportingContext* context,
     const NetworkAnonymizationKey& network_anonymization_key,
     const url::Origin& origin,
-    const base::Value::List& list) {
+    const base::ListValue& list) {
   DCHECK(GURL::SchemeIsCryptographic(origin.scheme()));
 
   ReportingDelegate* delegate = context->delegate();

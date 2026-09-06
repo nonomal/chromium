@@ -10,6 +10,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/app/vector_icons/vector_icons.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -26,6 +27,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/text_constants.h"
 #include "ui/views/accessibility/view_accessibility.h"
@@ -41,7 +43,10 @@ WebAppMenuButton::WebAppMenuButton(BrowserView* browser_view)
       browser_view_(browser_view) {
   views::SetHitTestComponent(this, static_cast<int>(HTCLIENT));
 
-  SetVectorIcons(kBrowserToolsIcon, kBrowserToolsTouchIcon);
+  SetVectorIcons(
+      features::IsRoundedIconsEnabled() ? kMoreVertIcon : kBrowserToolsOldIcon,
+      features::IsRoundedIconsEnabled() ? kMoreVertIcon
+                                        : kBrowserToolsTouchOldIcon);
 
   views::InkDrop::Get(this)->SetMode(views::InkDropHost::InkDropMode::ON);
 
@@ -91,14 +96,29 @@ void WebAppMenuButton::OnWebAppPendingUpdateChanged(
     const webapps::AppId& app_id,
     bool has_pending_update) {
   web_app::AppBrowserController* app_controller =
-      browser_view_->browser()->app_controller();
+      web_app::AppBrowserController::From(browser_view_->browser());
   // `app_controller` can be null if this button is used in a (Chrome OS) custom
   // tab bar view for an ARC app.
   if (!app_controller) {
     return;
   }
   if (app_id == app_controller->app_id()) {
-    UpdateTextAndHighlightColor(has_pending_update);
+    UpdateState();
+  }
+}
+
+void WebAppMenuButton::OnWebAppPendingMigrationInfoChanged(
+    const webapps::AppId& app_id,
+    bool has_pending_migration) {
+  web_app::AppBrowserController* app_controller =
+      web_app::AppBrowserController::From(browser_view_->browser());
+  // `app_controller` can be null if this button is used in a (Chrome OS) custom
+  // tab bar view for an ARC app.
+  if (!app_controller) {
+    return;
+  }
+  if (app_id == app_controller->app_id()) {
+    UpdateState();
   }
 }
 
@@ -107,7 +127,7 @@ void WebAppMenuButton::OnAppRegistrarDestroyed() {
 }
 
 void WebAppMenuButton::UpdateStateForTesting() {
-  UpdateTextAndHighlightColor(CanShowPendingUpdate());
+  UpdateState();
 }
 
 base::CallbackListSubscription WebAppMenuButton::AwaitLabelTextUpdated(
@@ -116,13 +136,13 @@ base::CallbackListSubscription WebAppMenuButton::AwaitLabelTextUpdated(
 }
 
 void WebAppMenuButton::ShowMenu(int run_types) {
-  Browser* browser = browser_view_->browser();
+  BrowserWindowInterface* browser = browser_view_->browser();
   RunMenu(std::make_unique<WebAppMenuModel>(browser_view_, browser), browser,
           run_types);
 }
 
 void WebAppMenuButton::OnThemeChanged() {
-  UpdateTextAndHighlightColor(CanShowPendingUpdate());
+  UpdateState();
   AppMenuButton::OnThemeChanged();
 }
 
@@ -163,23 +183,38 @@ void WebAppMenuButton::FadeHighlightOff() {
   }
 }
 
+void WebAppMenuButton::UpdateState() {
+  UpdateTextAndHighlightColor(
+      (CanShowPendingUpdate() || CanShowPendingMigration()));
+}
+
+
 bool WebAppMenuButton::CanShowPendingUpdate() {
   web_app::AppBrowserController* app_controller =
-      browser_view_->browser()->app_controller();
+      web_app::AppBrowserController::From(browser_view_->browser());
   // `app_controller` can be null if this button is used in a (Chrome OS) custom
   // tab bar view for an ARC app.
   return app_controller && app_controller->HasPendingUpdateNotIgnoredByUser();
 }
 
-void WebAppMenuButton::UpdateTextAndHighlightColor(bool is_pending_update) {
+bool WebAppMenuButton::CanShowPendingMigration() {
   web_app::AppBrowserController* app_controller =
-      browser_view_->browser()->app_controller();
+      web_app::AppBrowserController::From(browser_view_->browser());
+  // `app_controller` can be null if this button is used in a (Chrome OS) custom
+  // tab bar view for an ARC app.
+  return app_controller && app_controller->HasPendingMigration();
+}
+
+void WebAppMenuButton::UpdateTextAndHighlightColor(
+    bool has_pending_update_or_migration_info) {
+  web_app::AppBrowserController* app_controller =
+      web_app::AppBrowserController::From(browser_view_->browser());
   // `app_controller` can be null if this button is used in a (Chrome OS) custom
   // tab bar view for an ARC app.
 
   int tooltip_message_id;
   std::u16string text;
-  if (is_pending_update) {
+  if (has_pending_update_or_migration_info) {
     tooltip_message_id = IDS_WEB_APP_MENU_BUTTON_TOOLTIP_UPDATE_AVAILABLE;
     text = l10n_util::GetStringUTF16(IDS_WEB_APP_MENU_BUTTON_UPDATE);
   } else {

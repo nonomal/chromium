@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.externalnav;
 
-import static org.chromium.build.NullUtil.assertNonNull;
 import static org.chromium.build.NullUtil.assumeNonNull;
 
 import android.app.Activity;
@@ -28,11 +27,14 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.ChromeTabbedActivity2;
 import org.chromium.chrome.browser.IntentHandler;
+import org.chromium.chrome.browser.actor.ActorKeyedServiceFactory;
 import org.chromium.chrome.browser.browserservices.intents.WebappConstants;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
+import org.chromium.chrome.browser.glic.GlicEnabling;
+import org.chromium.chrome.browser.open_in_app.OpenInAppDelegate;
+import org.chromium.chrome.browser.open_in_app.OpenInAppUtils;
 import org.chromium.chrome.browser.password_manager.CctPasswordSavingMetricsRecorderBridge;
-import org.chromium.chrome.browser.safe_browsing.SafeBrowsingBridge;
-import org.chromium.chrome.browser.tab.EmptyTabObserver;
+import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabLaunchType;
 import org.chromium.chrome.browser.tab.TabObserver;
@@ -40,7 +42,9 @@ import org.chromium.chrome.browser.tabmodel.TabClosureParams;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorSupplier;
 import org.chromium.components.embedder_support.util.UrlConstants;
+import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.components.external_intents.ExternalNavigationDelegate;
+import org.chromium.components.external_intents.ExternalNavigationHelper;
 import org.chromium.components.external_intents.ExternalNavigationParams;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
@@ -56,7 +60,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     protected final Context mApplicationContext;
     private final Tab mTab;
     private final TabObserver mTabObserver;
-    private final @Nullable Supplier<TabModelSelector> mTabModelSelectorSupplier;
+    private final @Nullable Supplier<@Nullable TabModelSelector> mTabModelSelectorSupplier;
 
     private boolean mIsTabDestroyed;
     private @TabLaunchType int mTabLaunchType;
@@ -68,7 +72,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         mTabModelSelectorSupplier = TabModelSelectorSupplier.from(tab.getWindowAndroid());
         mApplicationContext = ContextUtils.getApplicationContext();
         mTabObserver =
-                new EmptyTabObserver() {
+                new TabObserver() {
                     @Override
                     public void onDestroyed(Tab tab) {
                         mIsTabDestroyed = true;
@@ -94,6 +98,10 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         Activity activityContext = ContextUtils.activityFromContext(getContext());
         if (activityContext == null) return ContextUtils.getApplicationContext();
         return activityContext;
+    }
+
+    protected final Tab getTab() {
+        return mTab;
     }
 
     public static void setWillChromeHandleIntentHookForTesting(Predicate<Intent> hook) {
@@ -254,7 +262,18 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
 
     @Override
     public boolean shouldDisableAllExternalIntents() {
-        return false;
+        Profile profile = mTab.getProfile();
+        if (profile == null || !GlicEnabling.isEnabledForProfile(profile)) {
+            return false;
+        }
+
+        var actorService = ActorKeyedServiceFactory.getForProfile(profile);
+        if (actorService == null) {
+            return false;
+        }
+
+        var activeTaskId = actorService.getActiveTaskIdOnTab(mTab.getId());
+        return activeTaskId != null;
     }
 
     @Override
@@ -268,9 +287,6 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     }
 
     @Override
-    public void maybeRecordExternalNavigationSchemeHistogram(GURL url) {}
-
-    @Override
     public void notifyCctPasswordSavingRecorderOfExternalNavigation() {
         WindowAndroid windowAndroid = assumeNonNull(getWindowAndroid());
         CctPasswordSavingMetricsRecorderBridge cctSavingMetricsRecorder =
@@ -279,11 +295,6 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         if (cctSavingMetricsRecorder != null) {
             cctSavingMetricsRecorder.onExternalNavigation();
         }
-    }
-
-    @Override
-    public void reportIntentToSafeBrowsing(Intent intent) {
-        SafeBrowsingBridge.reportIntent(assertNonNull(mTab.getWebContents()), intent);
     }
 
     @Override
@@ -322,6 +333,16 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     @Override
     public boolean shouldSelfNavigationLaunchAsMultipleTask(ExternalNavigationParams params) {
         return false;
+    }
+
+    @Override
+    public void setExternalNavigationHelper(ExternalNavigationHelper delegate) {
+        OpenInAppDelegate.from(mTab).setExternalNavigationHelper(delegate);
+    }
+
+    @Override
+    public boolean allowExternalNavigationForHttpProtocols(GURL url) {
+        return !OpenInAppUtils.isOpenInAppAvailable() || !UrlUtilities.isHttpOrHttps(url);
     }
 
     /**

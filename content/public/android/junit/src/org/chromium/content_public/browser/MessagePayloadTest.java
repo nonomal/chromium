@@ -7,18 +7,14 @@ package org.chromium.content_public.browser;
 import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.robolectric.annotation.Config;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 
 import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 
-/**
- * Unit tests for MessagePayload.
- * Note: After new type is added, please add a test case here.
- */
+/** Unit tests for MessagePayload. Note: After new type is added, please add a test case here. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
 public class MessagePayloadTest {
     @Test
     public void testString() {
@@ -39,7 +35,7 @@ public class MessagePayloadTest {
 
     @Test
     public void testArrayBuffer() throws UnsupportedEncodingException {
-        final byte[] bytes = "TestStr".getBytes("UTF-8");
+        final byte[] bytes = "TestStr".getBytes(StandardCharsets.UTF_8);
         MessagePayload jsValue = new MessagePayload(bytes);
         Assert.assertEquals(jsValue.getAsArrayBuffer(), bytes);
         Assert.assertEquals(MessagePayloadType.ARRAY_BUFFER, jsValue.getType());
@@ -57,7 +53,7 @@ public class MessagePayloadTest {
 
     @Test
     public void testWrongValueTypeString() throws UnsupportedEncodingException {
-        MessagePayload jsValue = new MessagePayload("TestStr".getBytes("UTF-8"));
+        MessagePayload jsValue = new MessagePayload("TestStr".getBytes(StandardCharsets.UTF_8));
         Assert.assertEquals(MessagePayloadType.ARRAY_BUFFER, jsValue.getType());
         try {
             jsValue.getAsString();

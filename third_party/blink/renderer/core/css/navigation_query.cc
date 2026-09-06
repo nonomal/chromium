@@ -4,63 +4,215 @@
 
 #include "third_party/blink/renderer/core/css/navigation_query.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_urlpatterninit_usvstring.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_url_pattern_init.h"
+#include "third_party/blink/renderer/core/css/css_markup.h"
+#include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/route_matching/route.h"
-#include "third_party/blink/renderer/core/route_matching/route_map.h"
+#include "third_party/blink/renderer/core/html/html_anchor_element.h"
+#include "third_party/blink/renderer/core/route_matching/navigation_state.h"
 #include "third_party/blink/renderer/core/url_pattern/url_pattern.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
-void NavigationLocation::Trace(Visitor* v) const {
-  v->Trace(url_pattern_);
+const URLPattern* NavigationLocation::FindOrCreateURLPattern(
+    Document& document) const {
+  if (type_ == kUrlPattern || type_ == kUrl) {
+    // The value is url() or url-pattern().
+    V8URLPatternInput* url_pattern_input =
+        MakeGarbageCollected<V8URLPatternInput>(value_);
+    URLPattern* pattern =
+        URLPattern::Create(document.GetExecutionContext()->GetIsolate(),
+                           url_pattern_input, document.Url(), IGNORE_EXCEPTION);
+    return pattern;
+  }
+  // The value is an @location dashed-ident.
+  DCHECK_EQ(type_, kLocationName);
+  return document.GetStyleEngine().FindURLPatternByLocation(value_);
 }
 
-const Route* NavigationLocation::FindOrCreateRoute(Document& document) const {
-  if (url_pattern_) {
-    // A URLPattern becomes an anonymous route. One route for each unique
-    // URLPattern.
-    RouteMap::Ensure(document).AddAnonymousRoute(url_pattern_);
+bool NavigationLocation::CheckSelectorMatch(
+    const Element& element,
+    std::optional<NavigationPreposition> preposition) const {
+  const auto* anchor = DynamicTo<HTMLAnchorElement>(&element);
+  if (!anchor) {
+    return false;
   }
-  const auto* route_map = RouteMap::Get(&document);
-  if (!route_map) {
-    return nullptr;
+
+  Document& document = element.GetDocument();
+  const URLPattern* url_pattern = FindOrCreateURLPattern(document);
+  if (!url_pattern || !url_pattern->Match(anchor->Href())) {
+    return false;
   }
-  if (url_pattern_) {
-    return route_map->FindRoute(url_pattern_);
+  if (!preposition) {
+    return true;
   }
-  return route_map->FindRoute(GetRouteName());
+
+  const auto* navigation_state = NavigationState::Get(&document);
+  if (!navigation_state) {
+    return false;
+  }
+  return navigation_state &&
+         navigation_state->Matches(*preposition, *url_pattern);
 }
 
 void NavigationLocation::SerializeTo(StringBuilder& builder) const {
-  DCHECK(!string_.IsNull());
-  if (url_pattern_) {
-    builder.Append("url-pattern(\"");
-    builder.Append(string_);
-    builder.Append("\")");
-  } else {
-    builder.Append(string_);
+  DCHECK(!value_.IsNull());
+  switch (type_) {
+    case kUrlPattern:
+      builder.Append("url-pattern(");
+      SerializeString(value_, builder);
+      builder.Append(")");
+      break;
+    case kUrl:
+      builder.Append("url(");
+      SerializeString(value_, builder);
+      builder.Append(")");
+      break;
+    case kLocationName:
+      SerializeIdentifier(value_, builder);
+      break;
   }
 }
 
-bool NavigationTestExpression::Matches(Document& document) const {
-  const Route* route = navigation_location_->FindOrCreateRoute(document);
-  return route && route->Matches(preposition_);
+void NavigationLocationTestExpression::Trace(Visitor* visitor) const {
+  visitor->Trace(navigation_location_);
+  NavigationTestExpression::Trace(visitor);
 }
 
-void NavigationTestExpression::SerializeTo(StringBuilder& builder) const {
-  switch (preposition_) {
+bool NavigationLocationTestExpression::Matches(Document& document) const {
+  const auto* navigation_state = NavigationState::Get(&document);
+  if (!navigation_state) {
+    return false;
+  }
+  const URLPattern* url_pattern =
+      navigation_location_->FindOrCreateURLPattern(document);
+  return url_pattern && navigation_state->Matches(preposition_, *url_pattern);
+}
+
+void NavigationLocationTestExpression::SerializeTo(
+    StringBuilder& builder) const {
+  SerializePrepositionTo(preposition_, builder);
+  builder.Append(": ");
+  navigation_location_->SerializeTo(builder);
+}
+
+void NavigationLocationTestExpression::SerializePrepositionTo(
+    NavigationPreposition preposition,
+    StringBuilder& builder) {
+  switch (preposition) {
     case NavigationPreposition::kAt:
-      builder.Append("at: ");
+      builder.Append("at");
       break;
     case NavigationPreposition::kFrom:
-      builder.Append("from: ");
+      builder.Append("from");
       break;
     case NavigationPreposition::kTo:
-      builder.Append("to: ");
+      builder.Append("to");
       break;
   }
-  navigation_location_->SerializeTo(builder);
+}
+
+void NavigationLocationBetweenTestExpression::Trace(Visitor* visitor) const {
+  visitor->Trace(navigation_location1_);
+  visitor->Trace(navigation_location2_);
+  NavigationTestExpression::Trace(visitor);
+}
+
+bool NavigationLocationBetweenTestExpression::Matches(
+    Document& document) const {
+  const auto* navigation_state = NavigationState::Get(&document);
+  if (!navigation_state) {
+    return false;
+  }
+  const URLPattern* pattern1 =
+      navigation_location1_->FindOrCreateURLPattern(document);
+  const URLPattern* pattern2 =
+      navigation_location2_->FindOrCreateURLPattern(document);
+  if (!pattern1 || !pattern2) {
+    return false;
+  }
+
+  using NavigationPreposition::kFrom;
+  using NavigationPreposition::kTo;
+  return (navigation_state->Matches(kFrom, *pattern1) &&
+          navigation_state->Matches(kTo, *pattern2)) ||
+         (navigation_state->Matches(kTo, *pattern1) &&
+          navigation_state->Matches(kFrom, *pattern2));
+}
+
+void NavigationLocationBetweenTestExpression::SerializeTo(
+    StringBuilder& builder) const {
+  builder.Append("between: ");
+  navigation_location1_->SerializeTo(builder);
+  builder.Append(" and ");
+  navigation_location2_->SerializeTo(builder);
+}
+
+bool NavigationPhaseTestExpression::Matches(Document& document) const {
+  const auto* state = NavigationState::Get(&document);
+  return state && state->GetPhase() == phase_;
+}
+
+void NavigationPhaseTestExpression::SerializeTo(StringBuilder& builder) const {
+  builder.Append("phase: ");
+  switch (phase_) {
+    case NavigationPhase::kLoading:
+      builder.Append("loading");
+      break;
+    case NavigationPhase::kReady:
+      builder.Append("ready");
+      break;
+    case NavigationPhase::kCommitted:
+      builder.Append("committed");
+      break;
+  }
+}
+
+bool NavigationTypeTestExpression::Matches(Document& document) const {
+  const auto* state = NavigationState::Get(&document);
+  if (!state) {
+    return false;
+  }
+  switch (state->GetTraverseType()) {
+    case NavigationState::kNotTraversing:
+      return false;
+    case NavigationState::kBack:
+      return type_ == kTraverse || type_ == kBack;
+    case NavigationState::kForward:
+      return type_ == kTraverse || type_ == kForward;
+    case NavigationState::kReload:
+      return type_ == kReload;
+  }
+}
+
+void NavigationTypeTestExpression::SerializeTo(StringBuilder& builder) const {
+  builder.Append("history: ");
+  switch (type_) {
+    case kTraverse:
+      builder.Append("traverse");
+      break;
+    case kBack:
+      builder.Append("back");
+      break;
+    case kForward:
+      builder.Append("forward");
+      break;
+    case kReload:
+      builder.Append("reload");
+      break;
+  }
+}
+
+bool NavigationPreviewTestExpression::Matches(Document& document) const {
+  const auto* state = NavigationState::Get(&document);
+  return state && state->IsInPreview();
+}
+
+void NavigationPreviewTestExpression::SerializeTo(
+    StringBuilder& builder) const {
+  builder.Append("preview");
 }
 
 void NavigationExpNode::Trace(Visitor* v) const {
@@ -82,6 +234,8 @@ void NavigationQuery::Trace(Visitor* v) const {
 }
 
 bool NavigationQuery::Evaluate(Document* document) const {
+  document->GetStyleEngine().SetNeedsStyleUpdateOnNavigation();
+
   class Handler : public ConditionalExpNodeVisitor {
     STACK_ALLOCATED();
 

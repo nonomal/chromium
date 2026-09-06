@@ -18,6 +18,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/checked_math.h"
 #include "components/variations/entropy_provider.h"
+#include "components/variations/experiment_group_ids.h"
 #include "components/variations/proto/layer.pb.h"
 
 namespace variations {
@@ -181,8 +182,6 @@ VariationsLayers::VariationsLayers(const VariationsSeed& seed,
     };
   }
 
-  // TODO(crbug.com/40734659): Support a way to expire old/unused layers so they
-  // no longer get processed by the clients.
   for (const Layer& layer_proto : seed.layers()) {
     // Only constructs a layer if its ID is unique. We want to discard all
     // layers with the same ID because changing layer ID re-randomizes the field
@@ -257,13 +256,7 @@ bool VariationsLayers::AreSlotBoundsValid(const Layer& layer_proto) {
 bool VariationsLayers::AllowsHighEntropy(const Study& study) {
   // This should be kept in sync with the server-side layer validation
   // code: go/chrome-variations-layer-validation
-  for (const auto& experiment : study.experiment()) {
-    if (experiment.has_google_web_experiment_id() ||
-        experiment.has_google_web_trigger_experiment_id()) {
-      return false;
-    }
-  }
-  return true;
+  return !HasGoogleWebExperimentId(study);
 }
 
 // static

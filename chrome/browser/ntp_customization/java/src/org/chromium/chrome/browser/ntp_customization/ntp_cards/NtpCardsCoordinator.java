@@ -14,7 +14,8 @@ import android.view.View;
 
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.magic_stack.HomeModulesConfigManager;
+import org.chromium.chrome.browser.magic_stack.ModuleRegistry;
 import org.chromium.chrome.browser.ntp_customization.BottomSheetDelegate;
 import org.chromium.chrome.browser.ntp_customization.BottomSheetListContainerViewBinder;
 import org.chromium.chrome.browser.ntp_customization.BottomSheetViewBinder;
@@ -29,22 +30,22 @@ import java.util.function.Supplier;
 /** Coordinator for the NTP cards bottom sheet. */
 @NullMarked
 public class NtpCardsCoordinator {
+    private final HomeModulesConfigManager.@Nullable HomeModulesStateListener
+            mHomeModulesStateListener;
     private final View mView;
     private NtpCardsMediator mMediator;
 
     public NtpCardsCoordinator(
             Context context,
             BottomSheetDelegate delegate,
-            Supplier<@Nullable Profile> profileSupplier) {
+            Supplier<@Nullable Profile> profileSupplier,
+            @Nullable ModuleRegistry moduleRegistry) {
         View view =
                 LayoutInflater.from(context)
                         .inflate(R.layout.ntp_customization_ntp_cards_bottom_sheet, null, false);
         mView = view;
-        // TODO(crbug.com/458409311): Change these views to always be visible in the XML.
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.HOME_MODULE_PREF_REFACTOR)) {
-            view.findViewById(R.id.cards_switch_button).setVisibility(VISIBLE);
-            view.findViewById(R.id.cards_section_title).setVisibility(VISIBLE);
-        }
+        view.findViewById(R.id.cards_switch_button).setVisibility(VISIBLE);
+        view.findViewById(R.id.cards_section_title).setVisibility(VISIBLE);
 
         delegate.registerBottomSheetLayout(NTP_CARDS, view);
 
@@ -78,10 +79,26 @@ public class NtpCardsCoordinator {
                         bottomSheetPropertyModel,
                         ntpCardsPropertyModel,
                         delegate,
-                        profileSupplier);
+                        profileSupplier,
+                        moduleRegistry);
+
+        mHomeModulesStateListener =
+                new HomeModulesConfigManager.HomeModulesStateListener() {
+                    @Override
+                    public void onModuleConfigChanged(int moduleType, boolean isEnabled) {}
+
+                    @Override
+                    public void allCardsConfigChanged(boolean isEnabled) {
+                        onAllCardsConfigChanged(isEnabled);
+                    }
+                };
+        HomeModulesConfigManager.getInstance().addListener(mHomeModulesStateListener);
     }
 
     public void destroy() {
+        if (mHomeModulesStateListener != null) {
+            HomeModulesConfigManager.getInstance().removeListener(mHomeModulesStateListener);
+        }
         mMediator.destroy();
     }
 

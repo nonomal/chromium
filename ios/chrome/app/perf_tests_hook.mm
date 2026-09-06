@@ -20,6 +20,10 @@ bool DisableGeminiEligibilityCheck() {
   return false;
 }
 
+bool EnablePassageEmbedderGpuExecution() {
+  return true;
+}
+
 bool DisableAppGroupAccess() {
   return false;
 }
@@ -74,9 +78,11 @@ bool NeverPurgeDiscardedSessionsData() {
   return false;
 }
 
-bool LoadMinimalAppUI() {
+bool ShouldLoadMinimalAppUI() {
   return false;
 }
+
+void LoadMinimalAppUI(UIWindow* window) {}
 
 policy::ConfigurationPolicyProvider* GetOverriddenPlatformPolicyProvider() {
   return nullptr;
@@ -109,10 +115,6 @@ std::unique_ptr<ShareKitService> CreateShareKitService(
 }
 std::unique_ptr<password_manager::BulkLeakCheckServiceInterface>
 GetOverriddenBulkLeakCheckService() {
-  return nullptr;
-}
-std::unique_ptr<plus_addresses::PlusAddressService>
-GetOverriddenPlusAddressService() {
   return nullptr;
 }
 std::unique_ptr<password_manager::RecipientsFetcher>
@@ -167,6 +169,19 @@ UIImage* GetPHPickerViewControllerImage() {
 std::unique_ptr<AimEligibilityService> CreateAimEligibilityService(
     ProfileIOS* profile) {
   return nullptr;
+}
+
+std::unique_ptr<contextual_search::ContextualSearchService>
+CreateContextualSearchService(ProfileIOS* profile) {
+  return nullptr;
+}
+
+void InjectFakeTabsInBrowser(Browser* browser) {
+  // No-op for perf tests.
+}
+
+id<ReauthenticationProtocol> GetFakeReauthenticationModule() {
+  return nil;
 }
 
 }  // namespace tests_hook

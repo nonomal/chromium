@@ -18,7 +18,6 @@
 #include "chrome/browser/ash/policy/off_hours/device_off_hours_controller.h"
 #include "chromeos/ash/components/login/login_state/login_state.h"
 #include "components/session_manager/core/session_manager_observer.h"
-#include "components/supervised_user/core/browser/supervised_user_service_observer.h"
 #include "components/user_manager/user_manager.h"
 
 class Profile;
@@ -27,6 +26,10 @@ class PrefService;
 
 namespace ash {
 enum class AddUserSessionPolicy;
+}
+
+namespace session_manager {
+class SessionManager;
 }
 
 namespace user_manager {
@@ -38,10 +41,9 @@ class User;
 // TODO(xiyuan): Update when UserSessionStateObserver is gone.
 class SessionControllerClientImpl
     : public ash::SessionControllerClient,
-      public user_manager::UserManager::UserSessionStateObserver,
       public user_manager::UserManager::Observer,
+      public user_manager::UserManager::UserSessionStateObserver,
       public session_manager::SessionManagerObserver,
-      public SupervisedUserServiceObserver,
       public policy::off_hours::DeviceOffHoursController::Observer {
  public:
   explicit SessionControllerClientImpl(PrefService& local_state);
@@ -80,14 +82,12 @@ class SessionControllerClientImpl
 
   // ash::SessionControllerClient:
   void RequestLockScreen() override;
-  void RequestHideLockScreen() override;
   void RequestSignOut() override;
   void RequestRestartForUpdate() override;
   void AttemptRestartChrome() override;
   void SwitchActiveUser(const AccountId& account_id) override;
   void CycleActiveUser(ash::CycleUserDirection direction) override;
   void ShowMultiProfileLogin() override;
-  void EmitAshInitialized() override;
   PrefService* GetSigninScreenPrefService() override;
   PrefService* GetUserPrefService(const AccountId& account_id) override;
   base::FilePath GetProfilePath(const AccountId& account_id) override;
@@ -101,7 +101,6 @@ class SessionControllerClientImpl
 
   // user_manager::UserManager::UserSessionStateObserver:
   void ActiveUserChanged(user_manager::User* active_user) override;
-  void UserAddedToSession(const user_manager::User* added_user) override;
 
   // user_manager::UserManager::Observer
   void LocalStateChanged(user_manager::UserManager* user_manager) override;
@@ -110,12 +109,10 @@ class SessionControllerClientImpl
   void OnUserToBeRemoved(const AccountId& account_id) override;
 
   // session_manager::SessionManagerObserver:
+  void OnSessionCreated(const AccountId& account_id) override;
   void OnSessionStateChanged() override;
   void OnUserProfileLoaded(const AccountId& account_id) override;
   void OnUserSessionStartUpTaskCompleted() override;
-
-  // SupervisedUserServiceObserver:
-  void OnCustodianInfoChanged() override;
 
   // DeviceOffHoursController::Observer:
   void OnOffHoursEndTimeChanged() override;
@@ -131,7 +128,6 @@ class SessionControllerClientImpl
  private:
   FRIEND_TEST_ALL_PREFIXES(SessionControllerClientImplTest, CyclingThreeUsers);
   FRIEND_TEST_ALL_PREFIXES(SessionControllerClientImplTest, SendUserSession);
-  FRIEND_TEST_ALL_PREFIXES(SessionControllerClientImplTest, SupervisedUser);
   FRIEND_TEST_ALL_PREFIXES(SessionControllerClientImplTest, UserPrefsChange);
   FRIEND_TEST_ALL_PREFIXES(SessionControllerClientImplTest, SessionLengthLimit);
   FRIEND_TEST_ALL_PREFIXES(SessionControllerClientImplTest, DeviceOwner);
@@ -168,10 +164,6 @@ class SessionControllerClientImpl
   // Tracks users whose profiles are being loaded.
   std::set<AccountId> pending_users_;
 
-  // If the session is for a supervised user, the profile of that user.
-  // Chrome OS only supports a single supervised user in a session.
-  raw_ptr<Profile> supervised_user_profile_ = nullptr;
-
   base::CallbackListSubscription subscription_;
 
   // Pref change observers to update session info when a relevant user pref
@@ -185,6 +177,19 @@ class SessionControllerClientImpl
   // Used to suppress duplicate calls to ash.
   std::unique_ptr<ash::SessionInfo> last_sent_session_info_;
   std::unique_ptr<ash::UserSession> last_sent_user_session_;
+
+  base::ScopedObservation<session_manager::SessionManager,
+                          session_manager::SessionManagerObserver>
+      session_observation_{this};
+  base::ScopedObservation<user_manager::UserManager,
+                          user_manager::UserManager::Observer>
+      user_manager_observation_{this};
+  base::ScopedObservation<user_manager::UserManager,
+                          user_manager::UserManager::UserSessionStateObserver>
+      user_session_state_observation_{this};
+  base::ScopedObservation<policy::off_hours::DeviceOffHoursController,
+                          policy::off_hours::DeviceOffHoursController::Observer>
+      device_off_hours_controller_observation_{this};
 
   base::WeakPtrFactory<SessionControllerClientImpl> weak_ptr_factory_{this};
 };

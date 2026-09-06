@@ -9,7 +9,12 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "components/enterprise/client_certificates/core/private_key.h"
+
+#if BUILDFLAG(IS_IOS)
+#include <Security/Security.h>
+#endif  // BUILDFLAG(IS_IOS)
 
 namespace crypto {
 class UnexportableSigningKey;
@@ -30,12 +35,16 @@ class UnexportablePrivateKey : public PrivateKey {
                          PrivateKeySource key_source);
 
   // PrivateKey:
-  std::optional<std::vector<uint8_t>> SignSlowly(
-      base::span<const uint8_t> data) const override;
+  void Sign(base::span<const uint8_t> data,
+            base::OnceCallback<void(std::optional<std::vector<uint8_t>>)>
+                callback) const override;
   std::vector<uint8_t> GetSubjectPublicKeyInfo() const override;
-  crypto::SignatureVerifier::SignatureAlgorithm GetAlgorithm() const override;
+  crypto::sign::SignatureKind GetAlgorithm() const override;
   client_certificates_pb::PrivateKey ToProto() const override;
-  base::Value::Dict ToDict() const override;
+  base::DictValue ToDict() const override;
+#if BUILDFLAG(IS_IOS)
+  SecKeyRef GetSecKeyRef() const override;
+#endif  // BUILDFLAG(IS_IOS)
 
  private:
   friend class base::RefCountedThreadSafe<UnexportablePrivateKey>;

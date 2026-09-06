@@ -41,16 +41,18 @@ def main(argv: list[str]):
   builders = set(args.builder) or None
 
   waterfalls = _get_literal(_TESTING_BUILDBOT_DIR / 'waterfalls.pyl')
-  test_suite_exceptions = _get_literal(_TESTING_BUILDBOT_DIR /
-                                       'test_suite_exceptions.pyl')
+  test_suite_exceptions = _get_literal(
+    _TESTING_BUILDBOT_DIR / 'test_suite_exceptions.pyl'
+  )
 
   try:
     edits = migrate_targets.process_waterfall(
-        args.builder_group,
-        builders,
-        typing.cast(pyl.List[pyl.Dict[pyl.Str, pyl.Value]], waterfalls),
-        typing.cast(pyl.Dict[pyl.Str, pyl.Dict[pyl.Str, pyl.Value]],
-                    test_suite_exceptions),
+      args.builder_group,
+      builders,
+      typing.cast(pyl.List[pyl.Dict[pyl.Str, pyl.Value]], waterfalls),
+      typing.cast(
+        pyl.Dict[pyl.Str, pyl.Dict[pyl.Str, pyl.Value]], test_suite_exceptions
+      ),
     )
   except migrate_targets.WaterfallError as e:
     print(e, file=sys.stderr)
@@ -58,36 +60,43 @@ def main(argv: list[str]):
 
   if args.star_file:
     if not os.path.exists(args.star_file):
-      print(f'The given starlark file does not exist: "{args.star_file}"',
-            file=sys.stderr)
+      print(
+        f'The given starlark file does not exist: "{args.star_file}"',
+        file=sys.stderr,
+      )
       sys.exit(1)
     star_file = pathlib.Path(args.star_file)
   else:
     bucket = 'try' if args.builder_group.startswith('tryserver.') else 'ci'
-    star_file = (_INFRA_CONFIG_DIR /
-                 f'subprojects/chromium/{bucket}/{args.builder_group}.star')
+    star_file = (
+      _INFRA_CONFIG_DIR
+      / f'subprojects/chromium/{bucket}/{args.builder_group}.star'
+    )
 
   migrate_targets.update_starlark(
-      args.builder_group,
-      star_file,
-      edits,
+    args.builder_group,
+    star_file,
+    edits,
   )
+
+  with open(_INFRA_CONFIG_DIR / 'PACKAGE.lock') as f:
+    package = json.load(f)
 
   subprocess.check_call(['lucicfg', 'fmt'], cwd=_INFRA_CONFIG_DIR)
 
   # Regenerate the configs
-  subprocess.check_call([_INFRA_CONFIG_DIR / 'main.star'])
-  subprocess.check_call([_INFRA_CONFIG_DIR / 'dev.star'])
+  for entrypoint in package['packages'][0]['entrypoints']:
+    subprocess.check_call([_INFRA_CONFIG_DIR / entrypoint])
 
   # Copy the relevant portions of the testing/buildbot json files to the
   # newly-generated json files to make it easy to compare what's different
   unmigrated_jsons = {
-      name: None
-      for name in glob.glob('*.json', root_dir=_TESTING_BUILDBOT_DIR)
+    name: None for name in glob.glob('*.json', root_dir=_TESTING_BUILDBOT_DIR)
   }
   not_present = object()
-  for json_file in glob.glob('generated/*/*/*/targets/*.json',
-                             root_dir=_INFRA_CONFIG_DIR):
+  for json_file in glob.glob(
+    'generated/*/*/*/targets/*.json', root_dir=_INFRA_CONFIG_DIR
+  ):
     json_file = _INFRA_CONFIG_DIR / json_file
 
     unmigrated_json = unmigrated_jsons.get(json_file.name, not_present)
@@ -113,8 +122,8 @@ def main(argv: list[str]):
   subprocess.check_call(['git', 'add', '.'], cwd=_INFRA_CONFIG_DIR)
 
   # Regenerate the configs
-  subprocess.check_call([_INFRA_CONFIG_DIR / 'main.star'])
-  subprocess.check_call([_INFRA_CONFIG_DIR / 'dev.star'])
+  for entrypoint in package['packages'][0]['entrypoints']:
+    subprocess.check_call([_INFRA_CONFIG_DIR / entrypoint])
 
 
 if __name__ == '__main__':

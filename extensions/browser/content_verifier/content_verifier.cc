@@ -8,7 +8,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
@@ -17,7 +16,6 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
@@ -85,10 +83,12 @@ base::FilePath NormalizeRelativePath(const base::FilePath& relative_path) {
 std::unique_ptr<ContentVerifierIOData::ExtensionData> CreateIOData(
     const Extension* extension,
     ContentVerifierDelegate* delegate) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   ContentVerifierDelegate::VerifierSourceType source_type =
       delegate->GetVerifierSourceType(*extension);
-  if (source_type == ContentVerifierDelegate::VerifierSourceType::NONE)
+  if (source_type == ContentVerifierDelegate::VerifierSourceType::NONE) {
     return nullptr;
+  }
 
   // The browser image paths from the extension might have '.' or '..'
   // components, so we strip those to make comparing to actual relative
@@ -147,6 +147,7 @@ std::unique_ptr<ContentVerifierIOData::ExtensionData> CreateIOData(
   }
 
   result->version = extension->version();
+  result->extension_root = extension->path();
   result->manifest_version = extension->manifest_version();
   result->source_type = source_type;
 
@@ -155,7 +156,8 @@ std::unique_ptr<ContentVerifierIOData::ExtensionData> CreateIOData(
 
 base::FilePath GetExtensionRootToUse(const base::FilePath& extension_root) {
   return base::FeatureList::IsEnabled(
-             extensions_features::kContentVerifierCacheIncludesExtensionRoot)
+             extensions_features::
+                 kExtensionContentVerificationUsesExtensionRoot)
              ? extension_root
              : base::FilePath();
 }
@@ -196,7 +198,7 @@ struct ContentVerifier::CacheKey {
 //
 // This class makes sure we do not have more than one ContentHash request in
 // flight for a particular version of an extension. If a call to retrieve an
-// extensions's ContentHash is made while another retieval for the same
+// extension's ContentHash is made while another retrieval for the same
 // version of the extension is in flight, this class will queue up the
 // callback(s) and respond to all of them when ContentHash is available.
 class ContentVerifier::HashHelper {
@@ -220,8 +222,9 @@ class ContentVerifier::HashHelper {
     auto callback_key = std::make_tuple(extension_id, extension_version,
                                         GetExtensionRootToUse(extension_root));
     auto iter = callback_infos_.find(callback_key);
-    if (iter == callback_infos_.end())
+    if (iter == callback_infos_.end()) {
       return;
+    }
     iter->second.Cancel();
     callback_infos_.erase(iter);
   }
@@ -328,8 +331,9 @@ class ContentVerifier::HashHelper {
                           bool was_cancelled) {
     // If the request was cancelled, then we don't have a corresponding entry
     // for the request in |callback_infos_| anymore.
-    if (was_cancelled)
+    if (was_cancelled) {
       return;
+    }
 
     content::GetIOThreadTaskRunner({})->PostTask(
         FROM_HERE,
@@ -378,7 +382,7 @@ class ContentVerifier::HashHelper {
         // The request might have been cancelled on IO after |content_hash| was
         // built.
         // TODO(lazyboy): Add a specific test case for this. See
-        // https://crbug.com/825470 for a likely example of this.
+        // https://crbug.com/41378691 for a likely example of this.
         checker->IsCancelled()) {
       return;
     }
@@ -431,8 +435,9 @@ class ContentVerifier::HashHelper {
     CHECK(iter != callback_infos_.end());
     auto& callback_info = iter->second;
 
-    for (auto& callback : callback_info.callbacks)
+    for (auto& callback : callback_info.callbacks) {
       std::move(callback).Run(content_hash);
+    }
     callback_infos_.erase(iter);
 
     // OnFetchComplete will check content_hash->hash_mismatch_unix_paths():
@@ -480,12 +485,11 @@ class ContentVerifier::VerifiedFileTypeHelper {
     if (canonical_path_value == data_->canonical_service_worker_script_path) {
       return ContentVerifier::VerifiedFileType::kServiceWorkerScript;
     }
-    if (base::Contains(data_->canonical_background_scripts_paths,
-                       canonical_path_value)) {
+    if (data_->canonical_background_scripts_paths.contains(
+            canonical_path_value)) {
       return ContentVerifier::VerifiedFileType::kBackgroundScript;
     }
-    if (base::Contains(data_->canonical_content_scripts_paths,
-                       canonical_path_value)) {
+    if (data_->canonical_content_scripts_paths.contains(canonical_path_value)) {
       return ContentVerifier::VerifiedFileType::kContentScript;
     }
 
@@ -505,14 +509,12 @@ class ContentVerifier::VerifiedFileTypeHelper {
 
     // The browser re-writes image files during extension load, so they can't
     // be verified.
-    if (base::Contains(data_->canonical_browser_image_paths,
-                       canonical_path_value)) {
+    if (data_->canonical_browser_image_paths.contains(canonical_path_value)) {
       return ContentVerifier::VerifiedFileType::kNone;
     }
 
     // Skip indexed rulesets since these are generated.
-    if (base::Contains(data_->canonical_indexed_ruleset_paths,
-                       canonical_path_value)) {
+    if (data_->canonical_indexed_ruleset_paths.contains(canonical_path_value)) {
       return ContentVerifier::VerifiedFileType::kNone;
     }
 
@@ -566,6 +568,7 @@ ContentVerifier::ContentVerifier(
     : context_(context), delegate_(std::move(delegate)) {}
 
 ContentVerifier::~ContentVerifier() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 }
 
 void ContentVerifier::Start() {
@@ -695,20 +698,19 @@ bool ContentVerifier::ShouldComputeHashesOnInstall(const Extension& extension) {
 void ContentVerifier::VerifyFailed(
     const ExtensionId& extension_id,
     const std::vector<VerifiedFileType>& failed_file_types,
-    int manifest_version,
     ContentVerifyJob::FailureReason reason) {
   TRACE_EVENT("extensions.content_verifier.debug",
               "ContentVerifier::VerifyFailed", "extension_id", extension_id,
               "ContentVerifyJob::FailureReason", reason);
   if (!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI)) {
     content::GetUIThreadTaskRunner({})->PostTask(
-        FROM_HERE,
-        base::BindOnce(&ContentVerifier::VerifyFailed, this, extension_id,
-                       failed_file_types, manifest_version, reason));
+        FROM_HERE, base::BindOnce(&ContentVerifier::VerifyFailed, this,
+                                  extension_id, failed_file_types, reason));
     return;
   }
-  if (shutdown_on_ui_)
+  if (shutdown_on_ui_) {
     return;
+  }
 
   VLOG(1) << "VerifyFailed " << extension_id << " reason:" << reason;
   DCHECK_NE(ContentVerifyJob::NONE, reason);
@@ -742,25 +744,13 @@ void ContentVerifier::VerifyFailed(
         break;
     }
 
-    if (manifest_version == 2) {
-      base::UmaHistogramEnumeration(
-          base::StringPrintf(
-              "Extensions.ContentVerification.VerifyFailedOnFileMV2.%s",
-              histogram_suffix),
-          reason, ContentVerifyJob::FAILURE_REASON_MAX);
-      base::UmaHistogramEnumeration(
-          "Extensions.ContentVerification.VerifyFailedOnFileTypeMV2",
-          file_type);
-    } else if (manifest_version == 3) {
-      base::UmaHistogramEnumeration(
-          base::StringPrintf(
-              "Extensions.ContentVerification.VerifyFailedOnFileMV3.%s",
-              histogram_suffix),
-          reason, ContentVerifyJob::FAILURE_REASON_MAX);
-      base::UmaHistogramEnumeration(
-          "Extensions.ContentVerification.VerifyFailedOnFileTypeMV3",
-          file_type);
-    }
+    base::UmaHistogramEnumeration(
+        base::StringPrintf(
+            "Extensions.ContentVerification.VerifyFailedOnFile.%s",
+            histogram_suffix),
+        reason, ContentVerifyJob::FAILURE_REASON_MAX);
+    base::UmaHistogramEnumeration(
+        "Extensions.ContentVerification.VerifyFailedOnFileType", file_type);
   }
 
   delegate_->VerifyFailed(extension_id, reason);
@@ -773,8 +763,9 @@ void ContentVerifier::OnExtensionLoaded(
               "ContentVerifier::OnExtensionLoaded", "extension_id",
               extension->id(), "extension_root", extension->path(),
               "extension_version", extension->version().GetString());
-  if (shutdown_on_ui_)
+  if (shutdown_on_ui_) {
     return;
+  }
 
   std::unique_ptr<ContentVerifierIOData::ExtensionData> io_data =
       CreateIOData(extension, delegate_.get());
@@ -793,8 +784,9 @@ void ContentVerifier::OnExtensionLoadedOnIO(
               "ContentVerifier::OnExtensionLoadedOnIO", "extension_id",
               extension_id, "extension_root", extension_root,
               "extension_version", extension_version.GetString());
-  if (shutdown_on_io_)
+  if (shutdown_on_io_) {
     return;
+  }
 
   // `data` may be null if no verification is needed for the extension. In that
   // case, we just mark the extension as ready.
@@ -818,8 +810,9 @@ void ContentVerifier::OnExtensionUnloaded(
               extension->id(), "extension_root", extension->path(),
               "extension_version", extension->version().GetString(),
               "UnloadedExtensionReason", reason);
-  if (shutdown_on_ui_)
+  if (shutdown_on_ui_) {
     return;
+  }
   content::GetIOThreadTaskRunner({})->PostTask(
       FROM_HERE,
       base::BindOnce(&ContentVerifier::OnExtensionUnloadedOnIO, this,
@@ -840,7 +833,7 @@ GURL ContentVerifier::GetSignatureFetchUrlForTest(
 void ContentVerifier::VerifyFailedForTest(
     const ExtensionId& extension_id,
     ContentVerifyJob::FailureReason reason) {
-  VerifyFailed(extension_id, {VerifiedFileType::kMiscFile}, 3, reason);
+  VerifyFailed(extension_id, {VerifiedFileType::kMiscFile}, reason);
 }
 
 void ContentVerifier::ClearCacheForTesting() {
@@ -855,8 +848,9 @@ void ContentVerifier::OnExtensionUnloadedOnIO(
   TRACE_EVENT("extensions.content_verifier.debug",
               "ContentVerifier::OnExtensionUnloadedOnIO", "extension_id",
               extension_id, "extension_version", extension_version.GetString());
-  if (shutdown_on_io_)
+  if (shutdown_on_io_) {
     return;
+  }
   io_data_.RemoveData(extension_id);
 
   // Remove all possible cache entries for this extension version.
@@ -867,8 +861,9 @@ void ContentVerifier::OnExtensionUnloadedOnIO(
                /*needs_force_missing_computed_hashes_creation=*/false));
 
   HashHelper* hash_helper = GetOrCreateHashHelper();
-  if (hash_helper)
+  if (hash_helper) {
     hash_helper->Cancel(extension_id, extension_version, extension_root);
+  }
 
   ready_extensions_.erase(extension_id);
   pending_jobs_.erase(extension_id);
@@ -909,18 +904,27 @@ void ContentVerifier::StartJob(const scoped_refptr<ContentVerifyJob>& job) {
   }
 
   std::vector<VerifiedFileType> file_types({verified_file_type});
-  auto callback =
-      base::BindOnce(&ContentVerifier::VerifyFailed, this, job->extension_id(),
-                     file_types, data->manifest_version);
-
+  auto callback = base::BindOnce(&ContentVerifier::VerifyFailed, this,
+                                 job->extension_id(), file_types);
   const base::Version& current_extension_version = data->version;
-  if (base::FeatureList::IsEnabled(
-          extensions_features::kContentVerifyJobUseJobVersionForHashing) &&
-      current_extension_version != job->extension_version()) {
+  if (current_extension_version != job->extension_version()) {
     // This verify job must've started after a newer version of the extension
     // has been loaded so let's not start the job since it'll try to check for a
     // non-existent `ContentHash` and/or create a `ContentHash` for an unloaded
     // extension version.
+    return;
+  }
+
+  if (base::FeatureList::IsEnabled(
+          extensions_features::
+              kExtensionContentVerificationUsesExtensionRoot) &&
+      data->extension_root != job->extension_root()) {
+    // Since this extension version is the same this verify job must've
+    // started during an extension corruption repair (which changes the root
+    // directory but the extension version remains the same). This check
+    // prevents starting jobs for old root directories that could lead to
+    // memory leaks (stale cache entries) and false-positive corruption
+    // reports for the currently loaded extension.
     return;
   }
 
@@ -956,12 +960,13 @@ void ContentVerifier::OnFetchComplete(
                                                       did_hash_mismatch);
   }
 
-  if (!did_hash_mismatch)
+  if (!did_hash_mismatch) {
     return;
+  }
 
   // Note: `data` must be non-null here, since we'd only populate
   // `file_hash_mismatches` if it's available.
-  VerifyFailed(extension_id, file_hash_mismatches, data->manifest_version,
+  VerifyFailed(extension_id, file_hash_mismatches,
                ContentVerifyJob::HASH_MISMATCH);
 }
 
@@ -1009,8 +1014,9 @@ void ContentVerifier::BindURLLoaderFactoryReceiverOnUIThread(
     mojo::PendingReceiver<network::mojom::URLLoaderFactory>
         url_loader_factory_receiver) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (shutdown_on_ui_)
+  if (shutdown_on_ui_) {
     return;
+  }
 
   context_->GetDefaultStoragePartition()
       ->GetURLLoaderFactoryForBrowserProcess()
@@ -1025,20 +1031,28 @@ ContentVerifier::HashHelper* ContentVerifier::GetOrCreateHashHelper() {
   // case.
   if (!hash_helper_created_) {
     DCHECK(!hash_helper_);
-    hash_helper_ =
-        std::unique_ptr<HashHelper, content::BrowserThread::DeleteOnIOThread>(
-            new HashHelper(this));
+    hash_helper_ = std::make_unique<HashHelper>(this);
     hash_helper_created_ = true;
   }
   return hash_helper_.get();
 }
 
-void ContentVerifier::ResetIODataForTesting(const Extension* extension) {
+void ContentVerifier::ResetIODataForTesting(const Extension* extension,
+                                            base::OnceClosure callback) {
   std::unique_ptr<ContentVerifierIOData::ExtensionData> data =
       CreateIOData(extension, delegate_.get());
   // This is only used in testing; `data` must always be successfully created.
   CHECK(data);
-  io_data_.AddData(extension->id(), std::move(*data));
+  content::GetIOThreadTaskRunner({})->PostTaskAndReply(
+      FROM_HERE,
+      base::BindOnce(
+          [](scoped_refptr<ContentVerifier> verifier,
+             const ExtensionId& extension_id,
+             std::unique_ptr<ContentVerifierIOData::ExtensionData> data) {
+            verifier->io_data_.AddData(extension_id, std::move(*data));
+          },
+          base::WrapRefCounted(this), extension->id(), std::move(data)),
+      std::move(callback));
 }
 
 base::FilePath ContentVerifier::NormalizeRelativePathForTesting(

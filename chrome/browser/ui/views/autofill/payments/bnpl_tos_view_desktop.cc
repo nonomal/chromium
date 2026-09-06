@@ -11,6 +11,8 @@
 #include "components/autofill/core/browser/ui/payments/bnpl_tos_controller.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/base/page_transition_types.h"
+#include "ui/base/window_open_disposition.h"
 
 using tabs::TabInterface;
 
@@ -31,6 +33,11 @@ BnplTosViewDesktop::BnplTosViewDesktop(
                                       weak_ptr_factory_.GetWeakPtr()));
   TabInterface* tab_interface = TabInterface::GetFromContents(web_contents_);
   CHECK(tab_interface);
+
+  tab_detach_subscription_ =
+      tab_interface->RegisterWillDetach(base::BindRepeating(
+          &BnplTosDialog::OnTabDetached, dialog_view->GetWeakPtr()));
+
   dialog_widget_ = tab_interface->GetTabFeatures()
                        ->tab_dialog_manager()
                        ->CreateAndShowDialog(

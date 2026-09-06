@@ -5,6 +5,7 @@
 #include "ui/accessibility/android/accessibility_state.h"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/android/jni_android.h"
@@ -18,27 +19,38 @@
 
 namespace ui {
 
+namespace {
+
+// Cached value of whether Samsung TalkBack is enabled, pushed from Java via
+// `JNI_AccessibilityState_OnSamsungTalkBackStateChanged`. We cache this value
+// here in C++ to avoid making synchronous JNI calls into Java on hot
+// accessibility node inspection paths.
+//
+// Thread safety: Written from Java via JNI on the UI thread and read by
+// accessibility tree node builders on the UI thread.
+bool g_is_samsung_talkback_enabled = false;
+
+}  // namespace
+
 static void JNI_AccessibilityState_OnAnimatorDurationScaleChanged(JNIEnv* env) {
   AccessibilityState::Get()->NotifyAnimatorDurationScaleObservers();
 }
 
 static void JNI_AccessibilityState_OnDisplayInversionEnabledChanged(
     JNIEnv* env,
-    jboolean enabled) {
-  AccessibilityState::Get()->NotifyDisplayInversionEnabledObservers(
-      static_cast<bool>(enabled));
+    bool enabled) {
+  AccessibilityState::Get()->NotifyDisplayInversionEnabledObservers(enabled);
 }
 
 static void JNI_AccessibilityState_OnContrastLevelChanged(
     JNIEnv* env,
-    jboolean highContrastEnabled) {
-  AccessibilityState::Get()->NotifyContrastLevelObservers(
-      static_cast<bool>(highContrastEnabled));
+    bool highContrastEnabled) {
+  AccessibilityState::Get()->NotifyContrastLevelObservers(highContrastEnabled);
 }
 
 static void JNI_AccessibilityState_OnTextCursorBlinkIntervalChanged(
     JNIEnv* env,
-    jint newIntervalMs) {
+    int32_t newIntervalMs) {
   AccessibilityState::Get()->NotifyTextCursorBlinkIntervalObservers(
       base::Milliseconds(newIntervalMs));
 }
@@ -46,6 +58,12 @@ static void JNI_AccessibilityState_OnTextCursorBlinkIntervalChanged(
 static void JNI_AccessibilityState_RecordAccessibilityServiceInfoHistograms(
     JNIEnv* env) {
   AccessibilityState::Get()->NotifyRecordAccessibilityServiceInfoHistogram();
+}
+
+static void JNI_AccessibilityState_OnSamsungTalkBackStateChanged(
+    JNIEnv* env,
+    bool enabled) {
+  g_is_samsung_talkback_enabled = enabled;
 }
 
 // static
@@ -125,6 +143,15 @@ std::vector<std::string> AccessibilityState::GetAccessibilityServiceIds() {
 }
 
 // static
+std::vector<bool> AccessibilityState::GetAccessibilityToolFlags() {
+  JNIEnv* const env = base::android::AttachCurrentThread();
+  std::vector<bool> tool_flags;
+  base::android::JavaBooleanArrayToBoolVector(
+      env, Java_AccessibilityState_getAccessibilityToolFlags(env), &tool_flags);
+  return tool_flags;
+}
+
+// static
 base::TimeDelta AccessibilityState::GetTextCursorBlinkInterval() {
   return base::Milliseconds(Java_AccessibilityState_getTextCursorBlinkInterval(
       base::android::AttachCurrentThread()));
@@ -134,6 +161,18 @@ base::TimeDelta AccessibilityState::GetTextCursorBlinkInterval() {
 bool AccessibilityState::PrefersReducedMotion() {
   return Java_AccessibilityState_prefersReducedMotion(
       base::android::AttachCurrentThread());
+}
+
+// static
+bool AccessibilityState::IsSamsungTalkBackEnabled() {
+  return g_is_samsung_talkback_enabled;
+}
+
+ScopedSamsungTalkBackForTesting::ScopedSamsungTalkBackForTesting(bool enabled)
+    : previous_value_(std::exchange(g_is_samsung_talkback_enabled, enabled)) {}
+
+ScopedSamsungTalkBackForTesting::~ScopedSamsungTalkBackForTesting() {
+  g_is_samsung_talkback_enabled = previous_value_;
 }
 
 // static

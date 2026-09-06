@@ -18,12 +18,12 @@
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
 #include "chrome/browser/signin/test_signin_client_builder.h"
+#include "chrome/browser/supervised_user/child_accounts/child_account_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_test_util.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/supervised_user/core/browser/proto/families_common.pb.h"
 #include "components/supervised_user/core/browser/proto/kidsmanagement_messages.pb.h"
 #include "components/supervised_user/core/browser/proto_fetcher_status.h"
-#include "components/supervised_user/core/browser/supervised_user_url_filter.h"
 #include "components/supervised_user/core/browser/supervised_user_utils.h"
 #include "components/supervised_user/core/common/supervised_user_constants.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
@@ -78,6 +78,8 @@ class FamilyInfoFeedbackSourceForChildFilterBehaviorTest
     identity_test_env_profile_adaptor_ =
         std::make_unique<IdentityTestEnvironmentProfileAdaptor>(profile_.get());
     j_feedback_source_ = CreateJavaObjectForTesting();
+
+    CHECK(ChildAccountServiceFactory::GetForProfile(profile_.get()));
   }
 
  protected:
@@ -109,7 +111,19 @@ class FamilyInfoFeedbackSourceForChildFilterBehaviorTest
     return source->weak_factory_.GetWeakPtr();
   }
 
+  // Creates a primary account that has consistent child status
+  CoreAccountInfo MakePrimaryChildAccountAvailable() {
+    AccountInfo account = identity_test_env()->MakeAccountAvailable(kTestEmail);
+    account = AccountInfo::Builder(account)
+                  .SetIsChildAccount(signin::TriboolFromBool(true))
+                  .Build();
+    identity_test_env()->UpdateAccountInfoForAccount(account);
+    return identity_test_env()->SetPrimaryAccount(
+        kTestEmail, signin::ConsentLevel::kSignin);
+  }
+
   kidsmanagement::FamilyRole role_;
+
  private:
   // Creates a Java instance of FamilyInfoFeedbackSource.
   base::android::ScopedJavaLocalRef<jobject> CreateJavaObjectForTesting() {
@@ -128,10 +142,7 @@ class FamilyInfoFeedbackSourceForChildFilterBehaviorTest
 // Tests that the parental control sites value for a child user is recorded.
 TEST_P(FamilyInfoFeedbackSourceForChildFilterBehaviorTest,
        GetChildFilteringBehaviour) {
-  CoreAccountInfo primary_account =
-      identity_test_env()->MakePrimaryAccountAvailable(
-          kTestEmail, signin::ConsentLevel::kSignin);
-
+  CoreAccountInfo primary_account = MakePrimaryChildAccountAvailable();
   supervised_user_test_util::SetWebFilterType(profile(), GetParam());
 
   kidsmanagement::ListMembersResponse members =
@@ -234,8 +245,9 @@ class FamilyInfoFeedbackSourceTest
       base::WeakPtr<FamilyInfoFeedbackSource> feedback_source) {
     feedback_source->OnFailure(
         supervised_user::ProtoFetcherStatus::GoogleServiceAuthError(
-            GoogleServiceAuthError(
-                GoogleServiceAuthError::State::INVALID_GAIA_CREDENTIALS)));
+            GoogleServiceAuthError::FromInvalidGaiaCredentialsReason(
+                GoogleServiceAuthError::InvalidGaiaCredentialsReason::
+                    UNKNOWN)));
   }
 
   // Creates a new instance of FamilyInfoFeedbackSource that is destroyed on

@@ -12,6 +12,7 @@
 #include "ash/webui/projector_app/public/cpp/projector_app_constants.h"
 #include "ash/webui/projector_app/test/mock_xhr_sender.h"
 #include "base/compiler_specific.h"
+#include "base/containers/span.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -33,6 +34,7 @@
 #include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/notifications/notification_display_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/ash/login/user_adding_screen.h"
 #include "chrome/browser/ui/ash/projector/projector_app_client_impl.h"
 #include "chrome/browser/ui/ash/projector/projector_drivefs_provider.h"
@@ -142,8 +144,9 @@ class PendingScreencastMangerBrowserTest : public InProcessBrowserTest {
     fake_drivefs_helper_ =
         std::make_unique<drive::FakeDriveFsHelper>(profile, mount_path);
     auto* integration_service = new drive::DriveIntegrationService(
-        g_browser_process->local_state(), profile, std::string(), mount_path,
-        fake_drivefs_helper_->CreateFakeDriveFsListenerFactory());
+        g_browser_process->local_state(), profile,
+        IdentityManagerFactory::GetForProfile(profile), std::string(),
+        mount_path, fake_drivefs_helper_->CreateFakeDriveFsListenerFactory());
     return integration_service;
   }
 
@@ -173,9 +176,7 @@ class PendingScreencastMangerBrowserTest : public InProcessBrowserTest {
 
     base::File file(folder_path.Append(relative_file_path.BaseName()),
                     base::File::FLAG_CREATE | base::File::FLAG_WRITE);
-    UNSAFE_TODO(EXPECT_EQ(static_cast<int>(file_content.size()),
-                          file.Write(/*offset=*/0, file_content.data(),
-                                     /*size=*/file_content.size())));
+    EXPECT_TRUE(file.WriteAndCheck(0, base::as_byte_span(file_content)));
     EXPECT_TRUE(file.IsValid());
     file.Close();
   }
@@ -207,7 +208,7 @@ class PendingScreencastMangerBrowserTest : public InProcessBrowserTest {
 
     drive::DriveIntegrationService* service =
         drive::DriveIntegrationServiceFactory::FindForProfile(
-            browser()->profile());
+            browser()->GetProfile());
     EXPECT_TRUE(service->IsMounted());
     EXPECT_TRUE(base::PathExists(service->GetMountPointPath()));
 
@@ -298,7 +299,7 @@ class PendingScreencastMangerBrowserTest : public InProcessBrowserTest {
 
   void VerifyNotificationCount(size_t size) {
     base::RunLoop run_loop;
-    NotificationDisplayServiceFactory::GetForProfile(browser()->profile())
+    NotificationDisplayServiceFactory::GetForProfile(browser()->GetProfile())
         ->GetDisplayed(base::BindLambdaForTesting(
             [&run_loop, &size](std::set<std::string> displayed_notification_ids,
                                bool supports_synchronization) {
@@ -806,6 +807,7 @@ IN_PROC_BROWSER_TEST_F(PendingScreencastMangerBrowserTest,
                     url);
                 run_loop.Quit();
               }),
+          ProjectorAppClient::Get()->GetIdentityManager(),
           &test_url_loader_factory));
 
   // Mocks a metadata file finishes upload:

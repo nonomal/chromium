@@ -18,11 +18,8 @@ constexpr char kThumbnailImageOptions[] = "=s639-k-no-nd";
 // etc. Options appear on an image URL after the '=' character.
 constexpr char kImageOptions[] = "=s2556-k-no-nd";
 #elif BUILDFLAG(IS_ANDROID)
-// TODO(crbug.com/423579377): Update the filter label to 'chrome_android_ntp'.
-
-// Android label added to request to filter out unwanted collections. We use the
-// same collections as iOS.
-constexpr char kFilteringLabel[] = "chrome_ios_ntp";
+// Android label added to request to filter out unwanted collections.
+constexpr char kFilteringLabel[] = "chrome_android_ntp";
 // The Android options to be added to a thumbnail image URL, specifying
 // resolution, cropping, etc. Options appear on an image URL after the '='
 // character. This resolution matches the height an width of bg-sel-tile.
@@ -59,9 +56,13 @@ std::string GetImageOptions() {
 
 GURL AddOptionsToImageURL(const std::string& image_url,
                           const std::string& image_options) {
-  return GURL(image_url + ((image_url.find('=') == std::string::npos)
-                               ? image_options
-                               : std::string("")));
+  GURL url(image_url + ((image_url.find('=') == std::string::npos)
+                            ? image_options
+                            : std::string("")));
+  if (!url.SchemeIsHTTPOrHTTPS()) {
+    return GURL();
+  }
+  return url;
 }
 
 GURL RemoveOptionsFromImageURL(const std::string& image_url) {

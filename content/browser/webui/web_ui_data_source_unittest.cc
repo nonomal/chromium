@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/containers/contains.h"
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
 #include "base/memory/ref_counted_memory.h"
@@ -11,15 +10,15 @@
 #include "content/browser/webui/web_ui_data_source_impl.h"
 #include "content/public/common/buildflags.h"
 #include "content/public/test/browser_task_environment.h"
-#include "content/test/test_content_client.h"
+#include "content/public/test/test_content_client.h"
 #include "services/network/public/mojom/content_security_policy.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/webui/resource_path.h"
 #include "url/gurl.h"
 
 #if BUILDFLAG(LOAD_WEBUI_FROM_DISK)
 #include "base/command_line.h"
 #include "content/public/common/content_switches.h"
-#include "ui/base/webui/resource_path.h"
 #endif
 
 namespace content {
@@ -45,16 +44,17 @@ class TestClient : public TestContentClient {
     return std::u16string();
   }
 
-  base::RefCountedMemory* GetDataResourceBytes(int resource_id) override {
-    base::RefCountedStaticMemory* bytes = nullptr;
+  scoped_refptr<base::RefCountedMemory> GetDataResourceBytes(
+      int resource_id) override {
+    scoped_refptr<base::RefCountedMemory> bytes;
     if (resource_id == kDummyDefaultResourceId) {
-      bytes = new base::RefCountedStaticMemory(
+      bytes = base::MakeRefCounted<base::RefCountedStaticMemory>(
           base::byte_span_with_nul_from_cstring(kDummyDefaultResource));
     } else if (resource_id == kDummyResourceId) {
-      bytes = new base::RefCountedStaticMemory(
+      bytes = base::MakeRefCounted<base::RefCountedStaticMemory>(
           base::byte_span_with_nul_from_cstring(kDummyResource));
     } else if (resource_id == kDummyJSResourceId) {
-      bytes = new base::RefCountedStaticMemory(
+      bytes = base::MakeRefCounted<base::RefCountedStaticMemory>(
           base::byte_span_with_nul_from_cstring(kDummyJSResource));
     }
     return bytes;
@@ -75,7 +75,7 @@ class WebUIDataSourceTest : public testing::Test {
                               WebContents::Getter(), std::move(callback));
   }
 
-  std::string GetMimeTypeForPath(const std::string& path) const {
+  std::string_view GetMimeTypeForPath(const std::string& path) const {
     return source_->GetMimeType(GURL("https://any-host/" + path));
   }
 
@@ -147,7 +147,7 @@ TEST_F(WebUIDataSourceTest, SomeValues) {
   StartDataRequest("strings.js", base::BindOnce(&SomeValuesCallback));
 }
 
-void DefaultResourceFoobarCallback(scoped_refptr<base::RefCountedMemory> data) {
+void DefaultResourceCallback(scoped_refptr<base::RefCountedMemory> data) {
   std::string result(base::as_string_view(*data));
   EXPECT_NE(result.find(kDummyDefaultResource), std::string::npos);
 }
@@ -158,11 +158,15 @@ void DefaultResourceStringsCallback(
   EXPECT_NE(result.find(kDummyDefaultResource), std::string::npos);
 }
 
+void NullCallback(scoped_refptr<base::RefCountedMemory> data) {
+  EXPECT_EQ(nullptr, data);
+}
+
 TEST_F(WebUIDataSourceTest, DefaultResource) {
   source()->SetDefaultResource(kDummyDefaultResourceId);
-  StartDataRequest("foobar", base::BindOnce(&DefaultResourceFoobarCallback));
-  StartDataRequest("strings.js",
-                   base::BindOnce(&DefaultResourceStringsCallback));
+  StartDataRequest("", base::BindOnce(&DefaultResourceCallback));
+  StartDataRequest("foobar", base::BindOnce(&DefaultResourceCallback));
+  StartDataRequest("strings.js", base::BindOnce(&NullCallback));
 }
 
 void NamedResourceFoobarCallback(scoped_refptr<base::RefCountedMemory> data) {
@@ -170,16 +174,35 @@ void NamedResourceFoobarCallback(scoped_refptr<base::RefCountedMemory> data) {
   EXPECT_NE(result.find(kDummyResource), std::string::npos);
 }
 
-void NamedResourceStringsCallback(scoped_refptr<base::RefCountedMemory> data) {
-  std::string result(base::as_string_view(*data));
-  EXPECT_NE(result.find(kDummyDefaultResource), std::string::npos);
-}
-
 TEST_F(WebUIDataSourceTest, NamedResource) {
   source()->SetDefaultResource(kDummyDefaultResourceId);
   source()->AddResourcePath("foobar", kDummyResourceId);
   StartDataRequest("foobar", base::BindOnce(&NamedResourceFoobarCallback));
-  StartDataRequest("strings.js", base::BindOnce(&NamedResourceStringsCallback));
+  StartDataRequest("strings.js", base::BindOnce(&NullCallback));
+}
+
+TEST_F(WebUIDataSourceTest, AddResourcePathsPreservesOverwriteSemantics) {
+  constexpr webui::ResourcePath kInitialResources[] = {
+      {"same-batch.js", kDummyResourceId},
+      {"a.js", kDummyResourceId},
+      {"same-batch.js", kDummyJSResourceId},
+      {"across-batches.js", kDummyResourceId},
+  };
+  constexpr webui::ResourcePath kOverridingResources[] = {
+      {"across-batches.js", kDummyJSResourceId},
+      {"existing.js", kDummyJSResourceId},
+  };
+  source()->AddResourcePath("existing.js", kDummyResourceId);
+
+  source()->AddResourcePaths(kInitialResources);
+  source()->AddResourcePaths(kOverridingResources);
+
+  const auto& resource_map = source()->path_to_idr_map();
+  EXPECT_EQ(4u, resource_map.size());
+  EXPECT_EQ(kDummyResourceId, resource_map.at("a.js"));
+  EXPECT_EQ(kDummyJSResourceId, resource_map.at("across-batches.js"));
+  EXPECT_EQ(kDummyJSResourceId, resource_map.at("existing.js"));
+  EXPECT_EQ(kDummyJSResourceId, resource_map.at("same-batch.js"));
 }
 
 void NamedResourceWithQueryStringCallback(
@@ -303,16 +326,16 @@ void NamedResourceBarJSCallback(scoped_refptr<base::RefCountedMemory> data) {
 
 TEST_F(WebUIDataSourceTest, NoSetDefaultResource) {
   // Set an empty path resource instead of a default.
-  source()->AddResourcePath("", kDummyDefaultResourceId);
+  source()->SetDefaultResource(kDummyDefaultResourceId);
   source()->AddResourcePath("foobar.html", kDummyResourceId);
   source()->AddResourcePath("bar.js", kDummyJSResourceId);
 
   // Empty paths return the resource for the empty path.
-  StartDataRequest("", base::BindOnce(&DefaultResourceFoobarCallback));
-  StartDataRequest("/", base::BindOnce(&DefaultResourceFoobarCallback));
+  StartDataRequest("", base::BindOnce(&DefaultResourceCallback));
+  StartDataRequest("/", base::BindOnce(&DefaultResourceCallback));
   // Un-mapped path that does not look like a file request also returns the
   // resource associated with the empty path.
-  StartDataRequest("subpage", base::BindOnce(&DefaultResourceFoobarCallback));
+  StartDataRequest("subpage", base::BindOnce(&DefaultResourceCallback));
   // Paths that are valid filenames succeed and return the file contents.
   StartDataRequest("foobar.html", base::BindOnce(&NamedResourceFoobarCallback));
   StartDataRequest("bar.js", base::BindOnce(&NamedResourceBarJSCallback));
@@ -486,7 +509,7 @@ class LoadWebUIFromDiskTest : public WebUIDataSourceTest {
 
 void LoadFromDiskCallback(scoped_refptr<base::RefCountedMemory> data) {
   std::string result(base::as_string_view(*data));
-  EXPECT_TRUE(base::Contains(result, "hello plain!"));
+  EXPECT_TRUE(result.contains("hello plain!"));
 }
 
 TEST_F(LoadWebUIFromDiskTest, FilepathInfoExists) {

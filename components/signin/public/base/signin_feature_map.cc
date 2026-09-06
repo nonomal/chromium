@@ -20,19 +20,40 @@ namespace {
 // Array of features exposed through the Java SigninFeatures API.
 const base::Feature* const kFeaturesExposedToJava[] = {
     &switches::kCctSignInPrompt,
+    &switches::kCrossDeviceSignin,
+    &switches::kEnableAccountPreviewUseAppAccount,
+    &switches::kEnableActivitylessSigninAllEntryPoint,
+    &switches::kEnableAccountPreviewPreferredAccount,
     &switches::kEnableAddSessionRedirect,
+    &switches::kEnableAiSubscriptionAvatarRing,
     &switches::kEnableSeamlessSignin,
     &switches::kForceStartupSigninPromo,
     &switches::kForceHistoryOptInScreen,
+    &switches::kOpenSystemAccountSettingsDirectly,
     &switches::kSkipCheckForAccountManagementOnSignin,
     &switches::kSyncEnableBookmarksInTransportMode,
-    &switches::kHistoryOptInEducationalTip,
+    &switches::kMakeIdentityManagerSourceOfAccounts,
+    &switches::kMakeIdentityManagerSourceOfAccountsPart2,
     &switches::kMigrateAccountManagerDelegate,
     &switches::kFullscreenSignInPromoUseDate,
     &switches::kSmartEmailLineBreaking,
     &switches::kSupportWebSigninAddSession,
+    &switches::kSignOutDeletesBrowsingData,
+    &switches::kSignOutOfChrome,
     &switches::kSkipRefreshTokenCheckInIdentityManager,
-    &switches::kFRESignInAlternativeSecondaryButtonText,
+    &switches::kChromeAndroidIdentitySurveyFirstRun,
+    &switches::kChromeAndroidIdentitySurveyWeb,
+    &switches::kChromeAndroidIdentitySurveyNtpSigninButton,
+    &switches::kChromeAndroidIdentitySurveyNtpAccountAvatarTap,
+    &switches::kChromeAndroidIdentitySurveyNtpPromo,
+    &switches::kChromeAndroidIdentitySurveyBookmarkPromo,
+    &switches::kEnableWebSigninLoadingDialog,
+    &switches::kForceShowWebSigninLoadingDialog,
+    &switches::kSigninButtonProfileMenu,
+    &switches::kSigninLevelUpButton,
+    &switches::kSupportForcedSigninPolicy,
+    &switches::kProfileDiscOnAllPages,
+    &switches::kSwitchToIncognitoInSettings,
 };
 
 // static
@@ -44,8 +65,8 @@ base::android::FeatureMap* GetFeatureMap() {
 
 }  // namespace
 
-static jlong JNI_SigninFeatureMap_GetNativeMap(JNIEnv* env) {
-  return reinterpret_cast<jlong>(GetFeatureMap());
+static int64_t JNI_SigninFeatureMap_GetNativeMap(JNIEnv* env) {
+  return reinterpret_cast<int64_t>(GetFeatureMap());
 }
 
 }  // namespace signin

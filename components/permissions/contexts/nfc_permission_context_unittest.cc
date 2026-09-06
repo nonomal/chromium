@@ -94,8 +94,10 @@ void NfcPermissionContextTests::RequestNfcPermission(
     bool user_gesture) {
   nfc_permission_context_->RequestPermission(
       std::make_unique<PermissionRequestData>(
-          std::make_unique<ContentSettingPermissionResolver>(
-              ContentSettingsType::MIDI_SYSEX),
+          blink::mojom::PermissionDescriptor::New(
+              blink::mojom::PermissionName::MIDI,
+              blink::mojom::PermissionDescriptorExtension::NewMidi(
+                  blink::mojom::MidiPermissionDescriptor::New(true))),
           id, user_gesture, requesting_frame),
       base::BindOnce(&NfcPermissionContextTests::PermissionResponse,
                      base::Unretained(this), id));
@@ -210,17 +212,20 @@ bool NfcPermissionContextTests::HasActivePrompt() {
 }
 
 void NfcPermissionContextTests::AcceptPrompt() {
-  PermissionRequestManager::FromWebContents(web_contents())->Accept();
+  PermissionRequestManager::FromWebContents(web_contents())
+      ->Accept(/*prompt_options=*/std::monostate());
   base::RunLoop().RunUntilIdle();
 }
 
 void NfcPermissionContextTests::DenyPrompt() {
-  PermissionRequestManager::FromWebContents(web_contents())->Deny();
+  PermissionRequestManager::FromWebContents(web_contents())
+      ->Deny(/*prompt_options=*/std::monostate());
   base::RunLoop().RunUntilIdle();
 }
 
 void NfcPermissionContextTests::ClosePrompt() {
-  PermissionRequestManager::FromWebContents(web_contents())->Dismiss();
+  PermissionRequestManager::FromWebContents(web_contents())
+      ->Dismiss(/*prompt_options=*/std::monostate());
   base::RunLoop().RunUntilIdle();
 }
 
@@ -249,6 +254,37 @@ TEST_F(NfcPermissionContextTests, SinglePermissionPromptFailsOnInsecureOrigin) {
   EXPECT_FALSE(HasActivePrompt());
   RequestNfcPermission(RequestID(0), requesting_frame, true);
   ASSERT_FALSE(HasActivePrompt());
+}
+
+TEST_F(NfcPermissionContextTests, SinglePermissionPromptFailsOnOpaqueOrigin) {
+  GURL requesting_frame("data:text/html,test");
+  NavigateAndCommit(requesting_frame);
+  RequestManagerDocumentLoadCompleted();
+
+  EXPECT_FALSE(HasActivePrompt());
+  RequestNfcPermission(RequestID(0), requesting_frame,
+                       /*user_gesture=*/true);
+  ASSERT_FALSE(HasActivePrompt());
+  CheckPermissionMessageSent(/*request_id=*/0, /*allowed=*/false);
+}
+
+TEST_F(NfcPermissionContextTests, SinglePermissionPromptFailsOnChildFrame) {
+  GURL requesting_frame("https://www.example.com/nfc");
+  NavigateAndCommit(requesting_frame);
+  RequestManagerDocumentLoadCompleted();
+
+  content::RenderFrameHost* child_frame =
+      content::RenderFrameHostTester::For(main_rfh())->AppendChild("child");
+
+  EXPECT_FALSE(HasActivePrompt());
+  RequestNfcPermission(
+      PermissionRequestID(child_frame->GetGlobalId(),
+                          permissions::PermissionRequestID::RequestLocalId(0)),
+      requesting_frame, /*user_gesture=*/true);
+  ASSERT_FALSE(HasActivePrompt());
+  CheckPermissionMessageSentInternal(
+      static_cast<MockRenderProcessHost*>(child_frame->GetProcess()),
+      /*request_id=*/0, /*allowed=*/false);
 }
 
 #if BUILDFLAG(IS_ANDROID)

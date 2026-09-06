@@ -4,7 +4,8 @@
 
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/grid/grid_mediator_test.h"
 
-#import "base/containers/contains.h"
+#import <algorithm>
+
 #import "base/test/ios/wait_util.h"
 #import "components/saved_tab_groups/test_support/fake_tab_group_sync_service.h"
 #import "components/saved_tab_groups/test_support/mock_tab_group_sync_service.h"
@@ -111,7 +112,7 @@ void GridMediatorTestClass::SetUp() {
                             base::BindRepeating(&CreateMockSyncService));
   builder.AddTestingFactory(
       AuthenticationServiceFactory::GetInstance(),
-      AuthenticationServiceFactory::GetFactoryWithDelegate(
+      AuthenticationServiceFactory::GetFactoryWithDelegateForTesting(
           std::make_unique<FakeAuthenticationServiceDelegate>()));
   builder.AddTestingFactory(ios::HistoryServiceFactory::GetInstance(),
                             ios::HistoryServiceFactory::GetDefaultFactory());
@@ -122,10 +123,10 @@ void GridMediatorTestClass::SetUp() {
       base::BindOnce(&CreateFakeTabGroupSyncService));
   builder.AddTestingFactory(TipsManagerIOSFactory::GetInstance(),
                             TipsManagerIOSFactory::GetDefaultFactory());
-  profile_ = std::move(builder).Build();
+  profile_ = profile_manager_.AddProfileWithBuilder(std::move(builder));
   tab_group_sync_service_ = static_cast<tab_groups::FakeTabGroupSyncService*>(
-      tab_groups::TabGroupSyncServiceFactory::GetForProfile(profile_.get()));
-  tab_group_service_ = TabGroupServiceFactory::GetForProfile(profile_.get());
+      tab_groups::TabGroupSyncServiceFactory::GetForProfile(profile_));
+  tab_group_service_ = TabGroupServiceFactory::GetForProfile(profile_);
   // Price Drops are only available to signed in MSBB users.
   profile_->GetPrefs()->SetBoolean(
       unified_consent::prefs::kUrlKeyedAnonymizedDataCollectionEnabled, true);
@@ -134,16 +135,14 @@ void GridMediatorTestClass::SetUp() {
       FakeSystemIdentityManager::FromSystemIdentityManager(
           GetApplicationContext()->GetSystemIdentityManager());
   system_identity_manager->AddIdentity(identity);
-  auth_service_ = AuthenticationServiceFactory::GetForProfile(profile_.get());
-  auth_service_->SignIn(identity, signin_metrics::AccessPoint::kUnknown);
-  scene_state_ = OCMClassMock([SceneState class]);
-  OCMStub([scene_state_ sceneSessionID]).andReturn(@(kIdentifier));
+  auth_service_ = AuthenticationServiceFactory::GetForProfile(profile_);
+  auth_service_->SignIn(identity, signin_metrics::AccessPoint::kStartPage);
+  scene_state_ = [[SceneState alloc] init];
   browser_ = std::make_unique<TestBrowser>(
-      profile_.get(), scene_state_,
-      std::make_unique<BrowserWebStateListDelegate>(profile_.get()));
+      profile_, scene_state_,
+      std::make_unique<BrowserWebStateListDelegate>(profile_));
   other_browser_ = std::make_unique<TestBrowser>(
-      profile_.get(), nil,
-      std::make_unique<BrowserWebStateListDelegate>(profile_.get()));
+      profile_, nil, std::make_unique<BrowserWebStateListDelegate>(profile_));
   scene_loader_ = std::make_unique<TestSceneUrlLoadingService>();
   scene_loader_->current_browser_ = browser_.get();
   url_loading_delegate_ = [[FakeURLLoadingDelegate alloc] init];
@@ -160,9 +159,9 @@ void GridMediatorTestClass::SetUp() {
   loader_->SetSceneService(scene_loader_.get());
   loader_->SetDelegate(url_loading_delegate_);
 
-  SessionRestorationServiceFactory::GetForProfile(profile_.get())
-      ->SetSessionID(browser_.get(), kIdentifier);
-  browser_list_ = BrowserListFactory::GetForProfile(profile_.get());
+  SessionRestorationServiceFactory::GetForProfile(profile_)->SetSessionID(
+      browser_.get(), kIdentifier);
+  browser_list_ = BrowserListFactory::GetForProfile(profile_);
   browser_list_->AddBrowser(browser_.get());
   browser_list_->AddBrowser(other_browser_.get());
 
@@ -174,7 +173,7 @@ void GridMediatorTestClass::SetUp() {
     auto web_state = CreateFakeWebStateWithURL(GURL(urls[i]));
     web::WebStateID identifier = web_state.get()->GetUniqueIdentifier();
     // Tab IDs should be unique.
-    ASSERT_FALSE(base::Contains(identifiers, identifier));
+    ASSERT_FALSE(std::ranges::contains(identifiers, identifier));
     identifiers.push_back(identifier);
     browser_->GetWebStateList()->InsertWebState(
         std::move(web_state), WebStateList::InsertionParams::AtIndex(i));
@@ -199,16 +198,16 @@ GridMediatorTestClass::CreateFakeWebStateWithURL(const GURL& url) {
     web_state->SetWebFramesManager(
         content_world, std::make_unique<web::FakeWebFramesManager>());
   }
-  web_state->SetBrowserState(profile_.get());
+  web_state->SetBrowserState(profile_);
   web_state->SetNavigationItemCount(1);
   web_state->SetCurrentURL(url);
   return web_state;
 }
 
 void GridMediatorTestClass::TearDown() {
+  SessionRestorationServiceFactory::GetForProfile(profile_)->Disconnect(
+      browser_.get());
   PlatformTest::TearDown();
-  SessionRestorationServiceFactory::GetForProfile(profile_.get())
-      ->Disconnect(browser_.get());
 }
 
 bool GridMediatorTestClass::WaitForConsumerUpdates(size_t expected_count) {

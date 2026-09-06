@@ -15,6 +15,10 @@ if (enable_rust) {
       ":rust_gtest_interop_cpp",
       ":rust_gtest_interop_rust",
     ]
+
+    # TODO(crbug.com/462501862): This is needed to disable the tests if ASAN
+    # is enabled on macs. It can be removed once that's fixed.
+    public_configs = [ "//base:sanitizer_buildflags_rust_cfg" ]
   }
 
   static_library("rust_gtest_interop_cpp") {
@@ -65,16 +69,25 @@ if (enable_rust) {
     visibility = [ ":*" ]
   }
 
-  test("rust_gtest_interop_unittests") {
-    sources = [
-      "rust_gtest_interop_unittest.rs",
-      "rust_gtest_interop_unittest_main.cc",
-    ]
+  source_set("cpp_unittests") {
+    testonly = true
+    sources = [ "rust_gtest_interop_unittest.cc" ]
+    deps = [ "//testing/gtest" ]
+  }
+
+  rust_static_library("rust_unittests") {
+    testonly = true
+    is_gtest_unittests = true
+    crate_root = "rust_gtest_interop_unittest.rs"
+    sources = [ crate_root ]
+    deps = [ "//testing/rust_gtest_interop" ]
+  }
+
+  group("unittests") {
+    testonly = true
     deps = [
-      "//base",
-      "//base/test:test_support",
-      "//build:blink_buildflags",
-      "//testing/gtest",
+      ":cpp_unittests",
+      ":rust_unittests",
     ]
   }
 }

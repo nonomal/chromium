@@ -21,8 +21,8 @@
 #include "chrome/browser/interstitials/security_interstitial_page_test_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/chrome_security_blocking_page_factory.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -30,7 +30,6 @@
 #include "components/captive_portal/core/captive_portal_detector.h"
 #include "components/prefs/pref_service.h"
 #include "components/security_interstitials/content/security_interstitial_tab_helper.h"
-#include "components/security_state/content/security_state_tab_helper.h"
 #include "components/security_state/core/security_state.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
@@ -156,7 +155,7 @@ void CaptivePortalBlockingPageTest::TestInterstitial(
     ExpectLoginURL expect_login_url,
     const std::string& expected_login_hostname) {
   content::WebContents* contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
+      browser()->GetTabStripModel()->GetActiveWebContents();
   DCHECK(contents);
 
   throttle_inserter_ =
@@ -253,7 +252,7 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBlockingPageTest, WiFi_SSID_LoginURL) {
                    EXPECT_WIFI_YES, EXPECT_WIFI_SSID_YES, EXPECT_LOGIN_URL_YES);
 }
 
-// Flaky on mac: https://crbug.com/690170
+// Flaky on mac: https://crbug.com/41300584
 #if BUILDFLAG(IS_MAC)
 #define MAYBE_WiFi_NoSSID_LoginURL DISABLED_WiFi_NoSSID_LoginURL
 #else
@@ -268,7 +267,7 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalBlockingPageTest,
                    EXPECT_WIFI_SSID_NO, EXPECT_LOGIN_URL_YES);
 }
 
-// Flaky on mac: https://crbug.com/690125
+// Flaky on mac: https://crbug.com/41300559
 #if BUILDFLAG(IS_MAC)
 #define MAYBE_WiFi_SSID_NoLoginURL DISABLED_WiFi_SSID_NoLoginURL
 #else

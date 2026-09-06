@@ -10,15 +10,16 @@
 
 #include "base/callback_list.h"
 #include "base/functional/callback_forward.h"
+#include "base/memory/raw_ref.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
 #include "base/sequence_checker.h"
 #include "base/thread_annotations.h"
 #include "base/values.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_observer.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/reporting/metrics/reporting_settings.h"
+
+class PrefService;
 
 namespace reporting {
 
@@ -29,7 +30,8 @@ namespace reporting {
 // its dependency on local_state's pref store.
 class LocalStateReportingSettings : public ReportingSettings {
  public:
-  LocalStateReportingSettings();
+  // `local_state` must be non-null and must outlive `this`.
+  explicit LocalStateReportingSettings(PrefService* local_state);
   LocalStateReportingSettings(const LocalStateReportingSettings& other) =
       delete;
   LocalStateReportingSettings& operator=(
@@ -44,7 +46,7 @@ class LocalStateReportingSettings : public ReportingSettings {
   bool GetBoolean(const std::string& path, bool* out_value) const override;
   bool GetInteger(const std::string& path, int* out_value) const override;
   bool GetList(const std::string& path,
-               const base::Value::List** out_value) const override;
+               const base::ListValue** out_value) const override;
 
   // Only bool and List are allowed, otherwise will return false.
   bool GetReportingEnabled(const std::string& path,
@@ -59,6 +61,8 @@ class LocalStateReportingSettings : public ReportingSettings {
   void OnPrefChanged(const std::string& path);
 
   SEQUENCE_CHECKER(sequence_checker_);
+
+  const raw_ref<PrefService> local_state_;
 
   PrefChangeRegistrar pref_change_registrar_;
 

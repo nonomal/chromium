@@ -11,7 +11,7 @@
 #import "components/autofill/core/browser/country_type.h"
 #import "components/autofill/core/browser/form_parsing/determine_regex_types.h"
 #import "components/autofill/core/browser/form_structure.h"
-#import "components/autofill/core/browser/test_utils/autofill_test_utils.h"
+#import "components/autofill/core/browser/test_utils/autofill_test_util.h"
 #import "components/autofill/core/common/language_code.h"
 #import "ios/web_view/internal/autofill/cwv_autofill_form_internal.h"
 #import "ios/web_view/test/test_with_locale_and_resources.h"
@@ -39,7 +39,7 @@ TEST_F(CWVAutofillFormTest, Initialization) {
       std::make_unique<autofill::FormStructure>(form_data);
   const autofill::RegexPredictions regex_predictions = DetermineRegexTypes(
       autofill::GeoIpCountryCode(""), autofill::LanguageCode(""),
-      form_structure->ToFormData(), nullptr);
+      form_structure->ToFormData(), nullptr, /*ignore_small_forms=*/true);
   regex_predictions.ApplyTo(form_structure->fields());
   form_structure->RationalizeAndAssignSections(
       autofill::GeoIpCountryCode(""), autofill::LanguageCode(""), nullptr);

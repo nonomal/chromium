@@ -15,7 +15,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -47,9 +46,24 @@ class CONTENT_EXPORT LockManager : public blink::mojom::LockManager {
   LockManager(const LockManager&) = delete;
   LockManager& operator=(const LockManager&) = delete;
 
+  class Observer {
+   public:
+    // Called when another client attempts to acquire a held lock or when the
+    // current lock state is queried. Returns true if the holding client was
+    // evicted from the Back-Forward Cache to resolve the contention.
+    virtual bool OnLockContention() { return false; }
+
+   protected:
+    virtual ~Observer() = default;
+  };
+
   // Binds |receiver| to this LockManager. |receiver| belongs to a frame or
   // worker at |lock_group_id|.
   void BindReceiver(LockGroupIdType lock_group_id,
+                    mojo::PendingReceiver<blink::mojom::LockManager> receiver);
+
+  void BindReceiver(LockGroupIdType lock_group_id,
+                    const base::UnguessableToken& token,
                     mojo::PendingReceiver<blink::mojom::LockManager> receiver);
 
   // Request a lock. When the lock is acquired, |callback| will be invoked with
@@ -65,6 +79,16 @@ class CONTENT_EXPORT LockManager : public blink::mojom::LockManager {
 
   // Called to request a snapshot of the current lock state for a lock group.
   void QueryState(QueryStateCallback callback) override;
+
+  // Registers an observer for the client token. This token must match the
+  // one provided when binding the LockManager receiver (e.g., via
+  // BindReceiver).
+  //
+  // The observer is notified only when a lock held by the matching client is
+  // contended. It is safe to remove an observer during a callback, because each
+  // notification performs a fresh map lookup.
+  void AddLockObserver(const base::UnguessableToken& token, Observer* observer);
+  void RemoveLockObserver(const base::UnguessableToken& token);
 
  private:
   // Internal representation of a lock request or held lock.
@@ -94,6 +118,8 @@ class CONTENT_EXPORT LockManager : public blink::mojom::LockManager {
 
   int64_t next_lock_id_ = 0;
   std::map<LockGroupIdType, LockGroupState> lock_groups_;
+
+  base::flat_map<std::string, Observer*> client_observer_map_;
 
   SEQUENCE_CHECKER(sequence_checker_);
   base::WeakPtrFactory<LockManager> weak_ptr_factory_{this};
@@ -172,10 +198,10 @@ class LockManager<LockGroupIdType>::Lock {
   // request pipe.
   void Grant(LockManager<LockGroupIdType>* lock_manager,
              LockGroupIdType lock_group_id) {
-    DCHECK(lock_manager);
-    DCHECK(!lock_manager_);
-    DCHECK(request_);
-    DCHECK(!handle_);
+    CHECK(lock_manager, base::NotFatalUntil::M159);
+    CHECK(!lock_manager_, base::NotFatalUntil::M159);
+    CHECK(request_, base::NotFatalUntil::M159);
+    CHECK(!handle_, base::NotFatalUntil::M159);
 
     lock_manager_ = lock_manager->weak_ptr_factory_.GetWeakPtr();
 
@@ -189,9 +215,9 @@ class LockManager<LockGroupIdType>::Lock {
   // Break a granted lock. This terminates the connection, signaling an error
   // on the other end of the pipe.
   void Break() {
-    DCHECK(!request_);
-    DCHECK(handle_);
-    DCHECK(lock_manager_);
+    CHECK(!request_, base::NotFatalUntil::M159);
+    CHECK(handle_, base::NotFatalUntil::M159);
+    CHECK(lock_manager_, base::NotFatalUntil::M159);
 
     LockHandleImpl<LockGroupIdType>* impl =
         static_cast<LockHandleImpl<LockGroupIdType>*>(handle_->impl());
@@ -241,13 +267,13 @@ class LockManager<LockGroupIdType>::LockGroupState {
       : lock_manager_(lock_manager) {}
   ~LockGroupState() = default;
 
-  // Helper function for breaking the lock at the front of a given request
-  // queue.
-  void BreakFront(std::list<Lock>& request_queue) {
-    Lock& broken_lock = request_queue.front();
-    lock_id_to_iterator_.erase(broken_lock.lock_id());
-    broken_lock.Break();
-    request_queue.pop_front();
+  // Helper function for breaking the lock at the given iterator.
+  typename std::list<Lock>::iterator BreakLock(
+      std::list<Lock>& request_queue,
+      typename std::list<Lock>::iterator iterator) {
+    lock_id_to_iterator_.erase(iterator->lock_id());
+    iterator->Break();
+    return request_queue.erase(iterator);
   }
 
   // Steals a lock for a given resource.
@@ -260,10 +286,10 @@ class LockManager<LockGroupIdType>::LockGroupState {
                    mojo::AssociatedRemote<blink::mojom::LockRequest> request,
                    const ReceiverState& receiver_state) {
     // Preempting shared locks is not supported.
-    DCHECK_EQ(mode, LockMode::EXCLUSIVE);
+    CHECK_EQ(mode, LockMode::EXCLUSIVE, base::NotFatalUntil::M159);
     std::list<Lock>& request_queue = resource_names_to_requests_[name];
     while (!request_queue.empty() && request_queue.front().is_granted()) {
-      BreakFront(request_queue);
+      BreakLock(request_queue, request_queue.begin());
     }
     request_queue.emplace_front(name, mode, lock_id, receiver_state,
                                 std::move(request));
@@ -278,12 +304,34 @@ class LockManager<LockGroupIdType>::LockGroupState {
                   mojo::AssociatedRemote<blink::mojom::LockRequest> request,
                   WaitMode wait,
                   const ReceiverState& receiver_state) {
-    DCHECK(wait != WaitMode::PREEMPT);
+    CHECK(wait != WaitMode::PREEMPT, base::NotFatalUntil::M159);
     std::list<Lock>& request_queue = resource_names_to_requests_[name];
     bool can_grant = request_queue.empty() ||
                      (request_queue.back().is_granted() &&
                       request_queue.back().mode() == LockMode::SHARED &&
                       mode == LockMode::SHARED);
+
+    if (!can_grant) {
+      auto holder_it = request_queue.begin();
+      while (holder_it != request_queue.end() && holder_it->is_granted()) {
+        auto observer_it =
+            lock_manager_->client_observer_map_.find(holder_it->client_id());
+        // If the lock cannot be granted immediately, notify the current
+        // holders. This triggers eviction for holders in BFCache and returns
+        // true, allowing us to synchronously release their locks.
+        if (observer_it != lock_manager_->client_observer_map_.end() &&
+            observer_it->second->OnLockContention()) {
+          holder_it = BreakLock(request_queue, holder_it);
+        } else {
+          ++holder_it;
+        }
+      }
+      // Re-evaluate can_grant after evicting any BFCached clients.
+      can_grant = request_queue.empty() ||
+                  (request_queue.back().is_granted() &&
+                   request_queue.back().mode() == LockMode::SHARED &&
+                   mode == LockMode::SHARED);
+    }
 
     if (!can_grant && wait == WaitMode::NO_WAIT) {
       request->Failed();
@@ -325,7 +373,7 @@ class LockManager<LockGroupIdType>::LockGroupState {
         break;
       }
     }
-    DCHECK(found);
+    CHECK(found, base::NotFatalUntil::M159);
 #endif
 
     request_queue.erase(lock_it);
@@ -346,12 +394,13 @@ class LockManager<LockGroupIdType>::LockGroupState {
     if (request_queue.front().mode() == LockMode::EXCLUSIVE) {
       request_queue.front().Grant(lock_manager_, lock_group_id);
     } else {
-      DCHECK(request_queue.front().mode() == LockMode::SHARED);
+      CHECK(request_queue.front().mode() == LockMode::SHARED,
+            base::NotFatalUntil::M159);
       for (auto grantee = request_queue.begin();
            grantee != request_queue.end() &&
            grantee->mode() == LockMode::SHARED;
            ++grantee) {
-        DCHECK(!grantee->is_granted());
+        CHECK(!grantee->is_granted(), base::NotFatalUntil::M159);
         grantee->Grant(lock_manager_, lock_group_id);
       }
     }
@@ -423,10 +472,18 @@ void LockManager<LockGroupIdType>::BindReceiver(
 
   // TODO(jsbell): This should reflect the 'environment id' from HTML,
   // and be the same opaque string seen in Service Worker client ids.
-  const std::string client_id =
-      base::Uuid::GenerateRandomV4().AsLowercaseString();
+  const base::UnguessableToken token = base::UnguessableToken::Create();
 
-  receivers_.Add(this, std::move(receiver), {client_id, lock_group_id});
+  BindReceiver(lock_group_id, std::move(token), std::move(receiver));
+}
+
+template <typename LockGroupIdType>
+void LockManager<LockGroupIdType>::BindReceiver(
+    LockGroupIdType lock_group_id,
+    const base::UnguessableToken& token,
+    mojo::PendingReceiver<blink::mojom::LockManager> receiver) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  receivers_.Add(this, std::move(receiver), {token.ToString(), lock_group_id});
 }
 
 template <typename LockGroupIdType>
@@ -455,7 +512,7 @@ void LockManager<LockGroupIdType>::RequestLock(
     return;
   }
 
-  if (!base::Contains(lock_groups_, context.lock_group_id)) {
+  if (!lock_groups_.contains(context.lock_group_id)) {
     lock_groups_.emplace(context.lock_group_id, this);
   }
 
@@ -504,17 +561,38 @@ void LockManager<LockGroupIdType>::QueryState(QueryStateCallback callback) {
                             std::vector<blink::mojom::LockInfoPtr>());
     return;
   }
-  DCHECK(!lock_group_id.is_null());
+  CHECK(!lock_group_id.is_null(), base::NotFatalUntil::M159);
   LockGroupState& state = lock_group_id_it->second;
   auto requested_held_pair = state.Snapshot();
+  for (const auto& lock_info : requested_held_pair.second) {
+    auto observer_it = client_observer_map_.find(lock_info->client_id);
+    if (observer_it != client_observer_map_.end()) {
+      observer_it->second->OnLockContention();
+    }
+  }
   std::move(callback).Run(std::move(requested_held_pair.first),
                           std::move(requested_held_pair.second));
 }
 
 template <typename LockGroupIdType>
+void LockManager<LockGroupIdType>::AddLockObserver(
+    const base::UnguessableToken& token,
+    Observer* observer) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  client_observer_map_[token.ToString()] = observer;
+}
+
+template <typename LockGroupIdType>
+void LockManager<LockGroupIdType>::RemoveLockObserver(
+    const base::UnguessableToken& token) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  client_observer_map_.erase(token.ToString());
+}
+
+template <typename LockGroupIdType>
 int64_t LockManager<LockGroupIdType>::NextLockId() {
   int64_t lock_id = ++next_lock_id_;
-  DCHECK_GT(lock_id, kPreemptiveLockId);
+  CHECK_GT(lock_id, kPreemptiveLockId, base::NotFatalUntil::M159);
   return lock_id;
 }
 

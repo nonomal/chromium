@@ -146,9 +146,9 @@ class SmartCardPermissionContextTest : public testing::Test {
 
   void TearDown() override {
     profile_.GetTestingPrefService()->SetManagedPref(
-        prefs::kManagedSmartCardConnectAllowedForUrls, base::Value::List());
+        prefs::kManagedSmartCardConnectAllowedForUrls, base::ListValue());
     profile_.GetTestingPrefService()->SetManagedPref(
-        prefs::kManagedSmartCardConnectBlockedForUrls, base::Value::List());
+        prefs::kManagedSmartCardConnectBlockedForUrls, base::ListValue());
   }
 
   bool HasReaderPermission(SmartCardPermissionContext& context,
@@ -172,13 +172,13 @@ class SmartCardPermissionContextTest : public testing::Test {
   void SetAllowlistedByPolicy(const url::Origin& origin) {
     profile_.GetTestingPrefService()->SetManagedPref(
         prefs::kManagedSmartCardConnectAllowedForUrls,
-        base::Value::List().Append(origin.Serialize()));
+        base::ListValue().Append(origin.Serialize()));
   }
 
   void SetBlocklistedByPolicy(const url::Origin& origin) {
     profile_.GetTestingPrefService()->SetManagedPref(
         prefs::kManagedSmartCardConnectBlockedForUrls,
-        base::Value::List().Append(origin.Serialize()));
+        base::ListValue().Append(origin.Serialize()));
   }
 
   std::unique_ptr<KeyedService> CreateFakeSmartCardReaderTracker(
@@ -583,5 +583,59 @@ TEST_F(SmartCardPermissionContextTest, EphemeralGrantExpiryOnLongTimeout) {
       "SmartCard.OneTimePermissionExpiryReason",
       SmartCardOneTimePermissionExpiryReason::
           kSmartCardPermissionExpiredMaxLifetimeReached,
+      1);
+}
+
+TEST_F(SmartCardPermissionContextTest, ClearBrowsingDataStaleCache) {
+  const auto kOrigin = url::Origin::Create(GURL("https://google.com"));
+  const std::string kReaderName = "Reader A";
+
+  SmartCardPermissionContext context(&profile_);
+
+  EXPECT_FALSE(HasReaderPermission(context, kOrigin, kReaderName));
+
+  GrantPersistentReaderPermission(context, kOrigin, kReaderName);
+  context.FlushScheduledSaveSettingsCalls();
+  EXPECT_TRUE(HasReaderPermission(context, kOrigin, kReaderName));
+
+  // Simulate Clear Browsing Data.
+  auto* map = HostContentSettingsMapFactory::GetForProfile(&profile_);
+  map->ClearSettingsForOneTypeWithPredicate(
+      ContentSettingsType::SMART_CARD_DATA, base::Time(), base::Time::Max(),
+      HostContentSettingsMap::PatternSourcePredicate());
+  map->ClearSettingsForOneTypeWithPredicate(
+      ContentSettingsType::SMART_CARD_GUARD, base::Time(), base::Time::Max(),
+      HostContentSettingsMap::PatternSourcePredicate());
+
+  // Check that permission was revoked.
+  EXPECT_FALSE(HasReaderPermission(context, kOrigin, kReaderName));
+}
+
+TEST_F(SmartCardPermissionContextTest, ClearBrowsingDataEphemeralDevice) {
+  const auto kOrigin = url::Origin::Create(GURL("https://google.com"));
+  const std::string kReaderName = "Reader A";
+
+  SmartCardPermissionContext context(&profile_);
+
+  EXPECT_FALSE(HasReaderPermission(context, kOrigin, kReaderName));
+
+  GrantEphemeralReaderPermission(context, kOrigin, kReaderName);
+  EXPECT_TRUE(HasReaderPermission(context, kOrigin, kReaderName));
+
+  // Simulate Clear Browsing Data.
+  auto* map = HostContentSettingsMapFactory::GetForProfile(&profile_);
+  map->ClearSettingsForOneTypeWithPredicate(
+      ContentSettingsType::SMART_CARD_DATA, base::Time(), base::Time::Max(),
+      HostContentSettingsMap::PatternSourcePredicate());
+  map->ClearSettingsForOneTypeWithPredicate(
+      ContentSettingsType::SMART_CARD_GUARD, base::Time(), base::Time::Max(),
+      HostContentSettingsMap::PatternSourcePredicate());
+
+  // Check that permission was revoked.
+  EXPECT_FALSE(HasReaderPermission(context, kOrigin, kReaderName));
+  histogram_tester_.ExpectUniqueSample(
+      "SmartCard.OneTimePermissionExpiryReason",
+      SmartCardOneTimePermissionExpiryReason::
+          kSmartCardPermissionExpiredSettingsChanged,
       1);
 }

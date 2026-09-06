@@ -18,6 +18,7 @@
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
 #include "base/values.h"
+#include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -35,15 +36,16 @@ namespace permissions {
 // is associated with a more complicated grant than simple allow/deny. This is
 // typically granted through a chooser-style UI.
 // Subclasses must define the structure of the objects that are stored.
-class ObjectPermissionContextBase : public KeyedService {
+class ObjectPermissionContextBase : public KeyedService,
+                                    public content_settings::Observer {
  public:
   struct Object {
     Object(const url::Origin& origin,
-           base::Value::Dict value,
+           base::DictValue value,
            content_settings::SettingSource source,
            bool incognito);
     // DEPRECATED.
-    // TODO(crbug.com/40172729): Migrate value to base::Value::Dict.
+    // TODO(crbug.com/40172729): Migrate value to base::DictValue.
     Object(const url::Origin& origin,
            base::Value value,
            content_settings::SettingSource source,
@@ -52,7 +54,7 @@ class ObjectPermissionContextBase : public KeyedService {
     std::unique_ptr<Object> Clone();
 
     GURL origin;
-    base::Value::Dict value;
+    base::DictValue value;
     content_settings::SettingSource source;
     bool incognito;
   };
@@ -122,14 +124,13 @@ class ObjectPermissionContextBase : public KeyedService {
   // TODO(crbug.com/40755589): Combine GrantObjectPermission and
   // UpdateObjectPermission methods into key-based GrantOrUpdateObjectPermission
   // once backend is updated to make key-based methods more efficient.
-  void GrantObjectPermission(const url::Origin& origin,
-                             base::Value::Dict object);
+  void GrantObjectPermission(const url::Origin& origin, base::DictValue object);
 
   // Updates |old_object| with |new_object| for |origin|, and writes the value
   // into |host_content_settings_map_|.
   void UpdateObjectPermission(const url::Origin& origin,
-                              const base::Value::Dict& old_object,
-                              base::Value::Dict new_object);
+                              const base::DictValue& old_object,
+                              base::DictValue new_object);
 
   // Revokes |origin|'s permission to access |object|.
   //
@@ -139,7 +140,7 @@ class ObjectPermissionContextBase : public KeyedService {
   // TODO(crbug.com/40755589): Remove this method once backend is updated
   // to make key-based methods more efficient.
   virtual void RevokeObjectPermission(const url::Origin& origin,
-                                      const base::Value::Dict& object);
+                                      const base::DictValue& object);
 
   // Revokes |origin|'s permission to access the object corresponding to |key|.
   // This method should only be called if |GetKeyForObject()| is overridden to
@@ -160,20 +161,30 @@ class ObjectPermissionContextBase : public KeyedService {
   virtual bool RevokeObjectPermissions(const url::Origin& origin);
 
   // Returns a string which is used to uniquely identify this object.
-  virtual std::string GetKeyForObject(const base::Value::Dict& object) = 0;
+  virtual std::string GetKeyForObject(const base::DictValue& object) = 0;
 
   // Validates the structure of an object read from
   // |host_content_settings_map_|.
-  virtual bool IsValidObject(const base::Value::Dict& object) = 0;
+  virtual bool IsValidObject(const base::DictValue& object) = 0;
 
   // Gets the human-readable name for a given object.
   virtual std::u16string GetObjectDisplayName(
-      const base::Value::Dict& object) = 0;
+      const base::DictValue& object) = 0;
 
   // Triggers the immediate flushing of all scheduled save setting operations.
   // To be called when the host_content_settings_map_ is about to become
-  // unusable (e.g. browser context shutting down).
+  // unusable (e.g. browser context shutting down) or before invalidating
+  // the in-memory cache to prevent losing unsaved changes.
   void FlushScheduledSaveSettingsCalls();
+
+  // KeyedService:
+  void Shutdown() override;
+
+  // content_settings::Observer implementation:
+  void OnContentSettingChanged(
+      const ContentSettingsPattern& primary_pattern,
+      const ContentSettingsPattern& secondary_pattern,
+      ContentSettingsTypeSet content_type_set) override;
 
  protected:
   // TODO(odejesush): Use this method in all derived classes instead of using a
@@ -181,14 +192,23 @@ class ObjectPermissionContextBase : public KeyedService {
   bool IsOffTheRecord();
   void NotifyPermissionChanged();
   void NotifyPermissionRevoked(const url::Origin& origin);
+  virtual std::vector<url::Origin> RevokeEphemeralPermissions(
+      const ContentSettingsPattern& primary_pattern,
+      bool unconditional);
 
   const std::optional<ContentSettingsType> guard_content_settings_type_;
   const ContentSettingsType data_content_settings_type_;
-  base::ObserverList<PermissionObserver> permission_observer_list_;
+  // TODO(crbug.com/484371187): Investigate if reentrancy can be removed.
+  base::ObserverList<
+      PermissionObserver,
+      /*check_empty=*/false,
+      /*allow_reentrancy=*/
+      base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>
+      permission_observer_list_;
 
  private:
-  base::Value::Dict GetWebsiteSetting(const url::Origin& origin,
-                                      content_settings::SettingInfo* info);
+  base::DictValue GetWebsiteSetting(const url::Origin& origin,
+                                    content_settings::SettingInfo* info);
   void SaveWebsiteSetting(const url::Origin& origin);
   void ScheduleSaveWebsiteSetting(const url::Origin& origin);
   virtual std::vector<std::unique_ptr<Object>> GetWebsiteSettingObjects();
@@ -210,6 +230,13 @@ class ObjectPermissionContextBase : public KeyedService {
 
   // Origins that have a scheduled `SaveWebsiteSetting` call.
   base::flat_set<url::Origin> origins_with_scheduled_save_settings_calls_;
+
+  // True if observing changes to `host_content_settings_map_`.
+  bool is_observing_ = false;
+
+  // Set to true while inside `SaveWebsiteSetting` to ignore observer callbacks
+  // triggered by our own changes.
+  bool ignore_map_callbacks_ = false;
 
   base::WeakPtrFactory<ObjectPermissionContextBase> weak_factory_{this};
 };

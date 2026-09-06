@@ -13,10 +13,10 @@
 #include <vector>
 
 #include "base/check_op.h"
-#include "base/containers/contains.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/strings/span_printf.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
@@ -36,16 +36,17 @@ namespace {
 
 const char* const kChildKinds[] = {"functions", "events"};
 
-base::Value::Dict LoadSchemaDictionary(const std::string& name,
-                                       std::string_view schema) {
+base::DictValue LoadSchemaDictionary(const std::string& name,
+                                     std::string_view schema) {
   auto result = base::JSONReader::ReadAndReturnValueWithError(
       schema, base::JSON_PARSE_CHROMIUM_EXTENSIONS);
 
-  // Tracking down http://crbug.com/121424
+  // Tracking down http://crbug.com/40183984
   char buf[128];
-  base::SpanPrintf(buf, "%s: (%d) '%s'", name.c_str(),
-                   result.has_value() ? static_cast<int>(result->type()) : -1,
-                   !result.has_value() ? result.error().message.c_str() : "");
+  UNSAFE_TODO(base::SpanPrintf(
+      buf, "%s: (%d) '%s'", name.c_str(),
+      result.has_value() ? static_cast<int>(result->type()) : -1,
+      !result.has_value() ? result.error().message.c_str() : ""));
 
   CHECK(result.has_value())
       << result.error().message << " for schema " << schema;
@@ -53,11 +54,11 @@ base::Value::Dict LoadSchemaDictionary(const std::string& name,
   return std::move(*result).TakeDict();
 }
 
-const base::Value::Dict* FindListItem(const base::Value::List& list,
-                                      const std::string& property_name,
-                                      const std::string& property_value) {
+const base::DictValue* FindListItem(const base::ListValue& list,
+                                    const std::string& property_name,
+                                    const std::string& property_value) {
   for (const base::Value& item_value : list) {
-    const base::Value::Dict* item = item_value.GetIfDict();
+    const base::DictValue* item = item_value.GetIfDict();
     CHECK(item) << property_value << "/" << property_name;
     const std::string* value = item->FindStringByDottedPath(property_name);
     if (value && *value == property_value) {
@@ -68,14 +69,14 @@ const base::Value::Dict* FindListItem(const base::Value::List& list,
   return nullptr;
 }
 
-const base::Value::Dict* GetSchemaChild(const base::Value::Dict& schema_node,
-                                        const std::string& child_name) {
+const base::DictValue* GetSchemaChild(const base::DictValue& schema_node,
+                                      const std::string& child_name) {
   for (const char* kind : kChildKinds) {
-    const base::Value::List* list_node = schema_node.FindList(kind);
+    const base::ListValue* list_node = schema_node.FindList(kind);
     if (!list_node) {
       continue;
     }
-    const base::Value::Dict* child_node =
+    const base::DictValue* child_node =
         FindListItem(*list_node, "name", child_name);
     if (child_node) {
       return child_node;
@@ -136,7 +137,7 @@ ExtensionAPI::OverrideSharedInstanceForTest::~OverrideSharedInstanceForTest() {
 void ExtensionAPI::LoadSchema(const std::string& name,
                               std::string_view schema) {
   lock_.AssertAcquired();
-  base::Value::Dict schema_dict(LoadSchemaDictionary(name, schema));
+  base::DictValue schema_dict(LoadSchemaDictionary(name, schema));
   const std::string* schema_namespace = schema_dict.FindString("namespace");
   CHECK(schema_namespace);
   schemas_[*schema_namespace] = std::move(schema_dict);
@@ -195,7 +196,7 @@ bool ExtensionAPI::IsAnyFeatureAvailableToContext(
     return false;
   }
 
-  const std::string& alias_name = api.alias();
+  std::string_view alias_name = api.alias();
   if (alias_name.empty()) {
     return false;
   }
@@ -239,12 +240,12 @@ std::string_view ExtensionAPI::GetSchemaStringPiece(
   return GetSchemaStringPieceUnsafe(api_name);
 }
 
-const base::Value::Dict* ExtensionAPI::GetSchema(const std::string& full_name) {
+const base::DictValue* ExtensionAPI::GetSchema(const std::string& full_name) {
   base::AutoLock lock(lock_);
   std::string child_name;
   std::string api_name = GetAPINameFromFullNameUnsafe(full_name, &child_name);
 
-  const base::Value::Dict* result = nullptr;
+  const base::DictValue* result = nullptr;
   auto maybe_schema = schemas_.find(api_name);
   if (maybe_schema != schemas_.end()) {
     result = &maybe_schema->second;
@@ -296,7 +297,7 @@ std::string ExtensionAPI::GetAPINameFromFullName(std::string_view full_name,
 bool ExtensionAPI::IsKnownAPI(const std::string& name,
                               ExtensionsClient* client) {
   lock_.AssertAcquired();
-  return base::Contains(schemas_, name) || client->IsAPISchemaGenerated(name);
+  return schemas_.contains(name) || client->IsAPISchemaGenerated(name);
 }
 
 Feature::Availability ExtensionAPI::IsAliasAvailable(
@@ -307,7 +308,7 @@ Feature::Availability ExtensionAPI::IsAliasAvailable(
     const GURL& url,
     int context_id,
     const ContextData& context_data) {
-  const std::string& alias = feature.alias();
+  std::string_view alias = feature.alias();
   if (alias.empty()) {
     return Feature::Availability(Feature::AvailabilityResult::kNotPresent,
                                  "Alias not defined");
@@ -324,7 +325,7 @@ Feature::Availability ExtensionAPI::IsAliasAvailable(
   // be determined using fooAlias.method feature, rather than fooAlias feature.
   std::string child_name;
   GetAPINameFromFullName(full_name, &child_name);
-  std::string full_alias_name = alias + "." + child_name;
+  const std::string full_alias_name = base::StrCat({alias, ".", child_name});
   const Feature* alias_feature = provider->second->GetFeature(full_alias_name);
 
   // If there is no child feature, use the alias API feature to check

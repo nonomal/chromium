@@ -17,7 +17,7 @@
 #include "chrome/browser/extensions/mixin_based_extension_apitest.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/ash/components/dbus/session_manager/fake_session_manager_client.h"
@@ -78,7 +78,7 @@ void PlatformKeysTestBase::SetUp() {
 
   // Initialize the server to allocate a port, so that URLs can be pointed at it
   // in SetUpCommandLine(). Don't spin up the IO thread yet since no threads are
-  // allowed while spawning sandbox host process. See crbug.com/322732.
+  // allowed while spawning sandbox host process. See crbug.com/41076404.
   ASSERT_TRUE(gaia_server_.InitializeAndListen());
 
   ash::platform_keys::PlatformKeysServiceFactory::GetInstance()->SetTestingMode(
@@ -214,7 +214,7 @@ void PlatformKeysTestBase::RunPreTest() {
 
 bool PlatformKeysTestBase::TestExtension(const std::string& page_url) {
   DCHECK(!page_url.empty()) << "page_url cannot be empty";
-  Browser* const browser = CreateBrowser(profile());
+  BrowserWindowInterface* const browser = CreateBrowser(profile());
 
   extensions::ResultCatcher catcher;
   EXPECT_TRUE(ui_test_utils::NavigateToURL(browser, GURL(page_url)));

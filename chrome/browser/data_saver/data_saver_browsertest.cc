@@ -2,19 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "data_saver.h"
+
 #include <memory>
 #include <string>
 
 #include "base/barrier_closure.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/chrome_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -24,11 +25,11 @@
 #include "content/public/test/browser_test_base.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/prerender_test_util.h"
-#include "data_saver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "services/network/public/cpp/network_quality_tracker.h"
+#include "ui/base/window_open_disposition.h"
 
 namespace {
 
@@ -195,14 +196,14 @@ class DataSaverBrowserTest : public InProcessBrowserTest {
 
  protected:
   void VerifySaveDataHeader(const std::string& expected_header_value,
-                            Browser* browser = nullptr) {
+                            BrowserWindowInterface* browser = nullptr) {
     if (!browser)
       browser = InProcessBrowserTest::browser();
     ASSERT_TRUE(ui_test_utils::NavigateToURL(
         browser, embedded_test_server()->GetURL("/echoheader?Save-Data")));
     EXPECT_EQ(
         expected_header_value,
-        content::EvalJs(browser->tab_strip_model()->GetActiveWebContents(),
+        content::EvalJs(browser->GetTabStripModel()->GetActiveWebContents(),
                         "document.body.textContent;"));
   }
 
@@ -253,7 +254,7 @@ IN_PROC_BROWSER_TEST_F(DataSaverBrowserTest,
   prerender_helper()->AddPrerenderAsync(prerendering_url);
   observer.WaitForTrigger(prerendering_url);
 
-  content::FrameTreeNodeId host_id =
+  content::PrerenderHostId host_id =
       prerender_helper()->GetHostForUrl(prerendering_url);
   EXPECT_TRUE(host_id.is_null());
 
@@ -378,10 +379,10 @@ IN_PROC_BROWSER_TEST_P(DataSaverForWorkerBrowserTest,
       kWorkerScript, &header_map);
 
   if (IsEnabledDataSaver()) {
-    EXPECT_TRUE(base::Contains(header_map, "Save-Data"));
+    EXPECT_TRUE(header_map.contains("Save-Data"));
     EXPECT_EQ("on", header_map["Save-Data"]);
   } else {
-    EXPECT_FALSE(base::Contains(header_map, "Save-Data"));
+    EXPECT_FALSE(header_map.contains("Save-Data"));
   }
 
   // Wait until the worker script is loaded to stop the test from crashing
@@ -409,10 +410,10 @@ IN_PROC_BROWSER_TEST_P(DataSaverForWorkerBrowserTest, MAYBE_SharedWorker) {
                        kWorkerScript, &header_map);
 
   if (IsEnabledDataSaver()) {
-    EXPECT_TRUE(base::Contains(header_map, "Save-Data"));
+    EXPECT_TRUE(header_map.contains("Save-Data"));
     EXPECT_EQ("on", header_map["Save-Data"]);
   } else {
-    EXPECT_FALSE(base::Contains(header_map, "Save-Data"));
+    EXPECT_FALSE(header_map.contains("Save-Data"));
   }
 
   // Wait until the worker script is loaded to stop the test from crashing
@@ -441,10 +442,10 @@ IN_PROC_BROWSER_TEST_P(DataSaverForWorkerBrowserTest, ServiceWorker_Register) {
   loop.Run();
 
   if (IsEnabledDataSaver()) {
-    EXPECT_TRUE(base::Contains(header_map, "Save-Data"));
+    EXPECT_TRUE(header_map.contains("Save-Data"));
     EXPECT_EQ("on", header_map["Save-Data"]);
   } else {
-    EXPECT_FALSE(base::Contains(header_map, "Save-Data"));
+    EXPECT_FALSE(header_map.contains("Save-Data"));
   }
 
   // Service worker doesn't have to wait for onmessage event because
@@ -474,10 +475,10 @@ IN_PROC_BROWSER_TEST_P(DataSaverForWorkerBrowserTest, ServiceWorker_Update) {
   loop.Run();
 
   if (IsEnabledDataSaver()) {
-    EXPECT_TRUE(base::Contains(header_map, "Save-Data"));
+    EXPECT_TRUE(header_map.contains("Save-Data"));
     EXPECT_EQ("on", header_map["Save-Data"]);
   } else {
-    EXPECT_FALSE(base::Contains(header_map, "Save-Data"));
+    EXPECT_FALSE(header_map.contains("Save-Data"));
   }
 
   // Service worker doesn't have to wait for onmessage event because

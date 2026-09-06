@@ -9,6 +9,7 @@
 #include <type_traits>
 
 #include "base/compiler_specific.h"
+#include "base/memory/raw_ptr_exclusion.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
@@ -122,7 +123,7 @@ struct RobinHoodMap {
 
     Bucket* bucket = FindBucket(key);
     for (unsigned i = 0; i < kPossibleBucketsPerKey;
-         ++i, UNSAFE_TODO(++bucket)) {
+         ++i, UNSAFE_BUFFERS(++bucket)) {
       if (bucket->key == key) {
         return bucket;
       }
@@ -148,38 +149,41 @@ struct RobinHoodMap {
    public:
     iterator(Bucket* pos, const Bucket* end) : pos_(pos), end_(end) {
       while (pos_ != end_ && pos_->key.IsNull()) {
-        UNSAFE_TODO(++pos_);
+        UNSAFE_BUFFERS(++pos_);
       }
     }
     Bucket& operator*() const { return *pos_; }
     Bucket* operator->() const { return pos_; }
     iterator& operator++() {
-      UNSAFE_TODO(++pos_);
+      UNSAFE_BUFFERS(++pos_);
       while (pos_ != end_ && pos_->key.IsNull()) {
-        UNSAFE_TODO(++pos_);
+        UNSAFE_BUFFERS(++pos_);
       }
       return *this;
     }
     bool operator==(const iterator& other) const { return pos_ == other.pos_; }
 
    private:
-    Bucket* pos_;
-    const Bucket* end_;
+    // Excluded for performance reasons: iterators are short-lived stack objects
+    // created, copied, and destroyed in tight loops during CSS rule lookup,
+    // where BRP refcount and bookkeeping overhead would be costly.
+    RAW_PTR_EXCLUSION Bucket* pos_;
+    RAW_PTR_EXCLUSION const Bucket* end_;
   };
   class const_iterator {
    public:
     const_iterator(const Bucket* pos, const Bucket* end)
         : pos_(pos), end_(end) {
       while (pos_ != end_ && pos_->key.IsNull()) {
-        UNSAFE_TODO(++pos_);
+        UNSAFE_BUFFERS(++pos_);
       }
     }
     const Bucket& operator*() const { return *pos_; }
     const Bucket* operator->() const { return pos_; }
     const_iterator& operator++() {
-      UNSAFE_TODO(++pos_);
+      UNSAFE_BUFFERS(++pos_);
       while (pos_ != end_ && pos_->key.IsNull()) {
-        UNSAFE_TODO(++pos_);
+        UNSAFE_BUFFERS(++pos_);
       }
       return *this;
     }
@@ -188,8 +192,9 @@ struct RobinHoodMap {
     }
 
    private:
-    const Bucket* pos_;
-    const Bucket* end_;
+    // Excluded for performance reasons: see iterator comment above.
+    RAW_PTR_EXCLUSION const Bucket* pos_;
+    RAW_PTR_EXCLUSION const Bucket* end_;
   };
 
   iterator begin() { return {buckets_.get(), EndBucket()}; }
@@ -200,13 +205,13 @@ struct RobinHoodMap {
 
  private:
   Bucket* EndBucket() {
-    return buckets_.get() ? UNSAFE_TODO(buckets_.get() + num_buckets_ +
-                                        kPossibleBucketsPerKey)
+    return buckets_.get() ? UNSAFE_BUFFERS(buckets_.get() + num_buckets_ +
+                                           kPossibleBucketsPerKey)
                           : nullptr;
   }
   const Bucket* EndBucket() const {
-    return buckets_.get() ? UNSAFE_TODO(buckets_.get() + num_buckets_ +
-                                        kPossibleBucketsPerKey)
+    return buckets_.get() ? UNSAFE_BUFFERS(buckets_.get() + num_buckets_ +
+                                           kPossibleBucketsPerKey)
                           : nullptr;
   }
   unsigned FindBucketIndex(const Key& key) const {
@@ -225,10 +230,10 @@ struct RobinHoodMap {
   // to find the element. This can never overflow; see the definition
   // of buckets_ below.
   Bucket* FindBucket(const Key& key) {
-    return UNSAFE_TODO(buckets_.get() + FindBucketIndex(key));
+    return UNSAFE_BUFFERS(buckets_.get() + FindBucketIndex(key));
   }
   const Bucket* FindBucket(const Key& key) const {
-    return UNSAFE_TODO(buckets_.get() + FindBucketIndex(key));
+    return UNSAFE_BUFFERS(buckets_.get() + FindBucketIndex(key));
   }
 
   // Inserts the given key/value, possibly displacing other buckets in the

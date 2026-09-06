@@ -25,7 +25,7 @@
 #include "components/autofill/core/browser/payments/test/test_credit_card_otp_authenticator.h"
 #include "components/autofill/core/browser/payments/test_payments_autofill_client.h"
 #include "components/autofill/core/browser/payments/test_payments_network_interface.h"
-#include "components/autofill/core/browser/test_utils/autofill_test_utils.h"
+#include "components/autofill/core/browser/test_utils/autofill_test_util.h"
 #include "components/autofill/core/common/autofill_prefs.h"
 #include "components/sync/test/test_sync_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -250,9 +250,9 @@ int CreditCardAccessManagerTestBase::GetStrikes() {
   return strike_database->GetStrikes();
 }
 
-base::Value::Dict CreditCardAccessManagerTestBase::GetTestRequestOptions(
+base::DictValue CreditCardAccessManagerTestBase::GetTestRequestOptions(
     bool return_invalid_request_options) {
-  base::Value::Dict request_options;
+  base::DictValue request_options;
   request_options.Set("challenge", base::Value(kTestChallenge));
   request_options.Set("relying_party_id", base::Value(kGooglePaymentsRpid));
 
@@ -262,15 +262,15 @@ base::Value::Dict CreditCardAccessManagerTestBase::GetTestRequestOptions(
     return request_options;
   }
 
-  base::Value::Dict key_info;
+  base::DictValue key_info;
   key_info.Set("credential_id", base::Value(kCredentialId));
   request_options.Set("key_info", base::Value(base::Value::Type::LIST));
   request_options.FindList("key_info")->Append(std::move(key_info));
   return request_options;
 }
 
-base::Value::Dict CreditCardAccessManagerTestBase::GetTestCreationOptions() {
-  base::Value::Dict creation_options;
+base::DictValue CreditCardAccessManagerTestBase::GetTestCreationOptions() {
+  base::DictValue creation_options;
   creation_options.Set("challenge", base::Value(kTestChallenge));
   creation_options.Set("relying_party_id", base::Value(kGooglePaymentsRpid));
   return creation_options;

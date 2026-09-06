@@ -28,6 +28,10 @@ namespace signin {
 class AccountsInCookieJarInfo;
 }
 
+namespace version_info {
+enum class Channel;
+}
+
 class PrefRegistrySimple;
 class SigninClient;
 
@@ -48,10 +52,10 @@ class AboutSigninInternals : public KeyedService,
    public:
     // |info| will contain the dictionary of signin_status_ values as indicated
     // in the comments for GetSigninStatus() below.
-    virtual void OnSigninStateChanged(const base::Value::Dict& info) = 0;
+    virtual void OnSigninStateChanged(const base::DictValue& info) = 0;
 
     // Notification that the cookie accounts are ready to be displayed.
-    virtual void OnCookieAccountsFetched(const base::Value::Dict& info) = 0;
+    virtual void OnCookieAccountsFetched(const base::DictValue& info) = 0;
   };
 
   AboutSigninInternals(signin::IdentityManager* identity_manager,
@@ -96,7 +100,13 @@ class AboutSigninInternals : public KeyedService,
   //     [ List of {"name": "foo-name", "token" : "foo-token",
   //                 "status": "foo_stat", "time" : "foo_time"} elems]
   //  }
-  base::Value::Dict GetSigninStatus();
+  base::DictValue GetSigninStatus();
+
+  // Returns whether capability override is allowed for the given account and
+  // capability on the given channel.
+  bool CanOverrideAccountCapability(const CoreAccountId& account_id,
+                                    std::string_view capability_name,
+                                    version_info::Channel channel) const;
 
   // signin::IdentityManager::Observer implementations.
   void OnAccountsInCookieUpdated(
@@ -108,7 +118,7 @@ class AboutSigninInternals : public KeyedService,
   struct TokenInfo {
     TokenInfo(const std::string& consumer_id, const signin::ScopeSet& scopes);
     ~TokenInfo();
-    base::Value::Dict ToValue() const;
+    base::DictValue ToValue() const;
 
     static bool LessThan(const std::unique_ptr<TokenInfo>& a,
                          const std::unique_ptr<TokenInfo>& b);
@@ -181,7 +191,7 @@ class AboutSigninInternals : public KeyedService,
     //                           "status" : request status} elems]
     //       }],
     //  }
-    base::Value::Dict ToValue(
+    base::DictValue ToValue(
         signin::IdentityManager* identity_manager,
         SigninErrorController* signin_error_controller,
         SigninClient* signin_client,

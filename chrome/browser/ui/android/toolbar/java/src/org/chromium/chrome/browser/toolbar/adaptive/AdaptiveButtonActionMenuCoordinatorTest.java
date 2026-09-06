@@ -14,6 +14,7 @@ import android.view.View;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.filters.SmallTest;
 
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -21,36 +22,27 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
-import org.robolectric.annotation.Config;
-import org.robolectric.annotation.Implementation;
-import org.robolectric.annotation.Implements;
 
 import org.chromium.base.Callback;
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.base.test.util.Features.EnableFeatures;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.toolbar.R;
 import org.chromium.ui.listmenu.ListMenuButton;
 import org.chromium.ui.widget.AnchoredPopupWindow;
 
 /** Unit tests for the {@link AdaptiveButtonActionMenuCoordinator}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(shadows = {AdaptiveButtonActionMenuCoordinatorTest.ShadowAnchoredPopupWindow.class})
 public class AdaptiveButtonActionMenuCoordinatorTest {
-    /** Shadow disabling {@code showPopupWindow()} which hangs under robolectric. */
-    @Implements(AnchoredPopupWindow.class)
-    public static class ShadowAnchoredPopupWindow {
-        @Implementation
-        protected void showPopupWindow() {}
-    }
-
     @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
 
     @Mock private Callback<Integer> mCallback;
 
+    @Before
+    public void setUp() {
+        AnchoredPopupWindow.setShowHookForTesting(() -> {});
+    }
+
     @Test
     @SmallTest
-    @EnableFeatures(ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2)
     public void testCreateOnLongClickListener() {
         var coordinator = new AdaptiveButtonActionMenuCoordinator(/* showMenu= */ true);
         View.OnLongClickListener listener = coordinator.createOnLongClickListener(mCallback);
@@ -74,7 +66,6 @@ public class AdaptiveButtonActionMenuCoordinatorTest {
 
     @Test
     @SmallTest
-    @EnableFeatures(ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2)
     public void testCreateOnLongClickListener_clickHandlerIsNotModified() {
         var coordinator = new AdaptiveButtonActionMenuCoordinator(/* showMenu= */ true);
         View.OnLongClickListener listener = coordinator.createOnLongClickListener(mCallback);
@@ -100,7 +91,6 @@ public class AdaptiveButtonActionMenuCoordinatorTest {
 
     @Test
     @SmallTest
-    @EnableFeatures(ChromeFeatureList.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_V2)
     public void testCreateOnLongClickListener_showsToast() {
         var coordinator = spy(new AdaptiveButtonActionMenuCoordinator(/* showMenu= */ false));
         View.OnLongClickListener listener = coordinator.createOnLongClickListener(mCallback);

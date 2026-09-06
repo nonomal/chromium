@@ -6,7 +6,7 @@ package org.chromium.chrome.browser.ntp_customization.theme;
 
 import static org.mockito.Mockito.verify;
 
-import static org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils.NtpBackgroundImageType.DEFAULT;
+import static org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils.NtpBackgroundType.DEFAULT;
 
 import android.content.Context;
 import android.graphics.drawable.Drawable;
@@ -25,7 +25,6 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
-import org.robolectric.annotation.Config;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.ntp_customization.R;
@@ -34,7 +33,6 @@ import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 
 /** Tests for {@link NtpThemeViewBinder}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
 public class NtpThemeViewBinderUnitTest {
 
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
@@ -73,17 +71,17 @@ public class NtpThemeViewBinderUnitTest {
     }
 
     @Test
-    public void testSectionTrailingIconVisibility() {
+    public void testIsSectionSelected() {
         PropertyModelChangeProcessor.create(
                 mModel, mNtpThemeBottomSheetView, NtpThemeViewBinder::bindThemeBottomSheet);
 
         Pair<Integer, Boolean> pair = new Pair<>(DEFAULT, true);
-        mModel.set(NtpThemeProperty.IS_SECTION_TRAILING_ICON_VISIBLE, pair);
-        verify(mNtpThemeBottomSheetView).setSectionTrailingIconVisibility(DEFAULT, true);
+        mModel.set(NtpThemeProperty.IS_SECTION_SELECTED, pair);
+        verify(mNtpThemeBottomSheetView).updateSectionTrailingIcon(DEFAULT, true);
 
         pair = new Pair<>(DEFAULT, false);
-        mModel.set(NtpThemeProperty.IS_SECTION_TRAILING_ICON_VISIBLE, pair);
-        verify(mNtpThemeBottomSheetView).setSectionTrailingIconVisibility(DEFAULT, false);
+        mModel.set(NtpThemeProperty.IS_SECTION_SELECTED, pair);
+        verify(mNtpThemeBottomSheetView).updateSectionTrailingIcon(DEFAULT, false);
     }
 
     @Test

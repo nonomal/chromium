@@ -21,6 +21,9 @@ class RegionalCapabilitiesService;
 namespace signin {
 class IdentityManager;
 }  // namespace signin
+namespace subscription_eligibility {
+class SubscriptionEligibilityService;
+}  // namespace subscription_eligibility
 namespace syncer {
 class SyncService;
 }  // namespace syncer
@@ -37,12 +40,14 @@ class DiscoverFeedVisibilityBrowserAgent;
 @protocol DiscoverFeedVisibilityObserver;
 @protocol FeedControlDelegate;
 @class FeedMetricsRecorder;
+class FullscreenBrowserAgent;
 class HomeBackgroundCustomizationService;
 @protocol NewTabPageConsumer;
 @protocol NewTabPageContentDelegate;
 @protocol NewTabPageHeaderConsumer;
 class PlaceholderService;
 class PrefService;
+@class SearchEngineLogoMediator;
 class TemplateURLService;
 class UrlLoadingBrowserAgent;
 class UserUploadedImageManager;
@@ -63,6 +68,9 @@ class UserUploadedImageManager;
                   (id<UserAccountImageUpdateDelegate>)imageUpdater
                    discoverFeedService:(DiscoverFeedService*)discoverFeedService
                            prefService:(PrefService*)prefService
+        subscriptionEligibilityService:
+            (subscription_eligibility::SubscriptionEligibilityService*)
+                subscriptionEligibilityService
                            syncService:(syncer::SyncService*)syncService
            regionalCapabilitiesService:
                (regional_capabilities::RegionalCapabilitiesService*)
@@ -81,6 +89,8 @@ class UserUploadedImageManager;
               featureEngagementTracker:(feature_engagement::Tracker*)tracker
                  aimEligibilityService:
                      (AimEligibilityService*)aimEligibilityService
+                fullscreenBrowserAgent:
+                    (FullscreenBrowserAgent*)fullscreenBrowserAgent
     NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;
@@ -91,6 +101,8 @@ class UserUploadedImageManager;
 @property(nonatomic, weak) id<NewTabPageConsumer> consumer;
 // Consumer for NTP header model updates.
 @property(nonatomic, weak) id<NewTabPageHeaderConsumer> headerConsumer;
+// Delegate to update the identity disc image.
+@property(nonatomic, weak) id<UserAccountImageUpdateDelegate> imageUpdater;
 // Observer for feed visibility changes.
 @property(nonatomic, weak) id<DiscoverFeedVisibilityObserver>
     feedVisibilityObserver;
@@ -102,9 +114,17 @@ class UserUploadedImageManager;
 @property(nonatomic, weak) id<NewTabPageContentDelegate> NTPContentDelegate;
 // Indicates that the new tab page is visible.
 @property(nonatomic, assign) BOOL NTPVisible;
+// The WebState currently associated with this mediator.
+@property(nonatomic, assign) web::WebState* webState;
 // A pointer to the collection view that currently embeds all the contents on
 // the new tab page.
 @property(nonatomic, weak) UICollectionView* contentCollectionView;
+// The screen size of the scene displaying this NTP, used for downsampling
+// user-uploaded background images. Set by the coordinator.
+@property(nonatomic, assign) CGSize screenSize;
+
+// Mediator for the search engine logo.
+@property(nonatomic, weak) SearchEngineLogoMediator* logoMediator;
 
 // Indicates whether the feed header should be visible.
 - (BOOL)isFeedHeaderVisible;
@@ -123,6 +143,9 @@ class UserUploadedImageManager;
 
 // Update the background of the NTP.
 - (void)updateBackground;
+
+// Marks the Safari Data Import item in the setup list as completed.
+- (void)markSafariDataImportSetupListItemAsComplete;
 
 @end
 

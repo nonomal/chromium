@@ -4,6 +4,13 @@
 
 ## Process
 
+<a name="TOC-How-do-i-report-a-security-vulnerability"></a>
+### How do I report a security vulnerability?
+
+Please report all Chromium security bugs via
+[Google Bughunters](https://bughunters.google.com/report/vrp) and select
+Chrome VRP. (Direct intake to the Chromium issuetracker is deprecated.)
+
 <a name="TOC-Which-bugs-are-valid-for-rewards-under-the-Chrome-Vulnerability-Rewards-program-"></a>
 ### Which bugs are valid for rewards under the Chrome Vulnerability Rewards program?
 
@@ -16,7 +23,8 @@ We must balance a commitment to openness with a commitment to avoiding
 unnecessary risk for users of widely-used open source libraries. All critical,
 high, and medium severity bugs are visible only to the security team and to the
 engineers directly involved in fixing them. Low-severity security bugs may be
-visible to all project contributors after an initial triage phase.
+visible to all project contributors after an initial triage phase. Low severity
+bugs that are not being actively worked on may be made public after four weeks.
 
 <a name="TOC-Can-you-please-un-hide-old-security-bugs-"></a>
 ### Can you please un-hide old security bugs?
@@ -27,7 +35,7 @@ affect products besides Chromium, and we don’t want to put users of those
 products unnecessarily at risk by opening the bug before fixes for the other
 affected products have shipped.
 
-Therefore, we make all security bugs public within approximately 14 weeks of the
+Therefore, we make all security bugs public within approximately 30 days of the
 fix landing in the Chromium repository. The exception to this is in the event of
 the bug reporter or some other responsible party explicitly requesting anonymity
 or protection against disclosing other particularly sensitive data included in
@@ -249,15 +257,15 @@ a new file type that meets that condition, we’d like to hear about it.
 ### I found a local file or directory that may be security-sensitive and is not blocked by File System Access API - is this a security bug?
 
 The File System Access API maintains a [blocklist](https://source.chromium.org/chromium/chromium/src/+/main:chrome/browser/file_system_access/chrome_file_system_access_permission_context.cc;l=266-346)
-of directories and files that may be sensitive such as systems file, and if user
+of directories and files that may be sensitive, such as systems files, and if user
 chooses a file or a directory matching the list on a site using File System
 Access API, the access is blocked.
 
-The blocklist is designed to help mitigate accidental granting by users by
-listing well-known, security-sensitive locations, as a defense in-depth
-strategy. Therefore, the blocklist coverage is not deemed as a security bug,
-especially as it requires user's explicit selection on a file or a directory
-from the file picker.
+The blocklist is designed to prevent users from *accidentally* granting access
+to sensitive files, by listing well-known, security-sensitive locations, as a
+defense in-depth strategy. Therefore, evading the blocklist in some manner is
+not deemed as a security bug, especially as it requires user's explicit
+selection on a file or a directory from the file picker.
 
 <a name="TOC-I-can-download-a-file-with-an-unsafe-extension-but-a-different-extension-or-file-type-is-shown-to-the-user-"></a>
 ### I can download a file with an unsafe extension but a different extension or file type is shown to the user - is this a security bug?
@@ -718,10 +726,41 @@ mitigations within the browser. For users, the very marginal security benefit is
 not usually a good trade-off for the compatibility issues and performance
 degradation the toolkit can cause.
 
-<a name="TOC-dangling-pointers"></a>
-### Dangling pointers
+<a name="TOC-Are-MiraclePtr-protected-use-after-frees-security-bugs-"></a>
+### Are MiraclePtr protected use-after-frees security bugs?
 
-Chromium can be instrumented to detect [dangling
+No. ["MiraclePtr"](https://chromium.googlesource.com/chromium/src/+/main/base/memory/raw_ptr.md)
+is a technology designed to deterministically prevent exploitation of
+use-after-free bugs. Address sanitizer is aware of MiraclePtr and will report
+on whether a given use-after-free bug is protected or not:
+
+```
+
+MiraclePtr Status: PROTECTED
+The crash occurred while a raw_ptr<T> object containing a dangling pointer was being dereferenced.
+MiraclePtr should make this crash non-exploitable in regular builds.
+
+```
+
+or
+
+```
+
+MiraclePtr Status: NOT PROTECTED
+No raw_ptr<T> access to this region was detected prior to the crash.
+
+```
+
+Only the NOT PROTECTED case indicates an actual security bug, hence reports
+need to include this section of the ASAN trace showing the MiraclePtr status.
+
+Note that we are interested in the PROTECTED case as well, but these will be
+treated as functional bugs.
+
+<a name="TOC-Are-detected-dangling-pointers-security-bugs-"></a>
+### Are detected dangling pointers security bugs?
+
+No. Chromium can be instrumented to detect [dangling
 pointers](https://chromium.googlesource.com/chromium/src/+/main/docs/dangling_ptr.md):
 
 Notable build flags are:
@@ -732,14 +771,15 @@ Notable runtime flags are:
 - `--enable-features=PartitionAllocDanglingPtr`
 
 It is important to note that detecting a dangling pointer alone does not
-necessarily indicate a security vulnerability. A dangling pointer becomes a
-security vulnerability only when it is dereferenced and used after it becomes
-dangling.
+indicate a security vulnerability. A dangling pointer becomes a security
+vulnerability only when it is dereferenced and used after it becomes dangling.
+Reports are considered vulnerabilities only when there is a demonstrable way
+to show a memory corruption. e.g. a POC causing a crash with ASAN
+**without the flags above**.
 
-In general, dangling pointer issues should be assigned to feature teams as
-ordinary bugs and be fixed by them. However, they can be considered only if
-there is a demonstrable way to show a memory corruption. e.g. with a POC causing
-crash with ASAN **without the flags above**.
+Note that we are interested in dangling pointer findings as well, but these
+will be treated as functional bugs and assigned to feature teams to be fixed
+in the same manner as other functional bugs.
 
 <a name="TOC-hard-coded-lists"></a>
 ### My domain is on the [Public Suffix List / HSTS preload list / etc.] upstream but this is not yet reflected in Chrome! Is this a security bug?
@@ -749,6 +789,43 @@ external lists like the [HSTS preload list](https://hstspreload.org) or the
 [Public Suffix List (PSL)](https://publicsuffix.org/) will be incorporated into Chrome.
 If you believe Chrome's copies of these lists are notably out-of-date, we are
 happy to field bug reports but we do not consider this to be a vulnerability.
+
+### I can demonstrate memory corruption in a test binary!
+
+Test binaries (`unit_tests`, `browser_tests`, etc) do not have the same security
+scrutiny as `chrome` or `d8`. Memory corruption in these binaries does not harm
+Chrome's users, and are not valid reports. Please ensure all of your PoCs
+demonstrate an issue in `chrome` or `d8`.
+
+### I can make Chrome perform potentially insecure NTLM requests to an attacker controlled server. Is this a security bug?
+
+Chrome generally does not treat the observation or capture of an NTLMv2
+authentication response, by itself, as a Chrome security vulnerability. NTLM is
+a Windows authentication mechanism provided by the operating system, and NTLM
+authentication responses are protocol messages intended to be sent to an
+authentication peer.
+
+Microsoft has deprecated all versions of NTLM, including NTLMv2, and recommends
+migrating applications to Negotiate/Kerberos. NTLMv1 has already been removed
+from Windows 11 version 24H2 and Windows Server 2025, and Microsoft has
+announced plans to disable NTLM by default in future major Windows releases.
+
+For this reason, reports whose only result is obtaining an NTLMv2
+challenge-response through expected Windows authentication behavior are
+generally considered an operating-system/network-authentication configuration
+issue rather than a Chrome vulnerability. We recommend using a current, fully
+patched version of Windows and following Microsoft's guidance for reducing or
+disabling NTLM and migrating to Kerberos where possible.
+
+We may still investigate cases where Chrome causes authentication in
+circumstances where it should not—for example, a demonstrated bypass of Chrome's
+authentication allowlisting, origin/security boundaries, or another Chrome
+security control. Chrome provides enterprise controls such as
+`AuthServerAllowlist` governing servers permitted to use integrated
+authentication.
+
+Reports should therefore demonstrate a Chrome-specific security-boundary bypass
+rather than only the ability to capture an NTLMv2 authentication response.
 
 ## AI Features
 
@@ -1241,7 +1318,7 @@ biometrics are unavailable (e.g. on a laptop with a closed lid).
 
 If you can demonstrate bypassing the user verification challenge where the
 request user verification parameter is set to 'required', please
-[report it](https://issues.chromium.org/issues/new?noWizard=true&component=1363614&template=1922342).
+[report it](https://bughunters.google.com/report/vrp).
 
 ## Other
 
@@ -1375,3 +1452,8 @@ Security Issues report and request a review from there. There is no separate
 appeal form or process at this time. Please follow these
 [guidelines](https://developers.google.com/search/docs/monitor-debug/security/malware#guidelines)
 to avoid having your binary show warnings from Safe Browsing.
+
+<a name="TOC-What-is-the-security-model-for-Split-View-"></a>
+### What's the security model for Split View?
+
+See our [Split View Security FAQ](https://chromium.googlesource.com/chromium/src/+/main/chrome/browser/ui/tabs/docs/split_view_security_faq.md).

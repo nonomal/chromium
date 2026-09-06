@@ -14,11 +14,6 @@ ConnectorsManager::ConnectorsManager(PrefService* pref_service,
 
 ConnectorsManager::~ConnectorsManager() = default;
 
-void ConnectorsManager::CacheAnalysisConnectorPolicy(
-    AnalysisConnector connector) const {
-  // do nothing
-}
-
 DataRegion ConnectorsManager::GetDataRegion(AnalysisConnector connector) const {
   return DataRegion::NO_PREFERENCE;
 }

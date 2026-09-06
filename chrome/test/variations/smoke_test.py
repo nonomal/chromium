@@ -29,7 +29,9 @@ def test_load_simple_url(driver_factory: drivers.DriverFactory,
     # expecting { 'product': 'Chrome/120.0.6090.0' }
     version = versions['product'].split('/')[1]
     add_tag('launched_version', version)
-    driver.set_window_size(800, 600)
+    # Window bounds cannot be changed on Android / WebView.
+    if test_options.platform not in ('android', 'webview', 'android_webview'):
+      driver.set_window_size(800, 600)
     driver.get(url)
     WebDriverWait(driver, 5).until(
       EC.presence_of_element_located((By.TAG_NAME, 'body')))
@@ -51,15 +53,17 @@ def test_basic_rendering(driver_factory: drivers.DriverFactory,
   url = (f'http://localhost:{local_http_server.server_port}')
   with driver_factory.create_driver(
     seed_file=seed_locator.get_seed()) as driver:
-    driver.set_window_size(800, 600)
+    # Window bounds cannot be changed on Android / WebView.
+    if test_options.platform not in ('android', 'webview', 'android_webview'):
+      driver.set_window_size(800, 600)
     driver.get(url)
     driver_factory.wait_for_screenshot()
-    body = WebDriverWait(driver, 5).until(
+    WebDriverWait(driver, 5).until(
       EC.presence_of_element_located((By.TAG_NAME, 'body')))
 
     status, error_msg = skia_gold_util.compare(
       name='body',
-      png_data=skia_gold_util.screenshot_from_element(body))
+      png_data=driver.get_screenshot_as_png())
 
     assert status == 0, error_msg
 

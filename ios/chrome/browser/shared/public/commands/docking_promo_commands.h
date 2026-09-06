@@ -5,11 +5,17 @@
 #ifndef IOS_CHROME_BROWSER_SHARED_PUBLIC_COMMANDS_DOCKING_PROMO_COMMANDS_H_
 #define IOS_CHROME_BROWSER_SHARED_PUBLIC_COMMANDS_DOCKING_PROMO_COMMANDS_H_
 
-// Commands to show app-wide Docking Promo(s).
+@protocol PromosManagerUIHandler;
+
+// Commands to manage app-wide Docking Promo(s).
 @protocol DockingPromoCommands <NSObject>
 
-// Show Docking Promo if conditions are met, or if `forced` is YES.
-- (void)showDockingPromo:(BOOL)forced;
+// Shows the Docking Promo UI.
+- (void)showDockingPromoWithPromosUIHandler:
+    (id<PromosManagerUIHandler>)promosUIHandler;
+
+// Dismisses the currently active Docking Promo UI.
+- (void)dismissDockingPromo;
 
 @end
 

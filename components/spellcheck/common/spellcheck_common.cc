@@ -4,11 +4,11 @@
 
 #include "components/spellcheck/common/spellcheck_common.h"
 
+#include <algorithm>
 #include <string_view>
 
 #include "base/check.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_util.h"
@@ -137,13 +137,13 @@ base::FilePath GetVersionedFileName(std::string_view input_language,
       // January 2020: Update fa-IR dictionaries from upstream.
       {"fa-IR", "-9-0"},
 
-      // March 2022: Update en-* dictionaries from upstream and add "Kyiv" to
-      // those dictionaries.
-      {"en-AU", "-10-1"},
-      {"en-CA", "-10-1"},
-      {"en-GB", "-10-1"},
-      {"en-GB-oxendict", "-10-1"},
-      {"en-US", "-10-1"},
+      // March 2022: Update en-* dictionaries from upstream and add "Kyiv".
+      // August 2026: Add "Googlebook".
+      {"en-AU", "-10-2"},
+      {"en-CA", "-10-2"},
+      {"en-GB", "-10-2"},
+      {"en-GB-oxendict", "-10-2"},
+      {"en-US", "-10-2"},
 
       // March 2022: Update uk-UA dictionary from upstream.
       {"uk-UA", "-5-0"},
@@ -231,7 +231,7 @@ void FillSuggestions(
 
     const std::u16string& suggestion = suggestions_list[language][index];
     // Only add the suggestion if it's unique.
-    if (!base::Contains(*optional_suggestions, suggestion)) {
+    if (!std::ranges::contains(*optional_suggestions, suggestion)) {
       optional_suggestions->push_back(suggestion);
     }
     if (optional_suggestions->size() >= kMaxSuggestions) {

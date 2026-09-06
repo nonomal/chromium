@@ -12,21 +12,25 @@ import androidx.test.filters.SmallTest;
 
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.content.browser.HostZoomMapImpl;
 import org.chromium.content.browser.HostZoomMapImplJni;
 import org.chromium.content_public.browser.BrowserContextHandle;
-import org.chromium.ui.modelutil.PropertyModel;
+import org.chromium.content_public.browser.HostZoomMap;
 
 /** Unit tests for {@link PageZoomUtils}. */
 @SmallTest
 @RunWith(BaseRobolectricTestRunner.class)
 public class PageZoomUtilsUnitTest {
+    @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
+
     // Error messages
     private static final String BAR_VALUE_TO_ZOOM_FACTOR_FAILURE =
             "Failure to correctly convert bar value to zoom factor.";
@@ -55,12 +59,8 @@ public class PageZoomUtilsUnitTest {
 
     @Mock private BrowserContextHandle mContextMock;
 
-    private PropertyModel mModel;
-
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
-
         HostZoomMapImplJni.setInstanceForTesting(mHostZoomMapMock);
     }
 
@@ -160,9 +160,13 @@ public class PageZoomUtilsUnitTest {
                 0.0001);
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void testGetNextIndexIncreaseMax() {
-        PageZoomUtils.getNextIndex(false, 6.03);
+        Assert.assertEquals(
+                GET_NEXT_INDEX_INCREASE_FAILURE,
+                HostZoomMap.AVAILABLE_ZOOM_FACTORS.length - 1,
+                PageZoomUtils.getNextIndex(false, 6.03),
+                0.0001);
     }
 
     @Test
@@ -171,8 +175,42 @@ public class PageZoomUtilsUnitTest {
                 GET_NEXT_INDEX_DECREASE_FAILURE, 6, PageZoomUtils.getNextIndex(true, 1.00), 0.0001);
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void testGetNextIndexDecreaseMin() {
-        PageZoomUtils.getNextIndex(true, -3.80);
+        Assert.assertEquals(
+                GET_NEXT_INDEX_DECREASE_FAILURE,
+                0,
+                PageZoomUtils.getNextIndex(true, -3.80),
+                0.0001);
+    }
+
+    @Test
+    public void testCanDecreaseZoom() {
+        Assert.assertFalse(
+                PageZoomUtils.canDecreaseZoom(HostZoomMap.AVAILABLE_ZOOM_FACTORS[0]));
+        Assert.assertTrue(PageZoomUtils.canDecreaseZoom(0.0));
+        Assert.assertTrue(
+                PageZoomUtils.canDecreaseZoom(
+                        HostZoomMap.AVAILABLE_ZOOM_FACTORS[
+                                HostZoomMap.AVAILABLE_ZOOM_FACTORS.length - 1]));
+    }
+
+    @Test
+    public void testCanIncreaseZoom() {
+        Assert.assertTrue(
+                PageZoomUtils.canIncreaseZoom(HostZoomMap.AVAILABLE_ZOOM_FACTORS[0]));
+        Assert.assertTrue(PageZoomUtils.canIncreaseZoom(0.0));
+        Assert.assertFalse(
+                PageZoomUtils.canIncreaseZoom(
+                        HostZoomMap.AVAILABLE_ZOOM_FACTORS[
+                                HostZoomMap.AVAILABLE_ZOOM_FACTORS.length - 1]));
+    }
+
+    @Test
+    public void testFormatZoomPercentage() {
+        Assert.assertEquals("100%", PageZoomUtils.formatZoomPercentage(0.0));
+        Assert.assertEquals("50%", PageZoomUtils.formatZoomPercentage(-3.80));
+        Assert.assertEquals("150%", PageZoomUtils.formatZoomPercentage(2.22));
+        Assert.assertEquals("300%", PageZoomUtils.formatZoomPercentage(6.03));
     }
 }

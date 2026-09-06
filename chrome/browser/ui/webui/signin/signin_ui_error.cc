@@ -16,8 +16,16 @@
 #include "build/build_config.h"
 #include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/sync/base/features.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "ui/base/l10n/l10n_util.h"
+
+namespace {
+
+std::u16string ErrorTypeToString(SigninUIError::Type error_type) {
+  return u"Error " + base::NumberToString16(std::to_underlying(error_type));
+}
+}  // namespace
 
 // ------------------------------ SigninUIError --------------------------------
 
@@ -28,16 +36,18 @@ SigninUIError SigninUIError::Ok() {
 
 // static
 SigninUIError SigninUIError::UsernameNotAllowedByPatternFromPrefs(
-    const std::string& email) {
+    std::string_view email) {
   return SigninUIError(
       Type::kUsernameNotAllowedByPatternFromPrefs, email,
-      l10n_util::GetStringUTF16(IDS_SYNC_LOGIN_NAME_PROHIBITED));
+      syncer::IsReplaceSyncPromosWithSignInPromosEnabled()
+          ? l10n_util::GetStringUTF16(IDS_SIGN_IN_LOGIN_NAME_PROHIBITED)
+          : l10n_util::GetStringUTF16(IDS_SYNC_LOGIN_NAME_PROHIBITED));
 }
 
 // static
 SigninUIError SigninUIError::WrongReauthAccount(
-    const std::string& email,
-    const std::string& current_email) {
+    std::string_view email,
+    std::string_view current_email) {
   return SigninUIError(
       Type::kWrongReauthAccount, email,
       l10n_util::GetStringFUTF16(IDS_SYNC_WRONG_EMAIL,
@@ -46,7 +56,7 @@ SigninUIError SigninUIError::WrongReauthAccount(
 
 // static
 SigninUIError SigninUIError::AccountAlreadyUsedByAnotherProfile(
-    const std::string& email,
+    std::string_view email,
     const base::FilePath& another_profile_path) {
   SigninUIError error(
       Type::kAccountAlreadyUsedByAnotherProfile, email,
@@ -57,8 +67,8 @@ SigninUIError SigninUIError::AccountAlreadyUsedByAnotherProfile(
 
 // static
 SigninUIError SigninUIError::ProfileWasUsedByAnotherAccount(
-    const std::string& email,
-    const std::string& last_email) {
+    std::string_view email,
+    std::string_view last_email) {
   return SigninUIError(
       Type::kProfileWasUsedByAnotherAccount, email,
       l10n_util::GetStringFUTF16(IDS_SYNC_USED_PROFILE_ERROR,
@@ -67,7 +77,7 @@ SigninUIError SigninUIError::ProfileWasUsedByAnotherAccount(
 
 // static
 SigninUIError SigninUIError::FromGoogleServiceAuthError(
-    const std::string& email,
+    std::string_view email,
     const GoogleServiceAuthError& error) {
   return SigninUIError(Type::kFromGoogleServiceAuthError, email,
                        base::UTF8ToUTF16(error.ToString()));
@@ -76,7 +86,7 @@ SigninUIError SigninUIError::FromGoogleServiceAuthError(
 #if BUILDFLAG(IS_WIN)
 // static
 SigninUIError SigninUIError::FromCredentialProviderUiExitCode(
-    const std::string& email,
+    std::string_view email,
     credential_provider::UiExitCodes exit_code) {
   SigninUIError error(Type::kFromCredentialProviderUiExitCode, email,
                       base::NumberToString16(exit_code));
@@ -85,26 +95,24 @@ SigninUIError SigninUIError::FromCredentialProviderUiExitCode(
 }
 #endif
 
-// static
-SigninUIError SigninUIError::ProfileIsBlocked() {
-  return SigninUIError(Type::kProfileIsBlocked, /*email=*/std::string(),
-                       /*error_message=*/std::u16string());
+SigninUIError SigninUIError::NoProfile(std::string_view email) {
+  return SigninUIError(Type::kNoProfile, email,
+                       ErrorTypeToString(Type::kNoProfile));
 }
 
-SigninUIError SigninUIError::NoProfile(const std::string& email) {
-  return SigninUIError(Type::kNoProfile, email, std::u16string());
+SigninUIError SigninUIError::SigninDisallowed(std::string_view email) {
+  return SigninUIError(Type::kSigninDisallowed, email,
+                       ErrorTypeToString(Type::kSigninDisallowed));
 }
 
-SigninUIError SigninUIError::SigninDisallowed(const std::string& email) {
-  return SigninUIError(Type::kSigninDisallowed, email, std::u16string());
+SigninUIError SigninUIError::SigninCookiesDisallowed(std::string_view email) {
+  return SigninUIError(Type::kSigninCookiesDisallowed, email,
+                       ErrorTypeToString(Type::kSigninCookiesDisallowed));
 }
 
-SigninUIError SigninUIError::SigninCookiesDisallowed(const std::string& email) {
-  return SigninUIError(Type::kSigninCookiesDisallowed, email, std::u16string());
-}
-
-SigninUIError SigninUIError::NoIdentityManager(const std::string& email) {
-  return SigninUIError(Type::kNoIdentityManager, email, std::u16string());
+SigninUIError SigninUIError::NoIdentityManager(std::string_view email) {
+  return SigninUIError(Type::kNoIdentityManager, email,
+                       ErrorTypeToString(Type::kNoIdentityManager));
 }
 
 SigninUIError::SigninUIError(const SigninUIError& other) = default;
@@ -140,7 +148,7 @@ credential_provider::UiExitCodes SigninUIError::credential_provider_exit_code()
 #endif
 
 SigninUIError::SigninUIError(Type type,
-                             const std::string& email,
+                             std::string_view email,
                              const std::u16string& error_message)
     : type_(type), email_(base::UTF8ToUTF16(email)), message_(error_message) {}
 
@@ -211,7 +219,9 @@ ForceSigninUIError::UiTexts ForceSigninUIError::GetErrorTexts() const {
       CHECK(!email_.empty());
       return {l10n_util::GetStringFUTF16(IDS_SIGNIN_ERROR_EMAIL_TITLE,
                                          base::UTF8ToUTF16(email_)),
-              l10n_util::GetStringUTF16(IDS_SYNC_LOGIN_NAME_PROHIBITED)};
+              syncer::IsReplaceSyncPromosWithSignInPromosEnabled()
+                  ? l10n_util::GetStringUTF16(IDS_SIGN_IN_LOGIN_NAME_PROHIBITED)
+                  : l10n_util::GetStringUTF16(IDS_SYNC_LOGIN_NAME_PROHIBITED)};
     case Type::kReauthNotSupportedByGlicFlow:
       return {
           l10n_util::GetStringUTF16(

@@ -5,20 +5,15 @@
 #include "media/mojo/mojom/audio_processing_mojom_traits.h"
 
 namespace mojo {
-namespace {
-// Deserializes has_field and field into a std::optional.
-#define DESERIALIZE_INTO_OPT(field) \
-  if (input.has_##field())          \
-  out_stats->field = input.field()
-}  // namespace
 
 // static
 bool StructTraits<media::mojom::AudioProcessingStatsDataView,
                   media::AudioProcessingStats>::
     Read(media::mojom::AudioProcessingStatsDataView input,
          media::AudioProcessingStats* out_stats) {
-  DESERIALIZE_INTO_OPT(echo_return_loss);
-  DESERIALIZE_INTO_OPT(echo_return_loss_enhancement);
+  out_stats->echo_return_loss = input.echo_return_loss();
+  out_stats->echo_return_loss_enhancement =
+      input.echo_return_loss_enhancement();
   return true;
 }
 
@@ -34,6 +29,9 @@ bool StructTraits<media::mojom::AudioProcessingSettingsDataView,
   out_settings->multi_channel_capture_processing =
       input.multi_channel_capture_processing();
   out_settings->use_loopback_aec_reference = input.use_loopback_aec_reference();
+#if BUILDFLAG(CHROME_WIDE_ECHO_CANCELLATION)
+  out_settings->voice_isolation = input.voice_isolation();
+#endif
   return true;
 }
 

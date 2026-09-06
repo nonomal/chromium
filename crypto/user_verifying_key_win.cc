@@ -11,11 +11,10 @@
 #include <windows.security.cryptography.core.h>
 #include <windows.storage.streams.h>
 
-#include <atomic>
 #include <functional>
 #include <utility>
 
-#include "base/compiler_specific.h"
+#include "base/containers/span.h"
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
@@ -34,6 +33,7 @@
 #include "base/win/scoped_hstring.h"
 #include "base/win/winrt_storage_util.h"
 #include "crypto/random.h"
+#include "crypto/sign.h"
 
 using ABI::Windows::Foundation::IAsyncAction;
 using ABI::Windows::Foundation::IAsyncOperation;
@@ -201,12 +201,6 @@ class HelloDialogForegrounder
   base::AtomicFlag stopping_;
 };
 
-enum KeyCredentialManagerAvailability {
-  kUnknown = 0,
-  kAvailable = 1,
-  kUnavailable = 2,
-};
-
 std::string FormatError(std::string message, HRESULT hr) {
   return base::StrCat(
       {message, " (hr = ", logging::SystemErrorCodeToString(hr), ")"});
@@ -261,11 +255,9 @@ void OnSigningSuccess(
         base::unexpected(UserVerifyingKeySigningError::kPlatformApiError));
     return;
   }
-
-  uint8_t* signature_data = nullptr;
-  uint32_t signature_length = 0;
-  hr = base::win::GetPointerToBufferData(signature_buffer.Get(),
-                                         &signature_data, &signature_length);
+  base::span<uint8_t> signature_span;
+  hr =
+      base::win::GetPointerToBufferData(signature_buffer.Get(), signature_span);
   if (FAILED(hr)) {
     LOG(ERROR) << FormatError("Failed to obtain data from signature buffer",
                               hr);
@@ -277,8 +269,8 @@ void OnSigningSuccess(
   }
 
   RecordSignAsyncResult(KeyCredentialSignResult::kSucceeded);
-  std::move(callback).Run(base::ok(std::vector<uint8_t>(
-      signature_data, UNSAFE_TODO(signature_data + signature_length))));
+  std::move(callback).Run(base::ok(
+      std::vector<uint8_t>(signature_span.begin(), signature_span.end())));
 }
 
 void OnSigningError(
@@ -297,8 +289,7 @@ void SignInternal(
     ComPtr<IKeyCredential> credential,
     UserVerifyingSigningKey::UserVerifyingKeySignatureCallback callback) {
   Microsoft::WRL::ComPtr<IBuffer> signing_buf;
-  HRESULT hr =
-      base::win::CreateIBufferFromData(data.data(), data.size(), &signing_buf);
+  HRESULT hr = base::win::CreateIBufferFromData(data, &signing_buf);
   if (FAILED(hr)) {
     LOG(ERROR) << FormatError("SignInternal: IBuffer creation failed", hr);
     RecordSignAsyncResult(KeyCredentialSignResult::kIBufferCreationFailed);
@@ -365,14 +356,11 @@ class UserVerifyingSigningKeyWin : public UserVerifyingSigningKey {
     CHECK(SUCCEEDED(hr)) << FormatError(
         "Failed to obtain public key from KeyCredential", hr);
 
-    uint8_t* pub_key_data = nullptr;
-    uint32_t pub_key_length = 0;
-    hr = base::win::GetPointerToBufferData(key_buf.Get(), &pub_key_data,
-                                           &pub_key_length);
+    base::span<uint8_t> pub_key_span;
+    hr = base::win::GetPointerToBufferData(key_buf.Get(), pub_key_span);
     CHECK(SUCCEEDED(hr)) << FormatError(
         "Failed to access public key buffer data", hr);
-    return std::vector<uint8_t>(pub_key_data,
-                                UNSAFE_TODO(pub_key_data + pub_key_length));
+    return std::vector<uint8_t>(pub_key_span.begin(), pub_key_span.end());
   }
 
   const UserVerifyingKeyLabel& GetKeyLabel() const override {
@@ -603,12 +591,11 @@ void DeleteUserVerifyingKeyInternal(UserVerifyingKeyLabel key_label,
   std::move(callback).Run(true);
 }
 
-std::optional<SignatureVerifier::SignatureAlgorithm> SelectAlgorithm(
-    base::span<const SignatureVerifier::SignatureAlgorithm>
-        acceptable_algorithms) {
+std::optional<sign::SignatureKind> SelectAlgorithm(
+    base::span<const sign::SignatureKind> acceptable_algorithms) {
   // Windows keys come in any algorithm you want, as long as it's RSA 2048.
   for (auto algorithm : acceptable_algorithms) {
-    if (algorithm == SignatureVerifier::SignatureAlgorithm::RSA_PKCS1_SHA256) {
+    if (algorithm == sign::RSA_PKCS1_SHA256) {
       return algorithm;
     }
   }
@@ -621,8 +608,7 @@ class UserVerifyingKeyProviderWin : public UserVerifyingKeyProvider {
   ~UserVerifyingKeyProviderWin() override = default;
 
   void GenerateUserVerifyingSigningKey(
-      base::span<const SignatureVerifier::SignatureAlgorithm>
-          acceptable_algorithms,
+      base::span<const sign::SignatureKind> acceptable_algorithms,
       UserVerifyingKeyCreationCallback callback) override {
     // Ignore the non-empty return value of `SelectAlgorithm` unless in the
     // future Windows supports more algorithms.
@@ -677,18 +663,6 @@ class UserVerifyingKeyProviderWin : public UserVerifyingKeyProvider {
 void IsKeyCredentialManagerAvailableInternal(
     base::OnceCallback<void(bool)> callback) {
   SCOPED_MAY_LOAD_LIBRARY_AT_BACKGROUND_PRIORITY();
-  // Lookup requires an asynchronous system API call, so cache the value.
-  static std::atomic<KeyCredentialManagerAvailability> availability =
-      KeyCredentialManagerAvailability::kUnknown;
-
-  // Read once to ensure consistency.
-  const KeyCredentialManagerAvailability current_availability = availability;
-  if (current_availability != KeyCredentialManagerAvailability::kUnknown) {
-    std::move(callback).Run(current_availability ==
-                            KeyCredentialManagerAvailability::kAvailable);
-    return;
-  }
-
   ComPtr<IKeyCredentialManagerStatics> factory;
   HRESULT hr = base::win::GetActivationFactory<
       IKeyCredentialManagerStatics,
@@ -710,16 +684,9 @@ void IsKeyCredentialManagerAvailableInternal(
   auto callback_splits = SplitOnceCallbackIntoThree(std::move(callback));
   hr = base::win::PostAsyncHandlers(
       is_supported_operation.Get(),
-      base::BindOnce(
-          [](base::OnceCallback<void(bool)> callback,
-             std::atomic<KeyCredentialManagerAvailability>& availability,
-             boolean result) {
-            availability = result
-                               ? KeyCredentialManagerAvailability::kAvailable
-                               : KeyCredentialManagerAvailability::kUnavailable;
-            std::move(callback).Run(result);
-          },
-          std::move(std::get<0>(callback_splits)), std::ref(availability)),
+      base::BindOnce([](base::OnceCallback<void(bool)> callback,
+                        boolean result) { std::move(callback).Run(result); },
+                     std::move(std::get<0>(callback_splits))),
       base::BindOnce([](base::OnceCallback<void(bool)> callback,
                         HRESULT) { std::move(callback).Run(false); },
                      std::move(std::get<1>(callback_splits))));

@@ -64,7 +64,7 @@ class ChromeAccountManagerService : public KeyedService,
     virtual void OnRefreshTokenUpdated(id<SystemIdentity> identity) {}
 
     // Handles access token refresh failed events.
-    // `identity` is the the identity for which the access token refresh failed.
+    // `identity` is the identity for which the access token refresh failed.
     // `error` is an opaque type containing information about the error.
     virtual void OnAccessTokenRefreshFailed(
         id<SystemIdentity> identity,
@@ -93,9 +93,9 @@ class ChromeAccountManagerService : public KeyedService,
   // service.
   bool HasIdentities() const;
 
-  // Returns whether `identity` is valid and belongs to the profile of this
+  // Returns whether `gaia_id` is valid and belongs to the profile of this
   // service.
-  bool IsValidIdentity(id<SystemIdentity> identity) const;
+  bool IsValidIdentity(const GaiaId& gaia_id) const;
 
   // Returns whether `email` is restricted according to the
   // RestrictAccountsToPatterns policy.
@@ -136,6 +136,13 @@ class ChromeAccountManagerService : public KeyedService,
   NSArray<id<SystemIdentity>>* GetIdentitiesOnDeviceWithGaiaIDs(
       const std::vector<AccountInfo>& account_infos) const;
 
+  // Returns the SystemIdentity with the given email, or nil if no matching
+  // identity exists on the device. Similar to GetIdentityOnDeviceWithGaiaID().
+  //
+  // Use GetIdentityOnDeviceWithGaiaID() instead of this method if possible.
+  // Emails can change, while gaia ids are fixed.
+  id<SystemIdentity> GetIdentityOnDeviceWithEmail(NSString* email) const;
+
   // For use by DeviceAccountsProviderImpl only, may not be called otherwise!
   // Returns all SystemIdentity objects that are available on the device,
   // including (as opposed to GetAllIdentities()) those that are assigned to
@@ -170,7 +177,12 @@ class ChromeAccountManagerService : public KeyedService,
   // Used to listen pref change.
   PrefChangeRegistrar registrar_;
 
-  base::ObserverList<Observer, true> observer_list_;
+  // TODO(crbug.com/484371187): Investigate if reentrancy can be removed.
+  base::ObserverList<
+      Observer,
+      true,
+      base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>
+      observer_list_;
 
   const std::string profile_name_;
 

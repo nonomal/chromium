@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.graphics.Bitmap;
+import android.graphics.Rect;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
@@ -20,7 +21,6 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
-import org.robolectric.annotation.Config;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.ntp_customization.R;
@@ -30,7 +30,6 @@ import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 
 /** Unit tests for {@link UploadImagePreviewLayoutViewBinder}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
 public class UploadImagePreviewLayoutViewBinderUnitTest {
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
 
@@ -113,16 +112,33 @@ public class UploadImagePreviewLayoutViewBinderUnitTest {
     }
 
     @Test
-    public void testSetTopMargin() {
-        int topMargin = 105;
-        mModel.set(NtpThemeProperty.TOP_INSETS, topMargin);
-        verify(mLayoutView).setTopInsets(eq(topMargin));
+    public void testSetLogoSearchBoxMargin() {
+        int expectedMargin = 45;
+        mModel.set(NtpThemeProperty.SEARCH_BOX_TOP_MARGIN, expectedMargin);
+
+        verify(mLayoutView).setSearchBoxContainerTopMargin(eq(expectedMargin));
     }
 
     @Test
-    public void testSetBottomMargin() {
-        int bottomMargin = 210;
-        mModel.set(NtpThemeProperty.BOTTOM_MARGIN, bottomMargin);
-        verify(mLayoutView).setBottomInsets(eq(bottomMargin));
+    public void testSetSearchBoxContainerHeight() {
+        int expectedHeight = 56;
+        mModel.set(NtpThemeProperty.SEARCH_BOX_HEIGHT, expectedHeight);
+
+        verify(mLayoutView).setSearchBoxContainerHeight(eq(expectedHeight));
+    }
+
+    @Test
+    public void testTopGuidelineBegin() {
+        int topMargin = 105;
+        mModel.set(NtpThemeProperty.TOP_GUIDELINE_BEGIN, topMargin);
+        verify(mLayoutView).setTopGuidelineBegin(eq(topMargin));
+    }
+
+    @Test
+    public void testSetSideAndBottomInsets() {
+        Rect expectedInsets =
+                new Rect(/* left= */ 10, /* top= */ 0, /* right= */ 20, /* bottom= */ 30);
+        mModel.set(NtpThemeProperty.SIDE_AND_BOTTOM_INSETS, expectedInsets);
+        verify(mLayoutView).setSideAndBottomInsets(eq(expectedInsets));
     }
 }

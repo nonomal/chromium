@@ -44,6 +44,7 @@
 #import "ios/chrome/browser/shared/public/commands/snackbar_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/util/layout_guide_names.h"
+#import "ios/chrome/browser/shared/ui/util/omnibox_util.h"
 #import "ios/chrome/browser/shared/ui/util/util_swift.h"
 
 @interface InfobarBannerOverlayCoordinator () <InfobarBannerPositioner>
@@ -88,15 +89,14 @@
 #pragma mark - InfobarBannerPositioner
 
 - (CGFloat)bannerYPosition {
+  if (!self.started || !self.browser) {
+    return 0;
+  }
   LayoutGuideCenter* layoutGuideCenter =
       LayoutGuideCenterForBrowser(self.browser);
-  UIView* topOmnibox =
-      [layoutGuideCenter referencedViewUnderName:kTopOmniboxGuide];
-  CGRect omniboxFrame = [topOmnibox convertRect:topOmnibox.bounds toView:nil];
-  CGFloat omniboxMaxY = CGRectGetMaxY(omniboxFrame);
 
-  // Use the top toolbar's layout guide when the omnibox is at the bottom.
-  if (topOmnibox.hidden) {
+  if (IsCurrentLayoutBottomOmnibox(self.browser)) {
+    // Use the top toolbar's layout guide when the omnibox is at the bottom.
     UIView* topToolbar =
         [layoutGuideCenter referencedViewUnderName:kPrimaryToolbarGuide];
     CGRect topToolbarFrame = [topToolbar convertRect:topToolbar.bounds
@@ -105,7 +105,11 @@
         CGRectGetMaxY(topToolbarFrame) + kInfobarTopPaddingBottomOmnibox;
     return topToolbarMaxY;
   }
-  return omniboxMaxY;
+
+  UIView* topOmnibox =
+      [layoutGuideCenter referencedViewUnderName:kTopOmniboxGuide];
+  CGRect omniboxFrame = [topOmnibox convertRect:topOmnibox.bounds toView:nil];
+  return CGRectGetMaxY(omniboxFrame);
 }
 
 - (UIView*)bannerView {
@@ -175,6 +179,9 @@
   // Mark started as NO before calling dismissal callback to prevent dup
   // stopAnimated: executions.
   self.started = NO;
+  // Disconnect the mediator synchronously so it stops referencing command
+  // handlers before asynchronous view controller dismissal finishes.
+  [self.mediator disconnect];
   __weak InfobarBannerOverlayCoordinator* weakSelf = self;
   [self.baseViewController dismissViewControllerAnimated:animated
                                               completion:^{
@@ -211,7 +218,7 @@
   // is necessary to synchronize OverlayPresenter scheduling logic with the UI
   // layer.
   if (self.delegate) {
-    self.delegate->OverlayUIDidFinishDismissal(self.request);
+    self.delegate->OverlayUIDidFinishDismissal(self.requestId);
   }
   UpdateBannerAccessibilityForDismissal(self.baseViewController);
 }

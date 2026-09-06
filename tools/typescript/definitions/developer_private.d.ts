@@ -136,6 +136,8 @@ declare global {
         parentDisabledPermissions: boolean;
         unsupportedManifestVersion: boolean;
         unsupportedDeveloperExtension: boolean;
+        disabledByAnotherExtension: boolean;
+        disabledByExtensionName?: string;
       }
 
       export interface OptionsPage {
@@ -205,7 +207,6 @@ declare global {
       export interface Permissions {
         simplePermissions: chrome.developerPrivate.Permission[];
         runtimeHostPermissions?: RuntimeHostPermissions;
-        canAccessSiteData: boolean;
       }
 
       export interface ExtensionInfo {
@@ -254,7 +255,6 @@ declare global {
         safetyCheckWarningReason: SafetyCheckWarningReason;
         pinnedToToolbar?: boolean;
         isAffectedByMV2Deprecation: boolean;
-        didAcknowledgeMV2DeprecationNotice: boolean;
         canUploadAsAccountExtension: boolean;
       }
 
@@ -265,6 +265,7 @@ declare global {
         isIncognitoAvailable: boolean;
         isChildAccount: boolean;
         isMv2DeprecationNoticeDismissed: boolean;
+        extensionsPinnedByDefault: boolean;
       }
 
       export interface ExtensionConfigurationUpdate {
@@ -282,6 +283,7 @@ declare global {
       export interface ProfileConfigurationUpdate {
         inDeveloperMode?: boolean;
         isMv2DeprecationNoticeDismissed?: boolean;
+        extensionsPinnedByDefault?: boolean;
       }
 
       export interface ExtensionCommandUpdate {
@@ -382,9 +384,7 @@ declare global {
       }
 
       export interface RequestFileSourceResponse {
-        highlight: string;
-        beforeHighlight: string;
-        afterHighlight: string;
+        source?: ErrorFileSource;
         title: string;
         message: string;
       }
@@ -476,6 +476,7 @@ declare global {
           Promise<void>;
       export function showOptions(extensionId: string): Promise<void>;
       export function showPath(extensionId: string): Promise<void>;
+      export function openReviewPage(extensionId: string): Promise<void>;
       export function updateExtensionCommand(update: ExtensionCommandUpdate):
           Promise<void>;
       export function updateExtensionConfiguration(
@@ -494,8 +495,6 @@ declare global {
           site: string, updates: ExtensionSiteAccessUpdate[]): Promise<void>;
       export function dismissSafetyHubExtensionsMenuNotification(): void;
       export function dismissMv2DeprecationPanel(): void;
-      export function dismissMv2DeprecationNoticeForExtension(
-          extensionId: string): Promise<void>;
       export function uploadExtensionToAccount(extensionId: string):
           Promise<boolean>;
       export function showSiteSettings(extensionId: string): Promise<void>;

@@ -6,10 +6,10 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/ref_counted_memory.h"
@@ -58,21 +58,21 @@ URLDataManager::URLDataManager(BrowserContext* browser_context)
 URLDataManager::~URLDataManager() = default;
 
 void URLDataManager::AddDataSource(URLDataSourceImpl* source) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M158);
   URLDataManagerBackend::GetForBrowserContext(browser_context_)
       ->AddDataSource(source);
 }
 
 void URLDataManager::UpdateWebUIDataSource(const std::string& source_name,
-                                           const base::Value::Dict& update) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+                                           const base::DictValue& update) {
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M158);
   URLDataManagerBackend::GetForBrowserContext(browser_context_)
       ->UpdateWebUIDataSource(source_name, update);
 }
 
 // static
 void URLDataManager::DeleteDataSources() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M158);
   URLDataSources sources;
   {
     base::AutoLock lock(GetDeleteLock());
@@ -128,7 +128,7 @@ void URLDataManager::AddWebUIDataSource(BrowserContext* browser_context,
 
 void URLDataManager::UpdateWebUIDataSource(BrowserContext* browser_context,
                                            const std::string& source_name,
-                                           const base::Value::Dict& update) {
+                                           const base::DictValue& update) {
   GetFromBrowserContext(browser_context)
       ->UpdateWebUIDataSource(source_name, std::move(update));
 }
@@ -137,7 +137,7 @@ void URLDataManager::UpdateWebUIDataSource(BrowserContext* browser_context,
 bool URLDataManager::IsScheduledForDeletion(
     const URLDataSourceImpl* data_source) {
   base::AutoLock lock(GetDeleteLock());
-  return data_sources_ && base::Contains(*data_sources_, data_source);
+  return data_sources_ && std::ranges::contains(*data_sources_, data_source);
 }
 
 }  // namespace content

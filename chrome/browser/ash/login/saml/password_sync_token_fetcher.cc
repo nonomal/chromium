@@ -20,7 +20,6 @@
 #include "base/strings/escape.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "chrome/browser/signin/identity_manager_factory.h"
 #include "components/signin/public/base/consent_level.h"
 #include "components/signin/public/identity_manager/access_token_fetcher.h"
 #include "components/signin/public/identity_manager/access_token_info.h"
@@ -124,10 +123,10 @@ PasswordSyncTokenFetcher::Consumer::~Consumer() = default;
 
 PasswordSyncTokenFetcher::PasswordSyncTokenFetcher(
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-    Profile* profile,
+    signin::IdentityManager* identity_manager,
     Consumer* consumer)
     : url_loader_factory_(std::move(url_loader_factory)),
-      profile_(profile),
+      identity_manager_(identity_manager),
       consumer_(consumer),
       request_type_(RequestType::kNone) {
   DCHECK(consumer_);
@@ -155,14 +154,9 @@ void PasswordSyncTokenFetcher::StartTokenVerify(const std::string& sync_token) {
 }
 
 void PasswordSyncTokenFetcher::StartAccessTokenFetch() {
-  DCHECK(profile_);
-  signin::IdentityManager* identity_manager =
-      IdentityManagerFactory::GetForProfile(profile_);
-  DCHECK(identity_manager);
-
   access_token_fetcher_ =
       std::make_unique<signin::PrimaryAccountAccessTokenFetcher>(
-          signin::OAuthConsumerId::kPasswordSyncTokenFetcher, identity_manager,
+          signin::OAuthConsumerId::kPasswordSyncTokenFetcher, identity_manager_,
           base::BindOnce(&PasswordSyncTokenFetcher::OnAccessTokenFetchComplete,
                          weak_ptr_factory_.GetWeakPtr()),
           signin::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable,
@@ -186,7 +180,7 @@ void PasswordSyncTokenFetcher::OnAccessTokenFetchComplete(
 }
 
 void PasswordSyncTokenFetcher::FetchSyncToken(const std::string& access_token) {
-  auto request_data = base::Value::Dict().Set(kTokenTypeKey, kTokenTypeValue);
+  auto request_data = base::DictValue().Set(kTokenTypeKey, kTokenTypeValue);
   std::string request_string;
   if (!base::JSONWriter::Write(request_data, &request_string)) {
     LOG(ERROR) << "Not able to serialize token request body.";
@@ -321,7 +315,7 @@ void PasswordSyncTokenFetcher::OnSimpleLoaderComplete(
 }
 
 void PasswordSyncTokenFetcher::ProcessValidTokenResponse(
-    base::Value::Dict json_response) {
+    base::DictValue json_response) {
   switch (request_type_) {
     case RequestType::kCreateToken: {
       const std::string* sync_token = json_response.FindString(kToken);
@@ -343,7 +337,7 @@ void PasswordSyncTokenFetcher::ProcessValidTokenResponse(
         consumer_->OnApiCallFailed(ErrorType::kGetNoList);
         return;
       }
-      const base::Value::List& list_of_tokens = *token_list_entry;
+      const base::ListValue& list_of_tokens = *token_list_entry;
       if (list_of_tokens.size() > 0) {
         const std::string* sync_token_string =
             list_of_tokens[0].GetDict().FindString(kToken);

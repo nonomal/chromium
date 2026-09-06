@@ -13,7 +13,6 @@
 #include "base/check.h"
 #include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/containers/span.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
@@ -370,25 +369,6 @@ DEFINE_TEST_CLIENT(CppSendWithMultiplePipesClient) {
   CHECK_EQ(kTestMessage2, ReadMessage(pipe1));
 }
 
-TEST(MAYBE_InvitationCppTest_NoParam, SendIsolatedInvitationWithDuplicateName) {
-  if (mojo::core::IsMojoIpczEnabled()) {
-    // This feature is not particularly useful in a world where isolated
-    // connections are only supported between broker nodes.
-    GTEST_SKIP() << "MojoIpcz does not support multiple isolated invitations "
-                 << "between the same two nodes.";
-  }
-
-  base::test::TaskEnvironment task_environment;
-  PlatformChannel channel1;
-  PlatformChannel channel2;
-  const char kConnectionName[] = "foo";
-  ScopedMessagePipeHandle pipe0 = OutgoingInvitation::SendIsolated(
-      channel1.TakeLocalEndpoint(), kConnectionName);
-  ScopedMessagePipeHandle pipe1 = OutgoingInvitation::SendIsolated(
-      channel2.TakeLocalEndpoint(), kConnectionName);
-  Wait(pipe0.get(), MOJO_HANDLE_SIGNAL_PEER_CLOSED);
-}
-
 const char kErrorMessage[] = "ur bad :{{";
 const char kDisconnectMessage[] = "go away plz";
 
@@ -422,7 +402,7 @@ TEST_P(MAYBE_InvitationCppTest, MAYBE_ProcessErrors) {
   base::RunLoop error_loop;
   actual_error_callback =
       base::BindLambdaForTesting([&](const std::string& error_message) {
-        EXPECT_TRUE(base::Contains(error_message, kErrorMessage));
+        EXPECT_TRUE(error_message.contains(kErrorMessage));
         error_loop.Quit();
       });
   EXPECT_EQ(MOJO_RESULT_OK,
@@ -431,9 +411,8 @@ TEST_P(MAYBE_InvitationCppTest, MAYBE_ProcessErrors) {
   error_loop.Run();
   EXPECT_EQ(MOJO_RESULT_OK, MojoDestroyMessage(message));
 
-  // TODO(crbug.com/40578072): Once we can rework the C++ invitation API
-  // to also notify on disconnect, this test should cover that too. For now we
-  // just tell the process to exit and wait for it to do.
+  // The C++ invitation API doesn't notify on disconnect, so this test just tells
+  // the process to exit and waits for it. See crbug.com/40578072 for context.
   WriteMessage(pipe, kDisconnectMessage);
   WaitForChildExit();
 }

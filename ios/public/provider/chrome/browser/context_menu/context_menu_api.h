@@ -19,6 +19,7 @@
 @protocol EnhancedCalendarCommands;
 @protocol MiniMapCommands;
 @protocol UnitConversionCommands;
+@protocol CountryCodePickerCommands;
 
 // Wraps information to add/show to/in a context menu
 @interface ElementsToAddToContextMenu : NSObject
@@ -28,6 +29,16 @@
 
 // List of elements to add to a context menu. Can be nil.
 @property(nonatomic, copy) NSMutableArray<UIMenuElement*>* elements;
+
+@end
+
+// Holder object containing command handlers that context menu items may invoke.
+@interface ContextMenuHandlers : NSObject
+
+@property(nonatomic, weak) id<MiniMapCommands> miniMapHandler;
+@property(nonatomic, weak) id<UnitConversionCommands> unitConversionHandler;
+@property(nonatomic, weak) id<EnhancedCalendarCommands> enhancedCalendarHandler;
+@property(nonatomic, weak) id<CountryCodePickerCommands> countryCodeHandler;
 
 @end
 
@@ -43,9 +54,14 @@ ElementsToAddToContextMenu* GetContextMenuElementsToAdd(
     web::WebState* web_state,
     web::ContextMenuParams params,
     UIViewController* presenting_view_controller,
-    id<MiniMapCommands> mini_map_handler,
-    id<UnitConversionCommands> unit_conversion_handler,
-    id<EnhancedCalendarCommands> enhanced_calendar_handler);
+    ContextMenuHandlers* context_menu_handlers);
+
+// Returns a default context menu configuration.
+UIContextMenuConfiguration* GetDefaultContextMenuConfiguration();
+
+// Updates the `config` with the `update`.
+void UpdateContextMenuConfiguration(UIContextMenuConfiguration* config,
+                                    UIContextMenuConfiguration* update);
 
 // Returns set of `NSTextCheckingType` representing the intent types that
 // can be handled by the provider, for the given `web_state`.
@@ -71,7 +87,7 @@ BOOL HandleIntentTypesForOneTap(
 // `model_path` for the give web state should be passed in if a detection by
 // model is required. (Note that some flags might still not allow it.)
 std::optional<std::vector<web::TextAnnotation>> ExtractTextAnnotationFromText(
-    const base::Value::Dict& metadata,
+    const base::DictValue& metadata,
     const std::string& text,
     NSTextCheckingType handled_types,
     ukm::SourceId source_id,

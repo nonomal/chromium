@@ -17,6 +17,7 @@
 #include "extensions/common/mojom/renderer_host.mojom.h"
 #include "extensions/common/mojom/service_worker.mojom.h"
 #include "extensions/common/mojom/service_worker_host.mojom.h"
+#include "extensions/common/mojom/web_request_host.mojom.h"
 #include "extensions/renderer/v8_schema_registry.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
@@ -70,6 +71,7 @@ class ServiceWorkerData
   mojom::ServiceWorkerHost* GetServiceWorkerHost();
   mojom::EventRouter* GetEventRouter();
   mojom::RendererAutomationRegistry* GetAutomationRegistry();
+  mojom::WebRequestHost* GetWebRequestHost();
 
   // mojom::ServiceWorker overrides:
   void UpdatePermissions(PermissionSet active_permissions,
@@ -87,8 +89,9 @@ class ServiceWorkerData
 
   // mojom::EventDispatcher overrides:
   void DispatchEvent(mojom::DispatchEventParamsPtr params,
-                     base::Value::List event_args,
+                     const scoped_refptr<const EventArgs>& event_args,
                      DispatchEventCallback callback) override;
+
  private:
   void OnServiceWorkerRequest(
       mojo::PendingAssociatedReceiver<mojom::ServiceWorker> receiver);
@@ -108,6 +111,7 @@ class ServiceWorkerData
   mojo::AssociatedRemote<mojom::EventRouter> event_router_remote_;
   mojo::AssociatedRemote<mojom::RendererAutomationRegistry>
       renderer_automation_registry_remote_;
+  mojo::AssociatedRemote<mojom::WebRequestHost> web_request_host_;
   mojo::AssociatedReceiver<mojom::ServiceWorker> receiver_{this};
 
   THREAD_CHECKER(thread_checker_);

@@ -7,8 +7,8 @@
 #include "base/test/metrics/histogram_tester.h"
 #include "components/autofill/core/browser/data_model/addresses/autofill_profile_test_api.h"
 #include "components/autofill/core/browser/field_types.h"
-#include "components/autofill/core/browser/metrics/autofill_metrics_utils.h"
-#include "components/autofill/core/browser/test_utils/autofill_test_utils.h"
+#include "components/autofill/core/browser/metrics/autofill_metrics_util.h"
+#include "components/autofill/core/browser/test_utils/autofill_test_util.h"
 #include "components/autofill/core/browser/test_utils/test_profiles.h"
 #include "components/autofill/core/common/autofill_clock.h"
 #include "components/autofill/core/common/autofill_features.h"
@@ -91,27 +91,6 @@ TEST_P(StoredProfileMetricsTestByCategory, StoredProfiles) {
   histogram_tester.ExpectTotalCount(last_used_metric, 2);
   histogram_tester.ExpectBucketCount(last_used_metric, 3, 1);
   histogram_tester.ExpectBucketCount(last_used_metric, 200, 1);
-}
-
-// Tests that `LogLocalProfileSupersetMetrics()` determines the correct number
-// of superset profiles.
-TEST(StoredProfileMetricsTest, LocalProfileSupersetMetrics) {
-  AutofillProfile account_profile = test::SubsetOfStandardProfile();
-  test_api(account_profile)
-      .set_record_type(AutofillProfile::RecordType::kAccount);
-  AutofillProfile local_profile1 = test::StandardProfile();
-  AutofillProfile local_profile2 = test::SubsetOfStandardProfile();
-  AutofillProfile local_profile3 = test::DifferentFromStandardProfile();
-
-  base::HistogramTester histogram_tester;
-  LogLocalProfileSupersetMetrics(
-      {&account_profile, &local_profile1, &local_profile2, &local_profile3},
-      "en-US");
-  // Expect that `local_profile1` is a strict superset of `account_profile`, but
-  // `local_profile2` and `local_profile3` is not.
-  histogram_tester.ExpectUniqueSample(
-      "Autofill.Leipzig.Duplication.NumberOfLocalSupersetProfilesOnStartup", 1,
-      1);
 }
 
 TEST(StoredProfileMetricsTest, TotalPostalAddressProfiles) {

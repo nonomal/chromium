@@ -12,7 +12,7 @@
 #include "components/autofill/core/browser/foundations/with_test_autofill_client_driver_manager.h"
 #include "components/autofill/core/browser/payments/bnpl_util.h"
 #include "components/autofill/core/browser/payments/constants.h"
-#include "components/autofill/core/browser/test_utils/autofill_test_utils.h"
+#include "components/autofill/core/browser/test_utils/autofill_test_util.h"
 #include "components/autofill/core/browser/ui/payments/select_bnpl_issuer_view.h"
 #include "components/strings/grit/components_strings.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -63,7 +63,7 @@ class SelectBnplIssuerDialogControllerImplTest
   base::MockCallback<
       base::OnceCallback<std::unique_ptr<SelectBnplIssuerView>()>>
       create_view_callback_;
-  base::MockOnceCallback<void(BnplIssuer)> selected_issuer_callback_;
+  base::MockRepeatingCallback<void(BnplIssuer)> selected_issuer_callback_;
   base::MockOnceClosure cancel_callback_;
 };
 
@@ -73,6 +73,9 @@ TEST_F(SelectBnplIssuerDialogControllerImplTest, Getters) {
                          BnplIssuerEligibilityForPage::kIsEligible)});
   InitController();
   EXPECT_EQ(controller_->GetIssuerContexts(), issuer_contexts_);
+  EXPECT_EQ(controller_->GetAppLocale(), "en-US");
+  EXPECT_EQ(&controller_->GetPaymentsDataManager(),
+            &payments_autofill_client().GetPaymentsDataManager());
   EXPECT_CALL(selected_issuer_callback_, Run(issuer_contexts_[0].issuer));
   controller_->OnIssuerSelected(issuer_contexts_[0].issuer);
   EXPECT_CALL(cancel_callback_, Run());
@@ -83,17 +86,6 @@ TEST_F(SelectBnplIssuerDialogControllerImplTest, GetTitle) {
   InitController();
   EXPECT_EQ(controller_->GetTitle(),
             GetStringUTF16(IDS_AUTOFILL_CARD_BNPL_SELECT_PROVIDER_TITLE));
-}
-
-TEST_F(SelectBnplIssuerDialogControllerImplTest, GetSelectionOptionText) {
-  SetIssuerContexts(
-      {BnplIssuerContext(test::GetTestLinkedBnplIssuer(),
-                         BnplIssuerEligibilityForPage::kIsEligible)});
-  InitController();
-
-  EXPECT_FALSE(
-      controller_->GetSelectionOptionText(BnplIssuer::IssuerId::kBnplAffirm)
-          .empty());
 }
 
 TEST_F(SelectBnplIssuerDialogControllerImplTest,
@@ -132,17 +124,25 @@ TEST_F(SelectBnplIssuerDialogControllerImplTest,
   controller_->OnIssuerSelected(selected_issuer);
 }
 
-// This test checks the `TextWithLink` returned from the `GetLinkText()` method.
-// On Android, `GetLinkText()` does not return a `TextWithLink` so this test is
-// not applicable.
-#if !BUILDFLAG(IS_ANDROID)
-TEST_F(SelectBnplIssuerDialogControllerImplTest, GetLinkText) {
+
+
+TEST_F(SelectBnplIssuerDialogControllerImplTest,
+       OnIssuerSelected_InvokesCallbackMultipleTimes) {
+  BnplIssuer issuer = test::GetTestLinkedBnplIssuer();
+  SetIssuerContexts(
+      {BnplIssuerContext(issuer, BnplIssuerEligibilityForPage::kIsEligible)});
+
   InitController();
 
-  EXPECT_THAT(controller_->GetLinkText(),
-              Field(&TextWithLink::text, Not(testing::IsEmpty())));
+  // Verify the callback can be called multiple times.
+  EXPECT_CALL(selected_issuer_callback_, Run(issuer)).Times(2);
+
+  // Mock the first issuer click.
+  controller_->OnIssuerSelected(issuer);
+
+  // Mock the second issuer click.
+  controller_->OnIssuerSelected(issuer);
 }
-#endif  // !BUILDFLAG(IS_ANDROID)
 
 }  // namespace
 

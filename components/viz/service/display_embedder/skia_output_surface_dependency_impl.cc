@@ -67,7 +67,7 @@ SkiaOutputSurfaceDependencyImpl::GetGrShaderCache() {
   return gpu_service_impl_->gr_shader_cache();
 }
 
-VulkanContextProvider*
+gpu::VulkanContextProvider*
 SkiaOutputSurfaceDependencyImpl::GetVulkanContextProvider() {
   if (gpu_service_impl_->compositor_gpu_thread()) {
     return gpu_service_impl_->compositor_gpu_thread()
@@ -102,14 +102,9 @@ gpu::SurfaceHandle SkiaOutputSurfaceDependencyImpl::GetSurfaceHandle() {
 scoped_refptr<gl::Presenter>
 SkiaOutputSurfaceDependencyImpl::CreatePresenter() {
   DCHECK(!IsOffscreen());
-  auto presenter = gpu::ImageTransportSurface::CreatePresenter(
+  return gpu::ImageTransportSurface::CreatePresenter(
       GetSharedContextState(), GetGpuDriverBugWorkarounds(),
       GetGpuFeatureInfo(), surface_handle_);
-  if (presenter &&
-      base::FeatureList::IsEnabled(features::kHandleOverlaysSwapFailure)) {
-    presenter->SetNotifyNonSimpleOverlayFailure();
-  }
-  return presenter;
 }
 
 scoped_refptr<gl::GLSurface> SkiaOutputSurfaceDependencyImpl::CreateGLSurface(

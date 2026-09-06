@@ -45,9 +45,9 @@ import org.chromium.ui.util.AttrUtils;
 public class ChromeDialog extends ComponentDialog {
     private final boolean mIsFullScreen;
     private final Activity mActivity;
-    @Nullable private InsetObserver mInsetObserver;
-    @Nullable private EdgeToEdgeLayoutCoordinator mEdgeToEdgeLayoutCoordinator;
-    @Nullable private WindowInsetsConsumer mWindowInsetsConsumer;
+    private @Nullable InsetObserver mInsetObserver;
+    private @Nullable EdgeToEdgeLayoutCoordinator mEdgeToEdgeLayoutCoordinator;
+    private @Nullable WindowInsetsConsumer mWindowInsetsConsumer;
     private final boolean mShouldPadForWindowInsets;
     private final WindowSystemBarColorHelper mWindowColorHelper;
 
@@ -73,9 +73,11 @@ public class ChromeDialog extends ComponentDialog {
             mInsetObserver =
                     new InsetObserver(
                             new ImmutableWeakReference<>(getWindow().getDecorView().getRootView()),
+                            new ImmutableWeakReference<>(mActivity),
                             // Keyboard overlay mode is enabled by default and is currently only
                             // relevant to the DeferredImeWindowInsetApplicationCallback.
-                            /* enableKeyboardOverlayMode= */ true);
+                            /* enableKeyboardOverlayMode= */ true,
+                            /* enableExtraEdgeToEdgeLogging= */ false);
         }
         // Currently, only the EdgeToEdgeLayoutCoordinator is listening to this InsetObserver,
         // and that class can handle cases with a null Window / null InsetObserver. Before
@@ -113,7 +115,6 @@ public class ChromeDialog extends ComponentDialog {
             ViewStub stub = findViewById(R.id.original_layout);
             stub.setLayoutResource(layoutResID);
             stub.inflate();
-            // TODO(crbug.com/402226908): Add margins when for dialog when not in fullscreen
         } else if (mShouldPadForWindowInsets && mIsFullScreen) {
             super.setContentView(
                     ensureEdgeToEdgeLayoutCoordinator()
@@ -193,6 +194,19 @@ public class ChromeDialog extends ComponentDialog {
         }
     }
 
+    /**
+     * Set the status bar color.
+     *
+     * @param color Status bar color for the current dialog.
+     */
+    public void setStatusBarColor(int color) {
+        if (mEdgeToEdgeLayoutCoordinator != null) {
+            mEdgeToEdgeLayoutCoordinator.setStatusBarColor(color);
+        } else {
+            mWindowColorHelper.setStatusBarColor(color);
+        }
+    }
+
     private void setAutomotiveToolbarBackButtonAction() {
         Toolbar backButtonToolbarForAutomotive = findViewById(R.id.back_button_toolbar);
         if (backButtonToolbarForAutomotive != null) {
@@ -224,8 +238,12 @@ public class ChromeDialog extends ComponentDialog {
     }
 
     public void destroy() {
+        if (isShowing()) {
+            dismiss();
+        }
         if (mInsetObserver != null && mWindowInsetsConsumer != null) {
             mInsetObserver.removeInsetsConsumer(mWindowInsetsConsumer);
+            mWindowInsetsConsumer = null;
         }
     }
 }

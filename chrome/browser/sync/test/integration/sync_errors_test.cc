@@ -17,9 +17,11 @@
 #include "chrome/browser/sync/user_event_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/browser_sync/browser_sync_switches.h"
 #include "components/history/core/common/pref_names.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
+#include "components/signin/public/base/signin_switches.h"
 #include "components/sync/base/data_type.h"
 #include "components/sync/base/features.h"
 #include "components/sync/engine/sync_protocol_error.h"
@@ -34,6 +36,7 @@
 using bookmarks::BookmarkNode;
 using bookmarks_helper::AddFolder;
 using bookmarks_helper::SetTitle;
+using bookmarks_helper::StoreType;
 using syncer::SyncServiceImpl;
 using testing::IsEmpty;
 using user_events_helper::CreateTestEvent;
@@ -121,8 +124,12 @@ class SyncErrorTest
  public:
   SyncErrorTest() : SyncTest(SINGLE_CLIENT) {
     if (GetSetupSyncMode() == SetupSyncMode::kSyncTransportOnly) {
-      scoped_feature_list_.InitAndEnableFeature(
-          syncer::kReplaceSyncPromosWithSignInPromos);
+      scoped_feature_list_.InitWithFeatures(
+          {syncer::kReplaceSyncPromosWithSignInPromos,
+           switches::kSyncEnableBookmarksInTransportMode,
+           switches::kEnablePreferencesAccountStorage,
+           syncer::kSeparateLocalAndAccountSearchEngines},
+          {});
     }
   }
 
@@ -135,14 +142,10 @@ class SyncErrorTest
     return GetParam();
   }
 
-  const bookmarks::BookmarkNode* GetParent() {
-    bookmarks::BookmarkModel* model = bookmarks_helper::GetBookmarkModel(0);
-    switch (GetSetupSyncMode()) {
-      case SetupSyncMode::kSyncTransportOnly:
-        return model->account_bookmark_bar_node();
-      case SetupSyncMode::kSyncTheFeature:
-        return model->bookmark_bar_node();
-    }
+  StoreType GetStoreType() {
+    return GetSetupSyncMode() == SyncTest::SetupSyncMode::kSyncTransportOnly
+               ? StoreType::kAccountStore
+               : StoreType::kLocalOrSyncableStore;
   }
 
  private:
@@ -198,7 +201,7 @@ IN_PROC_BROWSER_TEST_P(SyncErrorTest, BirthdayErrorTest) {
 IN_PROC_BROWSER_TEST_P(SyncErrorTest, UpgradeClientErrorDuringIncrementalSync) {
   ASSERT_TRUE(SetupSync());
 
-  const BookmarkNode* node1 = AddFolder(0, GetParent(), 0, u"title1");
+  const BookmarkNode* node1 = AddFolder(0, 0, u"title1", GetStoreType());
   SetTitle(0, node1, u"new_title1");
   ASSERT_TRUE(UpdatedProgressMarkerChecker(GetSyncService(0)).Wait());
 
@@ -209,7 +212,7 @@ IN_PROC_BROWSER_TEST_P(SyncErrorTest, UpgradeClientErrorDuringIncrementalSync) {
       sync_pb::SyncEnums::UPGRADE_CLIENT);
 
   // Now make one more change so we will do another sync.
-  const BookmarkNode* node2 = AddFolder(0, GetParent(), 0, u"title2");
+  const BookmarkNode* node2 = AddFolder(0, 0, u"title2", GetStoreType());
   SetTitle(0, node2, u"new_title2");
 
   // Wait until an actionable error is encountered.
@@ -238,7 +241,7 @@ IN_PROC_BROWSER_TEST_P(SyncErrorTest, UpgradeClientErrorDuringInitialSync) {
 
   // Signing in should start sync-the-transport, which should fail with an
   // error.
-  ASSERT_TRUE(GetClient(0)->SignInPrimaryAccount());
+  ASSERT_TRUE(GetClient(0)->SignInNoWaitForCompletion());
 
   // Wait until an actionable error is encountered.
   EXPECT_TRUE(ActionableProtocolErrorChecker(GetSyncService(0)).Wait());
@@ -257,7 +260,7 @@ IN_PROC_BROWSER_TEST_P(SyncErrorTest, UpgradeClientErrorDuringInitialSync) {
 
 // This test verifies that sync keeps retrying if it encounters error during
 // setup.
-// crbug.com/689662
+// crbug.com/41300290
 #if BUILDFLAG(IS_CHROMEOS)
 #define MAYBE_ErrorWhileSettingUp DISABLED_ErrorWhileSettingUp
 #else
@@ -295,7 +298,7 @@ IN_PROC_BROWSER_TEST_P(SyncErrorTest, MAYBE_ErrorWhileSettingUp) {
 IN_PROC_BROWSER_TEST_P(SyncErrorTest, ClientDataObsoleteTest) {
   ASSERT_TRUE(SetupSync());
 
-  const BookmarkNode* node1 = AddFolder(0, GetParent(), 0, u"title1");
+  const BookmarkNode* node1 = AddFolder(0, 0, u"title1", GetStoreType());
   SetTitle(0, node1, u"new_title1");
   ASSERT_TRUE(UpdatedProgressMarkerChecker(GetSyncService(0)).Wait());
 
@@ -310,7 +313,7 @@ IN_PROC_BROWSER_TEST_P(SyncErrorTest, ClientDataObsoleteTest) {
   GetFakeServer()->TriggerError(sync_pb::SyncEnums::CLIENT_DATA_OBSOLETE);
 
   // Trigger sync by making one more change.
-  const BookmarkNode* node2 = AddFolder(0, GetParent(), 0, u"title2");
+  const BookmarkNode* node2 = AddFolder(0, 0, u"title2", GetStoreType());
   SetTitle(0, node2, u"new_title2");
 
   ASSERT_TRUE(syncer::SyncEngineStoppedChecker(GetSyncService(0)).Wait());
@@ -328,7 +331,7 @@ IN_PROC_BROWSER_TEST_P(SyncErrorTest, ClientDataObsoleteTest) {
 IN_PROC_BROWSER_TEST_P(SyncErrorTest, EncryptionObsoleteErrorTest) {
   ASSERT_TRUE(SetupSync());
 
-  const BookmarkNode* node1 = AddFolder(0, GetParent(), 0, u"title1");
+  const BookmarkNode* node1 = AddFolder(0, 0, u"title1", GetStoreType());
   SetTitle(0, node1, u"new_title1");
   ASSERT_TRUE(UpdatedProgressMarkerChecker(GetSyncService(0)).Wait());
 
@@ -337,7 +340,7 @@ IN_PROC_BROWSER_TEST_P(SyncErrorTest, EncryptionObsoleteErrorTest) {
       sync_pb::SyncEnums::UNKNOWN_ACTION);
 
   // Now make one more change so we will do another sync.
-  const BookmarkNode* node2 = AddFolder(0, GetParent(), 0, u"title2");
+  const BookmarkNode* node2 = AddFolder(0, 0, u"title2", GetStoreType());
   SetTitle(0, node2, u"new_title2");
 
   syncer::SyncEngineStoppedChecker sync_stopped_waiter(GetSyncService(0));
@@ -364,7 +367,7 @@ IN_PROC_BROWSER_TEST_P(SyncErrorTest, DisableDatatypeWhileRunning) {
   ASSERT_TRUE(TypeDisabledChecker(GetSyncService(0), syncer::HISTORY).Wait());
   ASSERT_TRUE(TypeDisabledChecker(GetSyncService(0), syncer::SESSIONS).Wait());
 
-  const BookmarkNode* node1 = AddFolder(0, GetParent(), 0, u"title1");
+  const BookmarkNode* node1 = AddFolder(0, 0, u"title1", GetStoreType());
   SetTitle(0, node1, u"new_title1");
   ASSERT_TRUE(UpdatedProgressMarkerChecker(GetSyncService(0)).Wait());
 }
@@ -440,7 +443,7 @@ IN_PROC_BROWSER_TEST_P(SyncErrorTest, ShouldThrottleOneDatatypeButNotOthers) {
   // Make local changes for PREFERENCES and BOOKMARKS, but the first is
   // throttled.
   GetProfile(0)->GetPrefs()->SetBoolean(prefs::kHomePageIsNewTabPage, true);
-  AddFolder(0, GetParent(), 0, kBookmarkFolderTitle);
+  AddFolder(0, 0, kBookmarkFolderTitle, GetStoreType());
 
   // The bookmark should get committed successfully.
   EXPECT_TRUE(bookmarks_helper::ServerBookmarksEqualityChecker(

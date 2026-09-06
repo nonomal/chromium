@@ -5,6 +5,7 @@
 #include "net/device_bound_sessions/jwk_utils.h"
 
 #include "base/json/json_reader.h"
+#include "crypto/sign.h"
 #include "net/device_bound_sessions/test_support.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -23,8 +24,8 @@ constexpr uint8_t kES256Spki[] = {
     0x46, 0x7F, 0x2F, 0xB4, 0x3B, 0x46, 0x7E};
 
 TEST(JWKUtilsTest, InvalidSpki) {
-  base::Value::Dict converted =
-      ConvertPkeySpkiToJwk(crypto::SignatureVerifier::ECDSA_SHA256, {});
+  base::DictValue converted =
+      ConvertPkeySpkiToJwk(crypto::sign::ECDSA_SHA256, {});
   EXPECT_TRUE(converted.empty());
 }
 
@@ -54,8 +55,8 @@ TEST(JWKUtilsTest, UnsupportedAlgo) {
       0xC8, 0x7F, 0x42, 0xEB, 0x9F, 0xCA, 0x98, 0xF9, 0xB8, 0x34, 0xDB, 0x83,
       0x11, 0x02, 0x03, 0x01, 0x00, 0x01};
 
-  base::Value::Dict converted =
-      ConvertPkeySpkiToJwk(crypto::SignatureVerifier::RSA_PKCS1_SHA1, kSpki);
+  base::DictValue converted =
+      ConvertPkeySpkiToJwk(crypto::sign::RSA_PKCS1_SHA1, kSpki);
   EXPECT_TRUE(converted.empty());
 }
 
@@ -64,8 +65,8 @@ TEST(JWKUtilsTest, RS256) {
 
   base::Value expected =
       base::JSONReader::Read(jwk, base::JSON_PARSE_CHROMIUM_EXTENSIONS).value();
-  base::Value::Dict converted =
-      ConvertPkeySpkiToJwk(crypto::SignatureVerifier::RSA_PKCS1_SHA256, spki);
+  base::DictValue converted =
+      ConvertPkeySpkiToJwk(crypto::sign::RSA_PKCS1_SHA256, spki);
   EXPECT_EQ(converted, expected);
 }
 
@@ -79,8 +80,8 @@ TEST(JWKUtilsTest, ES256) {
   base::Value expected =
       base::JSONReader::Read(kJwk, base::JSON_PARSE_CHROMIUM_EXTENSIONS)
           .value();
-  base::Value::Dict converted =
-      ConvertPkeySpkiToJwk(crypto::SignatureVerifier::ECDSA_SHA256, kES256Spki);
+  base::DictValue converted =
+      ConvertPkeySpkiToJwk(crypto::sign::ECDSA_SHA256, kES256Spki);
   EXPECT_EQ(converted, expected);
 }
 
@@ -117,16 +118,15 @@ TEST(JWKUtilsTest, CreateJwkThumbprintRS256) {
       "n": "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw",
       "e": "AQAB"
   })json";
-  ASSERT_EQ(
-      ConvertPkeySpkiToJwk(crypto::SignatureVerifier::RSA_PKCS1_SHA256, kSpki),
-      base::JSONReader::Read(kJwk, base::JSON_PARSE_CHROMIUM_EXTENSIONS)
-          .value());
+  ASSERT_EQ(ConvertPkeySpkiToJwk(crypto::sign::RSA_PKCS1_SHA256, kSpki),
+            base::JSONReader::Read(kJwk, base::JSON_PARSE_CHROMIUM_EXTENSIONS)
+                .value());
 
   static constexpr char kExpectedThumbprint[] =
       "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs";
 
   std::string thumbprint =
-      CreateJwkThumbprint(crypto::SignatureVerifier::RSA_PKCS1_SHA256, kSpki);
+      CreateJwkThumbprint(crypto::sign::RSA_PKCS1_SHA256, kSpki);
   EXPECT_EQ(thumbprint, kExpectedThumbprint);
 }
 
@@ -135,16 +135,14 @@ TEST(JWKUtilsTest, CreateJwkThumbprintES256) {
       "_ECzPdFweUQepHljFjcCo0Oy5mhyMgyP5_DqdNhevXk";
 
   std::string thumbprint =
-      CreateJwkThumbprint(crypto::SignatureVerifier::ECDSA_SHA256, kES256Spki);
+      CreateJwkThumbprint(crypto::sign::ECDSA_SHA256, kES256Spki);
   EXPECT_EQ(thumbprint, kExpectedThumbprint);
 }
 
 TEST(JWKUtilsTest, CreateJwkThumbprintInvalidSpki) {
   static constexpr uint8_t kBadSpki[] = {0x01, 0x02, 0x03, 0x04};
 
-  EXPECT_EQ(
-      CreateJwkThumbprint(crypto::SignatureVerifier::ECDSA_SHA256, kBadSpki),
-      "");
+  EXPECT_EQ(CreateJwkThumbprint(crypto::sign::ECDSA_SHA256, kBadSpki), "");
 }
 
 }  // namespace

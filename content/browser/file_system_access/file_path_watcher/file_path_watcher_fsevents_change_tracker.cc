@@ -6,7 +6,8 @@
 
 #include <sys/stat.h>
 
-#include "base/containers/contains.h"
+#include <algorithm>
+
 #include "content/browser/file_system_access/file_path_watcher/file_path_watcher.h"
 
 namespace content {
@@ -103,8 +104,8 @@ void FilePathWatcherFSEventsChangeTracker::ReportChangeEvent(
 
 void FilePathWatcherFSEventsChangeTracker::DispatchEvents(
     std::map<FSEventStreamEventId, ChangeEvent> events) {
-  DCHECK(task_runner()->RunsTasksInCurrentSequence());
-  DCHECK(!target_.empty());
+  CHECK(task_runner()->RunsTasksInCurrentSequence(), base::NotFatalUntil::M159);
+  CHECK(!target_.empty(), base::NotFatalUntil::M159);
 
   // Don't issue callbacks after Cancel() has been called.
   if (callback_.is_null()) {
@@ -122,7 +123,7 @@ void FilePathWatcherFSEventsChangeTracker::DispatchEvents(
     const auto& [event_flags, event_path, event_inode] = it->second;
 
     // Skip coalesced events.
-    if (base::Contains(coalesced_event_ids, event_id)) {
+    if (std::ranges::contains(coalesced_event_ids, event_id)) {
       continue;
     }
 

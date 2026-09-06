@@ -10,14 +10,14 @@
 
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 
@@ -28,16 +28,16 @@ namespace {
 // Key used in dictionaries for the url.
 const char kURL[] = "url";
 
-// Returns a Value::Dict representing the supplied StartupTab.
-base::Value::Dict EncodeTab(const GURL& url) {
-  base::Value::Dict dict;
+// Returns a base::DictValue representing the supplied StartupTab.
+base::DictValue EncodeTab(const GURL& url) {
+  base::DictValue dict;
   dict.Set(kURL, url.spec());
   return dict;
 }
 
-// Encodes all the pinned tabs from |browser| into |serialized_tabs|.
+// Encodes all the pinned tabs from `browser` into `serialized_tabs`.
 void EncodePinnedTabs(BrowserWindowInterface* browser,
-                      base::Value::List& serialized_tabs) {
+                      base::ListValue& serialized_tabs) {
   const TabStripModel* const tab_model = browser->GetTabStripModel();
   for (const tabs::TabInterface* tab : *tab_model) {
     if (!tab->IsPinned()) {
@@ -53,9 +53,9 @@ void EncodePinnedTabs(BrowserWindowInterface* browser,
   }
 }
 
-// Decodes the previously written values in |value| to |tab|, returning true
+// Decodes the previously written values in `value` to `tab`, returning true
 // on success.
-std::optional<StartupTab> DecodeTab(const base::Value::Dict& value) {
+std::optional<StartupTab> DecodeTab(const base::DictValue& value) {
   const std::string* const url_string = value.FindString(kURL);
   return url_string ? std::make_optional(StartupTab(GURL(*url_string),
                                                     StartupTab::Type::kPinned))
@@ -77,7 +77,7 @@ void PinnedTabCodec::WritePinnedTabs(Profile* profile) {
     return;
   }
 
-  base::Value::List values;
+  base::ListValue values;
   ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
       [profile, &values](BrowserWindowInterface* browser) {
         if (browser->GetType() == BrowserWindowInterface::TYPE_NORMAL &&
@@ -98,7 +98,7 @@ void PinnedTabCodec::WritePinnedTabs(Profile* profile,
   }
 
   ScopedListPrefUpdate update(prefs, prefs::kPinnedTabs);
-  base::Value::List& values = update.Get();
+  base::ListValue& values = update.Get();
   values.clear();
   for (const auto& tab : tabs) {
     values.Append(EncodeTab(tab.url));

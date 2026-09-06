@@ -26,4 +26,7 @@ BASE_DECLARE_FEATURE(kThrottleFormInputAccessorySuggestionRefresh);
 // when the app is in the background.
 BASE_DECLARE_FEATURE(kFormInputAccessorySkipInputViewReloadInBackground);
 
+// Enables the keyboard accessory view to let touches pass through blank areas.
+BASE_DECLARE_FEATURE(kFormInputAccessoryPassThroughTouches);
+
 #endif  // IOS_CHROME_BROWSER_AUTOFILL_MODEL_FEATURES_H_

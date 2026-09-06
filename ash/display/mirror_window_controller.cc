@@ -4,6 +4,7 @@
 
 #include "ash/display/mirror_window_controller.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "ash/display/cursor_window_controller.h"
@@ -16,11 +17,11 @@
 #include "ash/host/root_window_transformer.h"
 #include "ash/root_window_settings.h"
 #include "ash/shell.h"
-#include "base/containers/contains.h"
 #include "base/memory/raw_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/single_thread_task_runner.h"
 #include "components/viz/common/surfaces/surface_id.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
@@ -28,7 +29,7 @@
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/compositor/compositor.h"
-#include "ui/compositor/layer.h"
+#include "ui/compositor/layer_surface.h"
 #include "ui/display/display_layout.h"
 #include "ui/display/display_transform.h"
 #include "ui/display/manager/display_manager.h"
@@ -189,7 +190,7 @@ void MirrorWindowController::UpdateWindow(
           display::Screen::Get()->GetPrimaryDisplay().bounds(), display);
     }
 
-    if (!base::Contains(mirroring_host_info_map_, display_info.id())) {
+    if (!mirroring_host_info_map_.contains(display_info.id())) {
       AshWindowTreeHostInitParams init_params;
       init_params.initial_bounds = display_info.bounds_in_native();
       init_params.display_id = display_info.id();
@@ -232,7 +233,8 @@ void MirrorWindowController::UpdateWindow(
 
       aura::Window* mirror_window = host_info->mirror_window =
           new aura::Window(nullptr);
-      mirror_window->Init(ui::LAYER_SOLID_COLOR);
+      mirror_window->Init(ui::LAYER_SURFACE);
+      mirror_window->SetTransparent(true);
       host->window()->AddChild(mirror_window);
       host_info->ash_host->SetRootWindowTransformer(std::move(transformer));
 
@@ -304,16 +306,16 @@ void MirrorWindowController::UpdateWindow(
     aura::Window* mirror_window = mirroring_host_info->mirror_window;
     mirror_window->SetBounds(gfx::Rect(mirror_size));
     mirror_window->Show();
-    mirror_window->layer()->SetShowReflectedSurface(reflecting_surface_id,
-                                                    mirror_size);
+    mirror_window->layer()->AsSurface()->SetShowReflectedSurface(
+        reflecting_surface_id, mirror_size);
   }
 
   // Deleting WTHs for disconnected displays.
   if (mirroring_host_info_map_.size() > display_info_list.size()) {
     for (MirroringHostInfoMap::iterator iter = mirroring_host_info_map_.begin();
          iter != mirroring_host_info_map_.end();) {
-      if (!base::Contains(display_info_list, iter->first,
-                          &display::ManagedDisplayInfo::id)) {
+      if (!std::ranges::contains(display_info_list, iter->first,
+                                 &display::ManagedDisplayInfo::id)) {
         CloseAndDeleteHost(iter->second, true);
         iter = mirroring_host_info_map_.erase(iter);
       } else {
@@ -357,6 +359,7 @@ void MirrorWindowController::CloseIfNotNecessary() {
 }
 
 void MirrorWindowController::Close(bool delay_host_deletion) {
+  current_event_targeter_src_host_ = nullptr;
   for (auto& info : mirroring_host_info_map_)
     CloseAndDeleteHost(info.second, delay_host_deletion);
   mirroring_host_info_map_.clear();

@@ -18,7 +18,6 @@ from unexpected_passes import gpu_unittest_utils as gpu_uu
 
 
 class QueryBuilderUnittest(unittest.TestCase):
-
   def setUp(self) -> None:
     self._patcher = mock.patch.object(subprocess, 'Popen')
     self._popen_mock = self._patcher.start()
@@ -32,50 +31,88 @@ class QueryBuilderUnittest(unittest.TestCase):
   def testSuiteNameTranslation(self) -> None:
     """Tests that the suite passed to the query is auto-translated."""
     # The key is the return value of Name() for a test suite, while the value is
-    # the last part of the Python module for the test file (i.e. the name of the
-    # file without .py). The former is used when running the tests, while the
-    # latter is used by ResultDB for reporting.
-    suites_to_modules = {
-        'cast_streaming': 'cast_streaming_integration_test',
-        'context_lost': 'context_lost_integration_test',
-        'expected_color': 'expected_color_test',
-        'gpu_process': 'gpu_process_integration_test',
-        'hardware_accelerated_feature':
-        'hardware_accelerated_feature_integration_test',
-        'info_collection': 'info_collection_test',
-        'noop_sleep': 'noop_sleep_integration_test',
-        'pixel': 'pixel_integration_test',
-        'power': 'power_measurement_integration_test',
-        'screenshot_sync': 'screenshot_sync_integration_test',
-        'trace_test': 'trace_integration_test',
-        'webcodecs': 'webcodecs_integration_test',
-        'webgl1_conformance': 'webgl1_conformance_integration_test',
-        'webgl2_conformance': 'webgl2_conformance_integration_test',
-        'webgpu_cts': 'webgpu_cts_integration_test',
+    # the qualified name of the test class relative to //content/test/gpu. This
+    # value is reported to ResultDB as the gpu_test_class tag.
+    suites_to_classes = {
+      'cast_streaming': (
+        'gpu_tests.cast_streaming_integration_test.CastStreamingIntegrationTest'
+      ),
+      'context_lost': (
+        'gpu_tests.context_lost_integration_test.ContextLostIntegrationTest'
+      ),
+      'expected_color': ('gpu_tests.expected_color_test.ExpectedColorTest'),
+      'gpu_process': (
+        'gpu_tests.gpu_process_integration_test.GpuProcessIntegrationTest'
+      ),
+      'hardware_accelerated_feature': (
+        'gpu_tests.'
+        'hardware_accelerated_feature_integration_test.'
+        'HardwareAcceleratedFeatureIntegrationTest'
+      ),
+      'info_collection': ('gpu_tests.info_collection_test.InfoCollectionTest'),
+      'noop_sleep': (
+        'gpu_tests.noop_sleep_integration_test.NoopSleepIntegrationTest'
+      ),
+      'pixel': 'gpu_tests.pixel_integration_test.PixelIntegrationTest',
+      'power': (
+        'gpu_tests.'
+        'power_measurement_integration_test.'
+        'PowerMeasurementIntegrationTest'
+      ),
+      'screenshot_sync': (
+        'gpu_tests.'
+        'screenshot_sync_integration_test.'
+        'ScreenshotSyncIntegrationTest'
+      ),
+      'trace_test': ('gpu_tests.trace_integration_test.TraceIntegrationTest'),
+      'webcodecs': (
+        'gpu_tests.webcodecs_integration_test.WebCodecsIntegrationTest'
+      ),
+      'webgl1_conformance': (
+        'gpu_tests.'
+        'webgl1_conformance_integration_test.'
+        'WebGL1ConformanceIntegrationTest'
+      ),
+      'webgl2_conformance': (
+        'gpu_tests.'
+        'webgl2_conformance_integration_test.'
+        'WebGL2ConformanceIntegrationTest'
+      ),
+      'webgpu_compat_cts': (
+        'gpu_tests.'
+        'webgpu_compat_cts_integration_test.'
+        'WebGpuCompatCtsIntegrationTest'
+      ),
+      'webgpu_cts': (
+        'gpu_tests.webgpu_cts_integration_test.WebGpuCtsIntegrationTest'
+      ),
     }
 
-    def assertSuiteInQuery(suite: str, call_args: tuple) -> None:
+    def assertTestClassInQuery(test_class: str, call_args: tuple) -> None:
       query = call_args[0][0]
-      s = f'gpu_tests\\\\.{suite}\\\\.'
+      s = f'"gpu_test_class", "{test_class}"'
       self.assertIn(s, query)
 
-    for suite, module in suites_to_modules.items():
+    for suite, test_class in suites_to_classes.items():
       querier = gpu_uu.CreateGenericGpuQuerier(suite=suite)
-      with mock.patch.object(querier, '_GetSeriesForQuery',
-                             return_value=[]) as query_mock:
+      with mock.patch.object(
+        querier, '_GetSeriesForQuery', return_value=[]
+      ) as query_mock:
         for _ in querier.GetBuilderGroupedQueryResults(
-            constants.BuilderTypes.CI, False):
+          constants.BuilderTypes.CI, False
+        ):
           pass
         query_mock.assert_called_once()
-        assertSuiteInQuery(module, query_mock.call_args)
+        assertTestClassInQuery(test_class, query_mock.call_args)
 
 
 class GeneratedQueryUnittest(unittest.TestCase):
   maxDiff = None
 
   def setUp(self):
-    self._querier = gpu_uu.CreateGenericGpuQuerier(suite='webgl1_conformance',
-                                                   num_samples=15)
+    self._querier = gpu_uu.CreateGenericGpuQuerier(
+      suite='webgl1_conformance', num_samples=15
+    )
 
   def testPublicCi(self):
     """Tests that the generated public CI query is as expected."""
@@ -101,7 +138,9 @@ WITH
           build_inv_id,
           value AS builder,
           partition_time,
-          RANK() OVER (PARTITION BY value ORDER BY partition_time DESC) AS rank_idx,
+          RANK() OVER (
+            PARTITION BY value ORDER BY partition_time DESC
+          ) AS rank_idx,
         FROM all_builds
       )
     SELECT
@@ -146,9 +185,7 @@ WITH
       DATE(tr.partition_time) > DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
       AND exported.id = build_inv_id
       AND status != "SKIP"
-      AND REGEXP_CONTAINS(
-          test_id,
-          "gpu_tests\\\\.webgl1_conformance_integration_test\\\\.")
+      AND STRUCT("gpu_test_class", "gpu_tests.webgl1_conformance_integration_test.WebGL1ConformanceIntegrationTest") IN UNNEST(tags)
   )
 SELECT id, test_id, test_name, builder_name, status, step_name, typ_tags
 FROM results
@@ -183,7 +220,9 @@ WITH
           build_inv_id,
           value AS builder,
           partition_time,
-          RANK() OVER (PARTITION BY value ORDER BY partition_time DESC) AS rank_idx,
+          RANK() OVER (
+            PARTITION BY value ORDER BY partition_time DESC
+          ) AS rank_idx,
         FROM all_builds
       )
     SELECT
@@ -228,9 +267,7 @@ WITH
       DATE(tr.partition_time) > DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
       AND exported.id = build_inv_id
       AND status != "SKIP"
-      AND REGEXP_CONTAINS(
-          test_id,
-          "gpu_tests\\\\.webgl1_conformance_integration_test\\\\.")
+      AND STRUCT("gpu_test_class", "gpu_tests.webgl1_conformance_integration_test.WebGL1ConformanceIntegrationTest") IN UNNEST(tags)
   )
 SELECT id, test_id, test_name, builder_name, status, step_name, typ_tags
 FROM results
@@ -292,7 +329,9 @@ WITH
           build_inv_id,
           value AS builder,
           partition_time,
-          RANK() OVER (PARTITION BY value ORDER BY partition_time DESC) AS rank_idx,
+          RANK() OVER (
+            PARTITION BY value ORDER BY partition_time DESC
+          ) AS rank_idx,
         FROM all_builds
       )
     SELECT
@@ -337,9 +376,7 @@ WITH
       DATE(tr.partition_time) > DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
       AND exported.id = build_inv_id
       AND status != "SKIP"
-      AND REGEXP_CONTAINS(
-          test_id,
-          "gpu_tests\\\\.webgl1_conformance_integration_test\\\\.")
+      AND STRUCT("gpu_test_class", "gpu_tests.webgl1_conformance_integration_test.WebGL1ConformanceIntegrationTest") IN UNNEST(tags)
   )
 SELECT id, test_id, test_name, builder_name, status, step_name, typ_tags
 FROM results
@@ -389,7 +426,9 @@ WITH
           build_inv_id,
           value AS builder,
           partition_time,
-          RANK() OVER (PARTITION BY value ORDER BY partition_time DESC) AS rank_idx,
+          RANK() OVER (
+            PARTITION BY value ORDER BY partition_time DESC
+          ) AS rank_idx,
         FROM all_builds
       )
     SELECT
@@ -434,9 +473,7 @@ WITH
       DATE(tr.partition_time) > DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
       AND exported.id = build_inv_id
       AND status != "SKIP"
-      AND REGEXP_CONTAINS(
-          test_id,
-          "gpu_tests\\\\.webgl1_conformance_integration_test\\\\.")
+      AND STRUCT("gpu_test_class", "gpu_tests.webgl1_conformance_integration_test.WebGL1ConformanceIntegrationTest") IN UNNEST(tags)
   )
 SELECT id, test_id, test_name, builder_name, status, step_name, typ_tags
 FROM results

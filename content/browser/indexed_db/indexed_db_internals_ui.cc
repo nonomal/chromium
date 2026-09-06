@@ -22,7 +22,6 @@
 #include "content/browser/devtools/service_worker_devtools_agent_host.h"
 #include "content/browser/devtools/service_worker_devtools_manager.h"
 #include "content/browser/devtools/shared_worker_devtools_agent_host.h"
-#include "content/browser/indexed_db/indexed_db_internals.mojom-forward.h"
 #include "content/browser/indexed_db/indexed_db_internals.mojom.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/service_worker/service_worker_info.h"
@@ -116,7 +115,7 @@ IndexedDBInternalsUI::IndexedDBInternalsUI(WebUI* web_ui)
       "trusted-types static-types lit-html-desktop;");
   source->UseStringsJs();
   source->AddResourcePaths(kIndexedDbResources);
-  source->AddResourcePath("", IDR_INDEXED_DB_INDEXEDDB_INTERNALS_HTML);
+  source->SetDefaultResource(IDR_INDEXED_DB_INDEXEDDB_INTERNALS_HTML);
 }
 
 WEB_UI_CONTROLLER_TYPE_IMPL(IndexedDBInternalsUI)
@@ -138,7 +137,7 @@ void IndexedDBInternalsUI::BindInterface(
 
 void IndexedDBInternalsUI::GetAllBucketsAcrossAllStorageKeys(
     GetAllBucketsAcrossAllStorageKeysCallback callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M158);
 
   BrowserContext* browser_context =
       web_ui()->GetWebContents()->GetBrowserContext();
@@ -203,7 +202,7 @@ storage::mojom::IndexedDBControl* IndexedDBInternalsUI::GetBucketControl(
   browser_context->ForEachLoadedStoragePartition(
       [&](StoragePartition* storage_partition) {
         if (storage_partition->GetPath() == partition_path) {
-          DCHECK_EQ(control, nullptr);
+          CHECK_EQ(control, nullptr, base::NotFatalUntil::M158);
           control = &storage_partition->GetIndexedDBControl();
         }
       });
@@ -214,7 +213,7 @@ storage::mojom::IndexedDBControl* IndexedDBInternalsUI::GetBucketControl(
 void IndexedDBInternalsUI::DownloadBucketData(
     storage::BucketId bucket_id,
     DownloadBucketDataCallback callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M158);
 
   storage::mojom::IndexedDBControl* control = GetBucketControl(bucket_id);
   if (!control) {
@@ -223,7 +222,7 @@ void IndexedDBInternalsUI::DownloadBucketData(
   }
 
   control->ForceClose(
-      bucket_id, storage::mojom::ForceCloseReason::FORCE_CLOSE_INTERNALS_PAGE,
+      bucket_id,
       base::BindOnce(
           [](base::WeakPtr<IndexedDBInternalsUI> handler,
              storage::BucketId bucket_id,
@@ -243,7 +242,7 @@ void IndexedDBInternalsUI::DownloadBucketData(
 
 void IndexedDBInternalsUI::ForceClose(storage::BucketId bucket_id,
                                       ForceCloseCallback callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M158);
 
   storage::mojom::IndexedDBControl* control = GetBucketControl(bucket_id);
   if (!control) {
@@ -251,19 +250,14 @@ void IndexedDBInternalsUI::ForceClose(storage::BucketId bucket_id,
     return;
   }
 
-  control->ForceClose(
-      bucket_id, storage::mojom::ForceCloseReason::FORCE_CLOSE_INTERNALS_PAGE,
-      base::BindOnce(
-          [](ForceCloseCallback callback) {
-            std::move(callback).Run(std::nullopt);
-          },
-          std::move(callback)));
+  control->ForceClose(bucket_id,
+                      base::BindOnce(std::move(callback), std::nullopt));
 }
 
 void IndexedDBInternalsUI::StartMetadataRecording(
     storage::BucketId bucket_id,
     StartMetadataRecordingCallback callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M158);
 
   storage::mojom::IndexedDBControl* control = GetBucketControl(bucket_id);
   if (!control) {
@@ -277,7 +271,7 @@ void IndexedDBInternalsUI::StartMetadataRecording(
 void IndexedDBInternalsUI::StopMetadataRecording(
     storage::BucketId bucket_id,
     StopMetadataRecordingCallback callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M158);
 
   storage::mojom::IndexedDBControl* control = GetBucketControl(bucket_id);
   if (!control) {
@@ -292,7 +286,7 @@ void IndexedDBInternalsUI::StopMetadataRecording(
 void IndexedDBInternalsUI::InspectClient(
     const storage::BucketClientInfo& client_info,
     InspectClientCallback callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M158);
   if (!devtools_agent_hosts_created_) {
     // If a DevTools window has never been opened in this browser session,
     // DevToolsAgentHosts will not have been created for RenderFrameHosts.
@@ -315,7 +309,7 @@ void IndexedDBInternalsUI::OnDownloadDataReady(
     bool success,
     const base::FilePath& temp_path,
     const base::FilePath& zip_path) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M158);
   if (!success) {
     std::move(callback).Run("Error downloading database");
     return;

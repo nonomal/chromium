@@ -4,12 +4,12 @@
 
 #include "chrome/browser/ash/notifications/idle_app_name_notification_view.h"
 
+#include "ash/constants/chrome_switches.h"
 #include "base/command_line.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "extensions/common/manifest_constants.h"
@@ -25,8 +25,7 @@ const char kTestAppName[] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 class IdleAppNameNotificationViewTest : public BrowserWithTestWindowTest {
  public:
-  IdleAppNameNotificationViewTest()
-      : BrowserWithTestWindowTest(Browser::TYPE_NORMAL) {}
+  IdleAppNameNotificationViewTest() = default;
 
   IdleAppNameNotificationViewTest(const IdleAppNameNotificationViewTest&) =
       delete;
@@ -38,11 +37,11 @@ class IdleAppNameNotificationViewTest : public BrowserWithTestWindowTest {
   void SetUp() override {
     // Add the application switch.
     base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-        ::switches::kAppId, kTestAppName);
+        ash::chrome_switches::kAppId, kTestAppName);
 
     BrowserWithTestWindowTest::SetUp();
 
-    base::Value::Dict manifest;
+    base::DictValue manifest;
     manifest.Set(extensions::manifest_keys::kName, "Test");
     manifest.Set(extensions::manifest_keys::kVersion, "1");
     manifest.Set(extensions::manifest_keys::kManifestVersion, 2);
@@ -53,7 +52,7 @@ class IdleAppNameNotificationViewTest : public BrowserWithTestWindowTest {
     correct_extension_ = extensions::Extension::Create(
         base::FilePath(), extensions::mojom::ManifestLocation::kUnpacked,
         manifest, extensions::Extension::NO_FLAGS, kTestAppName, &error);
-    base::Value::Dict manifest2;
+    base::DictValue manifest2;
     manifest2.Set(extensions::manifest_keys::kName, "Test");
     manifest2.Set(extensions::manifest_keys::kVersion, "1");
     manifest2.Set(extensions::manifest_keys::kDescription, "Test app");

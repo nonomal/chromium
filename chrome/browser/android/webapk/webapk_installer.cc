@@ -49,6 +49,7 @@
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom.h"
@@ -177,7 +178,7 @@ void WebApkInstaller::SetTimeoutMs(int timeout_ms) {
   webapk_server_timeout_ms_ = timeout_ms;
 }
 
-void WebApkInstaller::OnInstallFinished(JNIEnv* env, jint result) {
+void WebApkInstaller::OnInstallFinished(JNIEnv* env, int32_t result) {
   OnResult(static_cast<webapps::WebApkInstallResult>(result));
 }
 
@@ -217,7 +218,8 @@ void WebApkInstaller::InstallOrUpdateWebApk(const std::string& package_name,
                                       package_name);
     Java_WebApkInstaller_installWebApkAsync(
         env, java_ref_, webapk_package_, webapk_version_, short_name_, token,
-        webapps::ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_PWA);
+        webapps::ShortcutInfo::SOURCE_ADD_TO_HOMESCREEN_PWA,
+        manifest_id_.spec());
   } else {
     Java_WebApkInstaller_updateAsync(env, java_ref_, webapk_package_,
                                      webapk_version_, short_name_, token);
@@ -281,6 +283,10 @@ void WebApkInstaller::InstallAsync(content::WebContents* web_contents,
   short_name_ = shortcut_info.short_name;
   finish_callback_ = std::move(finish_callback);
   manifest_id_ = install_shortcut_info_->manifest_id;
+
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_WebApkInstaller_registerPending(env, java_ref_, manifest_id_.spec());
+
   install_source_ = install_source;
   task_type_ = INSTALL;
 
@@ -297,7 +303,7 @@ void WebApkInstaller::CheckFreeSpace() {
   Java_WebApkInstaller_checkFreeSpace(env, java_ref_);
 }
 
-void WebApkInstaller::OnGotSpaceStatus(JNIEnv* env, jint status) {
+void WebApkInstaller::OnGotSpaceStatus(JNIEnv* env, int32_t status) {
   SpaceStatus space_status = static_cast<SpaceStatus>(status);
   if (space_status == SpaceStatus::NOT_ENOUGH_SPACE) {
     OnResult(webapps::WebApkInstallResult::NOT_ENOUGH_SPACE);
@@ -414,7 +420,7 @@ void WebApkInstaller::OnURLLoaderComplete(
   base::StringToInt(response->version(), &webapk_version_);
   const std::string& token = response->token();
   if (task_type_ == UPDATE && token.empty()) {
-    // https://crbug.com/680131. The server sends an empty URL if the server
+    // https://crbug.com/40501010. The server sends an empty URL if the server
     // does not have a newer WebAPK to update to.
     relax_updates_ = response->relax_updates();
     OnResult(webapps::WebApkInstallResult::SUCCESS);

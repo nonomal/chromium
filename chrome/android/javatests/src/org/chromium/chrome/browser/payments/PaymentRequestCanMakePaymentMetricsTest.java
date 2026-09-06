@@ -14,18 +14,20 @@ import org.junit.runner.RunWith;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
+import org.chromium.chrome.R;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.AppPresence;
 import org.chromium.chrome.browser.payments.PaymentRequestTestRule.FactorySpeed;
 import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.R;
 import org.chromium.components.payments.Event2;
 import org.chromium.components.prefs.PrefService;
 import org.chromium.components.user_prefs.UserPrefs;
+import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.modaldialog.ModalDialogProperties;
 
 import java.util.concurrent.TimeoutException;
@@ -33,6 +35,7 @@ import java.util.concurrent.TimeoutException;
 /** A payment integration test for the correct log of the CanMakePayment metrics. */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+@DisableIf.Device(DeviceFormFactor.DESKTOP) // https://crbug.com/376100658
 public class PaymentRequestCanMakePaymentMetricsTest {
     @Rule
     public PaymentRequestTestRule mPaymentRequestTestRule =
@@ -45,7 +48,7 @@ public class PaymentRequestCanMakePaymentMetricsTest {
      */
     @Test
     @MediumTest
-    @DisabledTest(message = "crbug.com/1182234")
+    @DisabledTest(message = "crbug.com/40170709")
     @Feature({"Payments"})
     @CommandLineFlags.Add({"disable-features=PaymentRequestBasicCard"})
     public void testCannotMakePayment_UserAbort() throws TimeoutException {
@@ -76,7 +79,9 @@ public class PaymentRequestCanMakePaymentMetricsTest {
                 Event2.SHOWN
                         | Event2.USER_ABORTED
                         | Event2.HAD_INITIAL_FORM_OF_PAYMENT
-                        | Event2.REQUEST_METHOD_OTHER;
+                        | Event2.REQUEST_METHOD_OTHER
+                        | Event2.CAN_MAKE_PAYMENT_CALLED
+                        | Event2.HAS_ENROLLED_INSTRUMENT_CALLED;
         Assert.assertEquals(
                 1,
                 RecordHistogram.getHistogramValueCountForTesting(
@@ -90,7 +95,7 @@ public class PaymentRequestCanMakePaymentMetricsTest {
      */
     @Test
     @MediumTest
-    @DisabledTest(message = "crbug.com/1182234")
+    @DisabledTest(message = "crbug.com/40170709")
     @Feature({"Payments"})
     @CommandLineFlags.Add({"disable-features=PaymentRequestBasicCard"})
     public void testCannotMakePayment_Complete() throws TimeoutException {
@@ -131,7 +136,9 @@ public class PaymentRequestCanMakePaymentMetricsTest {
                         | Event2.PAY_CLICKED
                         | Event2.COMPLETED
                         | Event2.REQUEST_METHOD_OTHER
-                        | Event2.SELECTED_CREDIT_CARD;
+                        | Event2.SELECTED_CREDIT_CARD
+                        | Event2.CAN_MAKE_PAYMENT_CALLED
+                        | Event2.HAS_ENROLLED_INSTRUMENT_CALLED;
         Assert.assertEquals(
                 1,
                 RecordHistogram.getHistogramValueCountForTesting(
@@ -166,7 +173,9 @@ public class PaymentRequestCanMakePaymentMetricsTest {
                 Event2.SHOWN
                         | Event2.OTHER_ABORTED
                         | Event2.HAD_INITIAL_FORM_OF_PAYMENT
-                        | Event2.REQUEST_METHOD_OTHER;
+                        | Event2.REQUEST_METHOD_OTHER
+                        | Event2.CAN_MAKE_PAYMENT_CALLED
+                        | Event2.HAS_ENROLLED_INSTRUMENT_CALLED;
         Assert.assertEquals(
                 1,
                 RecordHistogram.getHistogramValueCountForTesting(
@@ -200,7 +209,9 @@ public class PaymentRequestCanMakePaymentMetricsTest {
                         | Event2.COMPLETED
                         | Event2.HAD_INITIAL_FORM_OF_PAYMENT
                         | Event2.REQUEST_METHOD_OTHER
-                        | Event2.SELECTED_OTHER;
+                        | Event2.SELECTED_OTHER
+                        | Event2.CAN_MAKE_PAYMENT_CALLED
+                        | Event2.HAS_ENROLLED_INSTRUMENT_CALLED;
         Assert.assertEquals(
                 1,
                 RecordHistogram.getHistogramValueCountForTesting(
@@ -246,7 +257,9 @@ public class PaymentRequestCanMakePaymentMetricsTest {
                         | Event2.COMPLETED
                         | Event2.HAD_INITIAL_FORM_OF_PAYMENT
                         | Event2.REQUEST_METHOD_OTHER
-                        | Event2.SELECTED_OTHER;
+                        | Event2.SELECTED_OTHER
+                        | Event2.CAN_MAKE_PAYMENT_CALLED
+                        | Event2.HAS_ENROLLED_INSTRUMENT_CALLED;
         Assert.assertEquals(
                 1,
                 RecordHistogram.getHistogramValueCountForTesting(

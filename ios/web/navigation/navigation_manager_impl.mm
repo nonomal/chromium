@@ -10,6 +10,7 @@
 #import <memory>
 #import <utility>
 
+#import "base/auto_reset.h"
 #import "base/containers/span.h"
 #import "base/feature_list.h"
 #import "base/functional/bind.h"
@@ -24,7 +25,9 @@
 #import "base/strings/string_util.h"
 #import "base/strings/sys_string_conversions.h"
 #import "base/timer/elapsed_timer.h"
+#import "ios/public/provider/web/navigation_api.h"
 #import "ios/web/common/features.h"
+#import "ios/web/navigation/back_forward_navigation_type.h"
 #import "ios/web/navigation/crw_navigation_item_holder.h"
 #import "ios/web/navigation/navigation_manager_delegate.h"
 #import "ios/web/navigation/wk_navigation_util.h"
@@ -36,12 +39,17 @@
 #import "ios/web/web_state/ui/crw_web_view_navigation_proxy.h"
 #import "net/base/apple/url_conversions.h"
 #import "ui/base/page_transition_types.h"
+#import "url/origin.h"
 
 namespace {
 
 void SetNavigationItemInWKItem(WKBackForwardListItem* wk_item,
                                std::unique_ptr<web::NavigationItemImpl> item) {
   DCHECK(wk_item);
+  if (item) {
+    item->SetWasCreatedAutomatically(
+        web::provider::WasCreatedAutomatically(wk_item));
+  }
   [[CRWNavigationItemHolder holderForBackForwardListItem:wk_item]
       setNavigationItem:std::move(item)];
 }
@@ -110,6 +118,72 @@ namespace web {
 
 const char kRestoreNavigationItemCount[] = "IOS.RestoreNavigationItemCount";
 
+BASE_FEATURE(kSkipAutomaticNavigationInBackForwardListKillSwitch,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+bool SkipAutomaticNavigationInBackForwardList() {
+  return !base::FeatureList::IsEnabled(
+      kSkipAutomaticNavigationInBackForwardListKillSwitch);
+}
+
+class NavigationManagerImpl::GoToParams {
+ public:
+  constexpr GoToParams(GoToParams&&) = default;
+  constexpr GoToParams(const GoToParams&) = default;
+
+  GoToParams& operator=(GoToParams&&) = delete;
+  GoToParams& operator=(const GoToParams&) = delete;
+
+  constexpr ~GoToParams() = default;
+
+  constexpr static GoToParams GoBackward() {
+    return GoToParams(BackForwardNavigationType::kBackward, -1);
+  }
+
+  constexpr static GoToParams GoForward() {
+    return GoToParams(BackForwardNavigationType::kForward, -1);
+  }
+
+  constexpr static GoToParams GoToIndex(int index) {
+    return GoToParams(BackForwardNavigationType::kToEntry, index);
+  }
+
+  GoToParams& SetInitiationType(NavigationInitiationType value) {
+    initiation_type_ = value;
+    return *this;
+  }
+
+  GoToParams& SetHasUserGesture(bool value) {
+    has_user_gesture_ = value;
+    return *this;
+  }
+
+  constexpr BackForwardNavigationType navigation_type() const {
+    return navigation_type_;
+  }
+
+  constexpr NavigationInitiationType initiation_type() const {
+    return initiation_type_;
+  }
+
+  constexpr bool has_user_gesture() const { return has_user_gesture_; }
+
+  constexpr int index() const {
+    CHECK_EQ(navigation_type_, BackForwardNavigationType::kToEntry);
+    return index_;
+  }
+
+ private:
+  constexpr GoToParams(BackForwardNavigationType navigation_type, int index)
+      : navigation_type_(navigation_type), index_(index) {}
+
+  const BackForwardNavigationType navigation_type_;
+  const int index_;
+
+  NavigationInitiationType initiation_type_ = NavigationInitiationType::NONE;
+  bool has_user_gesture_ = false;
+};
+
 NavigationManager::WebLoadParams::WebLoadParams(const GURL& url) : url(url) {}
 
 NavigationManager::WebLoadParams::~WebLoadParams() = default;
@@ -132,7 +206,7 @@ NavigationManagerImpl::~NavigationManagerImpl() = default;
 
 void NavigationManagerImpl::RestoreFromProto(
     const proto::NavigationStorage& storage) {
-  std::vector<std::unique_ptr<NavigationItem>> items;
+  std::vector<std::unique_ptr<NavigationItemImpl>> items;
   items.reserve(storage.items_size());
 
   for (const auto& item_storage : storage.items()) {
@@ -141,7 +215,7 @@ void NavigationManagerImpl::RestoreFromProto(
     items.push_back(std::move(item));
   }
 
-  Restore(storage.last_committed_item_index(), std::move(items));
+  RestoreImpl(storage.last_committed_item_index(), std::move(items));
 }
 
 void NavigationManagerImpl::SerializeToProto(
@@ -213,6 +287,16 @@ void NavigationManagerImpl::SerializeToProto(
   for (const auto* item : base::span(items).subspan(offset, length)) {
     item->SerializeToProto(*storage.add_items());
   }
+
+  // If the navigation history is empty but there is a pending navigation item,
+  // serialize the pending item as the initial committed item.
+  if (storage.items_size() == 0) {
+    const NavigationItemImpl* pending_item = GetPendingItemImpl();
+    if (pending_item) {
+      pending_item->SerializeToProto(*storage.add_items());
+      storage.set_last_committed_item_index(0);
+    }
+  }
 }
 
 void NavigationManagerImpl::SetNativeSessionFetcher(
@@ -262,6 +346,13 @@ void NavigationManagerImpl::AddPendingItem(
       &transient_url_rewriters_);
   RemoveTransientURLRewriters();
 
+  if (ui::PageTransitionCoreTypeIs(navigation_type,
+                                   ui::PAGE_TRANSITION_RELOAD) &&
+      last_committed_item && last_committed_item->GetURL() == url) {
+    pending_item_->SetInternalScrollToTextFragment(
+        last_committed_item->GetInternalScrollToTextFragment());
+  }
+
   if (!next_pending_url_should_skip_serialization_.is_empty() &&
       url == next_pending_url_should_skip_serialization_) {
     pending_item_->SetShouldSkipSerialization(true);
@@ -296,7 +387,8 @@ void NavigationManagerImpl::AddPendingItem(
 
   bool is_form_post =
       is_post_navigation &&
-      (navigation_type & ui::PageTransition::PAGE_TRANSITION_FORM_SUBMIT);
+      ui::PageTransitionCoreTypeIs(
+          navigation_type, ui::PageTransition::PAGE_TRANSITION_FORM_SUBMIT);
   if (proxy.backForwardList.currentItem && isCurrentURLSameAsPending &&
       !is_form_post && !is_error_navigation) {
     pending_item_index_ = web_view_cache_.GetCurrentItemIndex();
@@ -554,9 +646,8 @@ void NavigationManagerImpl::UpdateCurrentItemForReplaceState(
   current_item->SetPostData(nil);
 }
 
-void NavigationManagerImpl::GoToIndex(int index,
-                                      NavigationInitiationType initiation_type,
-                                      bool has_user_gesture) {
+void NavigationManagerImpl::GoTo(GoToParams params) {
+  const int index = IndexForParams(params);
   if (index < 0 || index >= GetItemCount()) {
     // Button actions are executed asynchronously, so it is possible for the
     // client to call this with an invalid index if the user quickly taps the
@@ -568,10 +659,9 @@ void NavigationManagerImpl::GoToIndex(int index,
   delegate_->ClearDialogs();
 
   if (!web_view_cache_.IsAttachedToWebView()) {
-    // GoToIndex from detached mode is equivalent to restoring history with
+    // GoTo(...) from detached mode is equivalent to restoring history with
     // `last_committed_item_index` updated to `index`.
-    Restore(index, web_view_cache_.ReleaseCachedItems());
-    DCHECK(web_view_cache_.IsAttachedToWebView());
+    RestoreImpl(index, web_view_cache_.ReleaseCachedItems());
     return;
   }
 
@@ -581,10 +671,20 @@ void NavigationManagerImpl::GoToIndex(int index,
       item->GetTransitionType() | ui::PAGE_TRANSITION_FORWARD_BACK));
   WKBackForwardListItem* wk_item = web_view_cache_.GetWKItemAtIndex(index);
   if (wk_item) {
-    going_to_back_forward_list_item_ = true;
-    delegate_->GoToBackForwardListItem(wk_item, item, initiation_type,
-                                       has_user_gesture);
-    going_to_back_forward_list_item_ = false;
+    base::AutoReset<bool> auto_reset(&going_to_back_forward_list_item_, true);
+
+    // When determining the target of the back/forward navigation using the
+    // heuristic in NavigationManagerImpl, use kToEntry as the navigation
+    // type to avoid using both //ios/web and WebKit heuristics.
+
+    const BackForwardNavigationType navigation_type =
+        SkipAutomaticNavigationInBackForwardList()
+            ? BackForwardNavigationType::kToEntry
+            : params.navigation_type();
+
+    delegate_->GoToBackForwardListItem(wk_item, item, navigation_type,
+                                       params.initiation_type(),
+                                       params.has_user_gesture());
   } else {
     DCHECK(index == 0 && empty_window_open_item_)
         << " wk_item should not be nullptr. index: " << index
@@ -593,9 +693,120 @@ void NavigationManagerImpl::GoToIndex(int index,
   }
 }
 
+int NavigationManagerImpl::IndexForParams(GoToParams params) {
+  const BackForwardNavigationType type = params.navigation_type();
+  if (type == BackForwardNavigationType::kToEntry) {
+    // For kToEntry, the index is stored in params.
+    return params.index();
+  }
+
+  if (!SkipAutomaticNavigationInBackForwardList()) {
+    // If the feature is disabled, then use GetIndexForOffset(+/-1) to
+    // compute the target index.
+    return GetIndexForOffset(type == BackForwardNavigationType::kForward ? +1
+                                                                         : -1);
+  }
+
+  // If the feature is enabled, we need to check whether there is automatic
+  // items (i.e. items inserted by "pushState(...)" or "replaceState(...)"
+  // calls in JavaScript).
+
+  // Say we have the following navigations, where #foo, ... are inserted by
+  // the page using "pushState(...)" when the document is loaded without any
+  // user interaction (i.e. automatic items). From the user perspective, those
+  // navigations are unexpected, and moving back/forward should skip over them.
+  //
+  //  a.com/a -> b.com/b -> b.com/b#foo -> b.com/b#bar -> c.com/c
+
+  int index = -1;
+  NavigationItemImpl* item = nullptr;
+  const int current_index = GetIndexForOffset(0);
+
+  switch (type) {
+    case BackForwardNavigationType::kToEntry:
+      NOTREACHED();
+
+    case BackForwardNavigationType::kBackward: {
+      // When navigating back, if the current item is not an automatic item
+      // (e.g. c.com/c), then the navigation is relative to `current_index`.
+      item = GetNavigationItemImplAtIndex(current_index);
+      if (!item || !item->WasCreatedAutomatically()) {
+        return current_index - 1;
+      }
+
+      // Otherwise, the current item is part of a chain of automatic items,
+      // skip over all those items to determine the item that corresponded
+      // to an user initiated navigation.
+      //
+      // In the exemple above, this would correspond to a back initiated
+      // from either "b.com/b#foo" or "b.com/b#bar" which should both be
+      // interpreted as relative to "b.com" instead.
+      index = current_index - 1;
+      item = GetNavigationItemImplAtIndex(index);
+      while (item && item->WasCreatedAutomatically()) {
+        index -= 1;
+        item = GetNavigationItemImplAtIndex(index);
+      }
+
+      if (!item) {
+        // The navigation history is incomplete, and all items up to the
+        // current item are automatic. Fall back to navigating relative
+        // to `current_index`.
+        return current_index - 1;
+      }
+
+      index -= 1;
+      item = GetNavigationItemImplAtIndex(index);
+      if (!item) {
+        // The navigation history is incomplete, and all items up to the
+        // current item are automatic. Fall back to navigating relative
+        // to `current_index`.
+        return current_index - 1;
+      }
+
+      return index;
+    }
+
+    case BackForwardNavigationType::kForward: {
+      // Starting from current_index + 1, skip over any automatic item
+      // (this corresponding navigating forward from "b.com/b" where we
+      // should skip over "b.com/b#foo" and "b.com/b#bar").
+      index = current_index + 1;
+      item = GetNavigationItemImplAtIndex(index);
+      while (item && item->WasCreatedAutomatically()) {
+        index += 1;
+        item = GetNavigationItemImplAtIndex(index);
+      }
+
+      if (!item) {
+        // The navigation history is incomplete, and all items up to the
+        // current item are automatic. Fall back to navigating relative
+        // to `current_index`.
+        return current_index + 1;
+      }
+
+      // After determining the potential target, check whether it is
+      // followed by any automatic navigations, and in that case, move
+      // to the back of the chain (this correspond to navigating forward
+      // from "a.com/a" where the previous iteration would have picked
+      // the index of "b.com/b" but we should navigate to "b.com/b#bar").
+      item = GetNavigationItemImplAtIndex(index + 1);
+      while (item && item->WasCreatedAutomatically()) {
+        index += 1;
+        item = GetNavigationItemImplAtIndex(index + 1);
+      }
+
+      return index;
+    }
+  }
+
+  NOTREACHED();
+}
+
 void NavigationManagerImpl::GoToIndex(int index) {
-  GoToIndex(index, NavigationInitiationType::BROWSER_INITIATED,
-            /*has_user_gesture=*/true);
+  GoTo(GoToParams::GoToIndex(index)
+           .SetInitiationType(NavigationInitiationType::BROWSER_INITIATED)
+           .SetHasUserGesture(true));
 }
 
 BrowserState* NavigationManagerImpl::GetBrowserState() const {
@@ -635,6 +846,10 @@ NavigationItem* NavigationManagerImpl::GetVisibleItem() const {
 
 NavigationItem* NavigationManagerImpl::GetLastCommittedItem() const {
   return GetLastCommittedItemImpl();
+}
+
+bool NavigationManagerImpl::IsRestoreSessionInProgress() const {
+  return native_restore_in_progress_;
 }
 
 NavigationItemImpl* NavigationManagerImpl::GetLastCommittedItemImpl() const {
@@ -749,6 +964,9 @@ void NavigationManagerImpl::LoadURLWithParams(
     added_item->AddHttpRequestHeaders(params.extra_headers);
   }
 
+  added_item->SetInternalScrollToTextFragment(
+      params.internal_scroll_to_text_fragment);
+
   added_item->SetHttpsUpgradeType(params.https_upgrade_type);
 
   if (params.post_data) {
@@ -763,14 +981,13 @@ void NavigationManagerImpl::LoadURLWithParams(
       // Loading a pending item from detached state is equivalent to replacing
       // all forward history after the cached current item with the new pending
       // item.
-      std::vector<std::unique_ptr<NavigationItem>> cached_items =
+      std::vector<std::unique_ptr<NavigationItemImpl>> cached_items =
           web_view_cache_.ReleaseCachedItems();
       int next_item_index = web_view_cache_.GetCurrentItemIndex() + 1;
       DCHECK_GT(next_item_index, 0);
       cached_items.resize(next_item_index + 1);
       cached_items[next_item_index] = std::move(pending_item_);
-      Restore(next_item_index, std::move(cached_items));
-      DCHECK(web_view_cache_.IsAttachedToWebView());
+      RestoreImpl(next_item_index, std::move(cached_items));
       return;
     }
     web_view_cache_.ResetToAttached();
@@ -783,9 +1000,8 @@ void NavigationManagerImpl::LoadIfNecessary() {
   if (!web_view_cache_.IsAttachedToWebView()) {
     // Loading from detached mode is equivalent to restoring cached history.
     // This can happen after clearing browsing data by removing the web view.
-    Restore(web_view_cache_.GetCurrentItemIndex(),
-            web_view_cache_.ReleaseCachedItems());
-    DCHECK(web_view_cache_.IsAttachedToWebView());
+    RestoreImpl(web_view_cache_.GetCurrentItemIndex(),
+                web_view_cache_.ReleaseCachedItems());
   } else if (!native_restore_in_progress_) {
     delegate_->LoadIfNecessary();
   }
@@ -847,11 +1063,15 @@ bool NavigationManagerImpl::CanGoToOffset(int offset) const {
 }
 
 void NavigationManagerImpl::GoBack() {
-  GoToIndex(GetIndexForOffset(-1));
+  GoTo(GoToParams::GoBackward()
+           .SetInitiationType(NavigationInitiationType::BROWSER_INITIATED)
+           .SetHasUserGesture(true));
 }
 
 void NavigationManagerImpl::GoForward() {
-  GoToIndex(GetIndexForOffset(1));
+  GoTo(GoToParams::GoForward()
+           .SetInitiationType(NavigationInitiationType::BROWSER_INITIATED)
+           .SetHasUserGesture(true));
 }
 
 void NavigationManagerImpl::Reload(ReloadType reload_type,
@@ -883,9 +1103,8 @@ void NavigationManagerImpl::Reload(ReloadType reload_type,
 
   if (!web_view_cache_.IsAttachedToWebView()) {
     // Reload from detached mode is equivalent to restoring history unchanged.
-    Restore(web_view_cache_.GetCurrentItemIndex(),
-            web_view_cache_.ReleaseCachedItems());
-    DCHECK(web_view_cache_.IsAttachedToWebView());
+    RestoreImpl(web_view_cache_.GetCurrentItemIndex(),
+                web_view_cache_.ReleaseCachedItems());
     return;
   }
 
@@ -918,6 +1137,8 @@ void NavigationManagerImpl::ReloadWithUserAgentType(
   if (item_to_reload->GetVirtualURL() != reload_url) {
     params.virtual_url = item_to_reload->GetVirtualURL();
   }
+  params.internal_scroll_to_text_fragment =
+      item_to_reload->GetInternalScrollToTextFragment();
   params.referrer = item_to_reload->GetReferrer();
   params.transition_type = ui::PAGE_TRANSITION_RELOAD;
 
@@ -949,6 +1170,36 @@ std::vector<NavigationItem*> NavigationManagerImpl::GetForwardItems() const {
 void NavigationManagerImpl::Restore(
     int last_committed_item_index,
     std::vector<std::unique_ptr<NavigationItem>> items) {
+  std::vector<std::unique_ptr<NavigationItemImpl>> impl_items;
+  impl_items.reserve(items.size());
+
+  for (std::unique_ptr<NavigationItem>& item : items) {
+    // SAFETY: NavigationItemImpl is the only sub-class of NavigationItem,
+    // so the down-cast of the pointer is valid.
+    impl_items.emplace_back(static_cast<NavigationItemImpl*>(item.release()));
+  }
+
+  RestoreImpl(last_committed_item_index, std::move(impl_items));
+}
+
+void NavigationManagerImpl::RestoreImpl(
+    int last_committed_item_index,
+    std::vector<std::unique_ptr<NavigationItemImpl>> items) {
+  if (!web_view_cache_.IsAttachedToWebView() &&
+      !delegate_->GetWebState()->IsWebUsageEnabled()) {
+    // If web usage is disabled, it is not possible to create the
+    // web view. However the embedder will call LoadIfNecessary()
+    // after re-enabling the web usage, which will call Restore().
+    // So saving the items in the WKWebViewCache is equivalent to
+    // scheduling the Restore(...) on the next load.
+    //
+    // This is a fix for https://crbug.com/532898037 (which is a
+    // crash in CRWWebController when attempting to create the
+    // web view while web usage is disabled).
+    web_view_cache_.SetCachedItems(last_committed_item_index, std::move(items));
+    return;
+  }
+
   WillRestore(items.size());
 
   // Ensure that last_committed_item_index is in range [0; items.size()-1]
@@ -999,12 +1250,12 @@ void NavigationManagerImpl::Restore(
     restored_visible_item_ = std::move(items[last_committed_item_index]);
   }
 
-  std::vector<std::unique_ptr<NavigationItem>> back_items;
+  std::vector<std::unique_ptr<NavigationItemImpl>> back_items;
   for (int index = 0; index < last_committed_item_index; index++) {
     back_items.push_back(std::move(items[index]));
   }
 
-  std::vector<std::unique_ptr<NavigationItem>> forward_items;
+  std::vector<std::unique_ptr<NavigationItemImpl>> forward_items;
   for (size_t index = last_committed_item_index + 1; index < items.size();
        index++) {
     forward_items.push_back(std::move(items[index]));
@@ -1042,7 +1293,7 @@ void NavigationManagerImpl::AppendSessionDataBlobFetcher(
 
 void NavigationManagerImpl::RestoreItemsState(
     RestoreItemListType list_type,
-    std::vector<std::unique_ptr<NavigationItem>> items_restored) {
+    std::vector<std::unique_ptr<NavigationItemImpl>> items_restored) {
   bool back_list = list_type == RestoreItemListType::kBackList;
   size_t current_item_index = web_view_cache_.GetCurrentItemIndex();
   size_t cache_offset = back_list ? 0 : current_item_index + 1;
@@ -1193,7 +1444,7 @@ bool NavigationManagerImpl::CanTrustLastCommittedItem(
   // visible.
   const GURL& web_view_origin_url =
       web_view_cache_.GetVisibleWebViewOriginURL();
-  if (web_view_origin_url == last_committed_url.DeprecatedGetOriginAsURL()) {
+  if (url::IsSameOriginWith(web_view_origin_url, last_committed_url)) {
     return true;
   }
 
@@ -1243,15 +1494,20 @@ void NavigationManagerImpl::WKWebViewCache::ResetToAttached() {
   attached_to_web_view_ = true;
 }
 
-std::vector<std::unique_ptr<NavigationItem>>
+void NavigationManagerImpl::WKWebViewCache::SetCachedItems(
+    int current_item_index,
+    std::vector<std::unique_ptr<NavigationItemImpl>> cached_items) {
+  DCHECK(!IsAttachedToWebView());
+  CHECK_GE(current_item_index, 0);
+  CHECK_LT(current_item_index, static_cast<int>(cached_items.size()));
+  cached_current_item_index_ = current_item_index;
+  cached_items_ = std::move(cached_items);
+}
+
+std::vector<std::unique_ptr<NavigationItemImpl>>
 NavigationManagerImpl::WKWebViewCache::ReleaseCachedItems() {
   DCHECK(!IsAttachedToWebView());
-  std::vector<std::unique_ptr<NavigationItem>> result(cached_items_.size());
-  for (size_t index = 0; index < cached_items_.size(); index++) {
-    result[index] = std::move(cached_items_[index]);
-  }
-  cached_items_.clear();
-  return result;
+  return std::exchange(cached_items_, {});
 }
 
 size_t NavigationManagerImpl::WKWebViewCache::GetBackForwardListItemCount()
@@ -1284,12 +1540,14 @@ const GURL& NavigationManagerImpl::WKWebViewCache::GetVisibleWebViewOriginURL()
     // Retain the url to reduce the number of calls to `proxy.URL` which may be
     // very expensive after being called hundreds of time for one navigation.
     NSURL* url = proxy.URL;
-    if (![cached_visible_host_nsstring_ isEqualToString:url.host] ||
+    if (![cached_visible_port_nsnumber_ isEqual:url.port] ||
+        ![cached_visible_host_nsstring_ isEqualToString:url.host] ||
         ![cached_visible_scheme_nsstring_ isEqualToString:url.scheme]) {
       cached_visible_origin_url_ =
-          net::GURLWithNSURL(url).DeprecatedGetOriginAsURL();
+          url::Origin::Create(net::GURLWithNSURL(url)).GetURL();
       cached_visible_host_nsstring_ = url.host;
       cached_visible_scheme_nsstring_ = url.scheme;
+      cached_visible_port_nsnumber_ = url.port;
     }
     return cached_visible_origin_url_;
   }

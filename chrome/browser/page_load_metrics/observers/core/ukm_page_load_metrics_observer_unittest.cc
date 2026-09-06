@@ -4,18 +4,19 @@
 
 #include "chrome/browser/page_load_metrics/observers/core/ukm_page_load_metrics_observer.h"
 
+#include <map>
 #include <memory>
 #include <optional>
 
-#include "base/byte_count.h"
+#include "base/byte_size.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/metrics_hashes.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_clock.h"
-#include "base/test/test_trace_processor.h"
-#include "base/test/trace_event_analyzer.h"
-#include "base/test/trace_test_utils.h"
+#include "base/test/tracing/test_trace_processor.h"
+#include "base/test/tracing/trace_event_analyzer.h"
+#include "base/test/tracing/trace_test_utils.h"
 #include "base/time/time.h"
 #include "base/trace_event/traced_value.h"
 #include "base/unguessable_token.h"
@@ -66,7 +67,9 @@
 #include "services/network/public/cpp/network_quality_tracker.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/blink/public/common/performance/largest_contentful_paint_type.h"
+#include "third_party/blink/public/mojom/navigation/navigation_type_for_navigation_api.mojom-shared.h"
 #include "third_party/metrics_proto/system_profile.pb.h"
+#include "ui/base/page_transition_types.h"
 
 using content::NavigationSimulator;
 using content::RenderFrameHost;
@@ -75,7 +78,6 @@ using page_load_metrics::PageVisitFinalStatus;
 using testing::AnyNumber;
 using testing::Mock;
 using testing::Return;
-using UserInteractionLatency = page_load_metrics::mojom::UserInteractionLatency;
 
 namespace {
 
@@ -147,7 +149,9 @@ class UkmPageLoadMetricsObserverTest
     HistoryTabHelper::FromWebContents(web_contents())
         ->SetForceEligibleTabForTesting(true);
 
-    HistoryClustersTabHelper::CreateForWebContents(web_contents());
+    HistoryTabHelper::CreateForWebContents(web_contents());
+    HistoryClustersTabHelper::CreateForWebContents(
+        web_contents(), HistoryTabHelper::FromWebContents(web_contents()));
   }
 
   TestingProfile::TestingFactories GetTestingFactories() const override {
@@ -930,7 +934,7 @@ TEST_F(UkmPageLoadMetricsObserverTest, LargestContentfulPaint_Trace) {
   EXPECT_EQ(1u, events.size());
   EXPECT_EQ("loading", events[0]->category);
   ASSERT_TRUE(events[0]->HasDictArg("data"));
-  base::Value::Dict arg = events[0]->GetKnownArgAsDict("data");
+  base::DictValue arg = events[0]->GetKnownArgAsDict("data");
   int time = arg.FindInt("durationInMilliseconds").value_or(0);
   EXPECT_EQ(600, time);
   int size = arg.FindInt("size").value_or(0);
@@ -1298,18 +1302,20 @@ TEST_F(UkmPageLoadMetricsObserverTest,
 TEST_F(UkmPageLoadMetricsObserverTest, NormalizedUserInteractionLatencies) {
   NavigateAndCommit(GURL(kTestUrl1));
 
-  page_load_metrics::mojom::InputTiming input_timing;
-  auto& user_interaction_latencies = input_timing.user_interaction_latencies;
+  std::vector<page_load_metrics::mojom::EventTimingPtr> event_timings;
 
   base::TimeTicks current_time = base::TimeTicks::Now();
-  user_interaction_latencies.emplace_back(UserInteractionLatency::New(
-      base::Milliseconds(50), 1, current_time + base::Milliseconds(1000)));
-  user_interaction_latencies.emplace_back(UserInteractionLatency::New(
-      base::Milliseconds(100), 2, current_time + base::Milliseconds(2000)));
-  user_interaction_latencies.emplace_back(UserInteractionLatency::New(
-      base::Milliseconds(150), 3, current_time + base::Milliseconds(3000)));
+  event_timings.emplace_back(page_load_metrics::mojom::EventTiming::New(
+      base::Milliseconds(50), 1, current_time + base::Milliseconds(1000),
+      current_time + base::Milliseconds(1030), /*navigation_id=*/1u));
+  event_timings.emplace_back(page_load_metrics::mojom::EventTiming::New(
+      base::Milliseconds(100), 2, current_time + base::Milliseconds(2000),
+      current_time + base::Milliseconds(2044), /*navigation_id=*/1u));
+  event_timings.emplace_back(page_load_metrics::mojom::EventTiming::New(
+      base::Milliseconds(150), 3, current_time + base::Milliseconds(3000),
+      current_time + base::Milliseconds(3050), /*navigation_id=*/1u));
 
-  tester()->SimulateInputTimingUpdate(input_timing);
+  tester()->SimulateEventTimingUpdate(event_timings);
 
   // Simulate closing the tab.
   DeleteContents();
@@ -1343,13 +1349,13 @@ TEST_F(UkmPageLoadMetricsObserverTest,
        NormalizedUserInteractionLatenciesRecordOnHidden) {
   NavigateAndCommit(GURL(kTestUrl1));
 
-  page_load_metrics::mojom::InputTiming input_timing;
-  auto& user_interaction_latencies = input_timing.user_interaction_latencies;
+  std::vector<page_load_metrics::mojom::EventTimingPtr> event_timings;
 
-  user_interaction_latencies.emplace_back(UserInteractionLatency::New(
-      base::Milliseconds(50), 0, base::TimeTicks::Now()));
+  event_timings.emplace_back(page_load_metrics::mojom::EventTiming::New(
+      base::Milliseconds(50), 1, base::TimeTicks::Now(), base::TimeTicks::Now(),
+      /*navigation_id=*/1u));
 
-  tester()->SimulateInputTimingUpdate(input_timing);
+  tester()->SimulateEventTimingUpdate(event_timings);
 
   // Simulate hiding the tab (the new INP metrics should be recorded at the
   // first hide).
@@ -1565,7 +1571,7 @@ TEST_F(UkmPageLoadMetricsObserverTest, PageSizeMetrics) {
   std::vector<page_load_metrics::mojom::ResourceDataUpdatePtr> resources;
   // Cached resource.
   resources.push_back(CreateResource(/*was_cached=*/true,
-                                     /*delta_bytes=*/base::ByteCount(0),
+                                     /*delta_bytes=*/base::ByteSize(0),
                                      /*encoded_body_length=*/base::KiB(20),
                                      /*decoded_body_length=*/base::KiB(30),
                                      /*is_complete=*/true));
@@ -1577,8 +1583,8 @@ TEST_F(UkmPageLoadMetricsObserverTest, PageSizeMetrics) {
       /*is_complete=*/true));
   tester()->SimulateResourceDataUseUpdate(resources);
 
-  base::ByteCount network_bytes;
-  base::ByteCount cache_bytes;
+  base::ByteSize network_bytes;
+  base::ByteSize cache_bytes;
   for (const auto& request : resources) {
     if (request->cache_type ==
         page_load_metrics::mojom::CacheType::kNotCached) {
@@ -1617,7 +1623,7 @@ TEST_F(UkmPageLoadMetricsObserverTest, JSSizeMetrics) {
   std::vector<page_load_metrics::mojom::ResourceDataUpdatePtr> resources;
   // 30 kilobytes after decoding.
   resources.push_back(CreateResource(/*was_cached=*/true,
-                                     /*delta_bytes=*/base::ByteCount(0),
+                                     /*delta_bytes=*/base::ByteSize(0),
                                      /*encoded_body_length=*/base::KiB(20),
                                      /*decoded_body_length=*/base::KiB(30),
                                      /*is_complete=*/true));
@@ -1669,7 +1675,7 @@ TEST_F(UkmPageLoadMetricsObserverTest, JSMaxSizeMetrics) {
 
   // 30 kilobytes after decoding.
   resources.push_back(CreateResource(/*was_cached=*/true,
-                                     /*delta_bytes=*/base::ByteCount(0),
+                                     /*delta_bytes=*/base::ByteSize(0),
                                      /*encoded_body_length=*/base::KiB(20),
                                      /*decoded_body_length=*/base::KiB(30),
                                      /*is_complete=*/true));
@@ -1792,23 +1798,26 @@ TEST_F(UkmPageLoadMetricsObserverTest, CpuTimeMetrics) {
 TEST_F(UkmPageLoadMetricsObserverTest, LayoutInstability) {
   NavigateAndCommit(GURL(kTestUrl1));
   base::TimeTicks current_time = base::TimeTicks::Now();
-  page_load_metrics::mojom::FrameRenderDataUpdate render_data(1.0, 1.0, {});
+  page_load_metrics::mojom::FrameRenderDataUpdate render_data;
   render_data.new_layout_shifts.emplace_back(
       page_load_metrics::mojom::LayoutShift::New(
-          current_time - base::Milliseconds(4000), 0.5));
+          current_time - base::Milliseconds(4000), 0.5, false,
+          /*navigation_id=*/1u));
   render_data.new_layout_shifts.emplace_back(
       page_load_metrics::mojom::LayoutShift::New(
-          current_time - base::Milliseconds(3500), 0.5));
+          current_time - base::Milliseconds(3500), 0.5, false,
+          /*navigation_id=*/1u));
 
   tester()->SimulateRenderDataUpdate(render_data);
 
   // Simulate hiding the tab (the report should include shifts after hide).
   web_contents()->WasHidden();
 
-  page_load_metrics::mojom::FrameRenderDataUpdate render_data_2(1.5, 0.0, {});
+  page_load_metrics::mojom::FrameRenderDataUpdate render_data_2;
   render_data_2.new_layout_shifts.emplace_back(
       page_load_metrics::mojom::LayoutShift::New(
-          current_time - base::Milliseconds(2500), 1.5));
+          current_time - base::Milliseconds(2500), 1.5, true,
+          /*navigation_id=*/1u));
   tester()->SimulateRenderDataUpdate(render_data_2);
 
   // Simulate closing the tab.
@@ -1851,17 +1860,19 @@ TEST_F(UkmPageLoadMetricsObserverTest, SoftNavigationCount) {
   auto url = GURL(kTestUrl1);
   NavigateAndCommit(url);
 
-  auto soft_navigation_metrics =
-      page_load_metrics::mojom::SoftNavigationMetrics(
-          1, base::Milliseconds(12), 42000, base::UnguessableToken::Create(),
-          page_load_metrics::mojom::LargestContentfulPaintTiming::New());
+  base::UnguessableToken same_doc_token = base::UnguessableToken::Create();
+  page_load_metrics::mojom::SoftNavigationMetrics soft_navigation_metrics(
+      2,
+      page_load_metrics::mojom::SoftNavigationCommit::New(
+          base::Milliseconds(12), base::TimeTicks::Now(),
+          blink::mojom::NavigationTypeForNavigationApi::kPush, same_doc_token),
+      base::Milliseconds(20));
 
   content::MockNavigationHandle navigation_handle;
   navigation_handle.set_has_committed(true);
   navigation_handle.set_is_in_primary_main_frame(true);
   navigation_handle.set_is_same_document(true);
-  navigation_handle.set_same_document_metrics_token(
-      base::UnguessableToken::Create());
+  navigation_handle.set_same_document_metrics_token(same_doc_token);
 
   // Simulate the detection of soft navigation so that the ukm source id for
   // soft navigation is initialized.
@@ -1892,13 +1903,15 @@ TEST_F(UkmPageLoadMetricsObserverTest,
        ExperimentalLayoutInstabilityRecordOnHidden) {
   NavigateAndCommit(GURL(kTestUrl1));
   base::TimeTicks current_time = base::TimeTicks::Now();
-  page_load_metrics::mojom::FrameRenderDataUpdate render_data(1.0, 1.0, {});
+  page_load_metrics::mojom::FrameRenderDataUpdate render_data;
   render_data.new_layout_shifts.emplace_back(
       page_load_metrics::mojom::LayoutShift::New(
-          current_time - base::Milliseconds(4000), 0.5));
+          current_time - base::Milliseconds(4000), 0.5, false,
+          /*navigation_id=*/1u));
   render_data.new_layout_shifts.emplace_back(
       page_load_metrics::mojom::LayoutShift::New(
-          current_time - base::Milliseconds(3500), 0.5));
+          current_time - base::Milliseconds(3500), 0.5, false,
+          /*navigation_id=*/1u));
 
   tester()->SimulateRenderDataUpdate(render_data);
 
@@ -1926,10 +1939,11 @@ TEST_F(UkmPageLoadMetricsObserverTest,
         100);
   }
 
-  page_load_metrics::mojom::FrameRenderDataUpdate render_data_2(1.5, 0.0, {});
+  page_load_metrics::mojom::FrameRenderDataUpdate render_data_2;
   render_data_2.new_layout_shifts.emplace_back(
       page_load_metrics::mojom::LayoutShift::New(
-          current_time - base::Milliseconds(2500), 1.5));
+          current_time - base::Milliseconds(2500), 1.5, true,
+          /*navigation_id=*/1u));
   tester()->SimulateRenderDataUpdate(render_data_2);
 
   // Simulate closing the tab (the CLS metrics should include all the shifts
@@ -2000,13 +2014,15 @@ TEST_F(UkmPageLoadMetricsObserverTest,
 
   // Bring the tab to the foreground and simulate a layout shift.
   web_contents()->WasShown();
-  page_load_metrics::mojom::FrameRenderDataUpdate render_data(1.0, 1.0, {});
+  page_load_metrics::mojom::FrameRenderDataUpdate render_data;
   render_data.new_layout_shifts.emplace_back(
       page_load_metrics::mojom::LayoutShift::New(
-          current_time - base::Milliseconds(4000), 0.5));
+          current_time - base::Milliseconds(4000), 0.5, false,
+          /*navigation_id=*/1u));
   render_data.new_layout_shifts.emplace_back(
       page_load_metrics::mojom::LayoutShift::New(
-          current_time - base::Milliseconds(3500), 0.5));
+          current_time - base::Milliseconds(3500), 0.5, false,
+          /*navigation_id=*/1u));
 
   tester()->SimulateRenderDataUpdate(render_data);
 
@@ -2163,7 +2179,11 @@ TEST_F(UkmPageLoadMetricsObserverTest, LayoutInstabilitySubframeAggregation) {
   NavigateAndCommit(GURL(kTestUrl1));
 
   // Simulate layout instability in the main frame.
-  page_load_metrics::mojom::FrameRenderDataUpdate render_data(1.0, 1.0, {});
+  page_load_metrics::mojom::FrameRenderDataUpdate render_data;
+  render_data.new_layout_shifts.push_back(
+      page_load_metrics::mojom::LayoutShift::New(base::TimeTicks::Now(), 1.0,
+                                                 false, /*navigation_id=*/1u));
+
   tester()->SimulateRenderDataUpdate(render_data);
 
   RenderFrameHost* subframe =
@@ -2173,7 +2193,10 @@ TEST_F(UkmPageLoadMetricsObserverTest, LayoutInstabilitySubframeAggregation) {
               ->AppendChild("subframe"));
 
   // Simulate layout instability in the subframe.
-  render_data.layout_shift_delta = 1.5;
+  render_data.new_layout_shifts.clear();
+  render_data.new_layout_shifts.push_back(
+      page_load_metrics::mojom::LayoutShift::New(base::TimeTicks::Now(), 1.5,
+                                                 false, /*navigation_id=*/1u));
   tester()->SimulateRenderDataUpdate(render_data, subframe);
 
   // Simulate closing the tab.
@@ -2374,6 +2397,132 @@ TEST_F(UkmPageLoadMetricsObserverTest, DefaultSearchReported) {
     tester()->test_ukm_recorder().ExpectEntryMetric(
         kv.second.get(), GeneratedNavigation::kFinalURLIsHomePageName, false);
   }
+}
+
+TEST_F(UkmPageLoadMetricsObserverTest, TypedAndDefaultSearchMatches) {
+  using Navigation_TypedAndDefault = ukm::builders::Navigation_TypedAndDefault;
+
+  TemplateURLService* model = TemplateURLServiceFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()));
+  ASSERT_TRUE(model);
+  search_test_utils::WaitForTemplateURLServiceToLoad(model);
+  ASSERT_TRUE(model->loaded());
+
+  // Register Default Search Engine: test-engine.com.
+  TemplateURLData default_engine_data;
+  default_engine_data.SetShortName(u"Engine");
+  default_engine_data.SetKeyword(u"test-engine.com");
+  default_engine_data.SetURL(
+      "https://www.test-engine.com/search?q={searchTerms}");
+  TemplateURL* default_engine_turl =
+      model->Add(std::make_unique<TemplateURL>(default_engine_data));
+  ASSERT_TRUE(default_engine_turl);
+  model->SetUserSelectedDefaultSearchProvider(default_engine_turl);
+
+  // Simulate typed navigation to Default Search Engine.
+  tester()->NavigateWithPageTransitionAndCommit(
+      GURL("https://www.test-engine.com/"),
+      ui::PageTransitionFromInt(ui::PAGE_TRANSITION_TYPED |
+                                ui::PAGE_TRANSITION_FROM_ADDRESS_BAR));
+
+  // Simulate closing the tab to flush metrics.
+  DeleteContents();
+
+  std::map<ukm::SourceId, ukm::mojom::UkmEntryPtr> merged_entries =
+      tester()->test_ukm_recorder().GetMergedEntriesByName(
+          Navigation_TypedAndDefault::kEntryName);
+  EXPECT_EQ(1ul, merged_entries.size());
+
+  for (const auto& kv : merged_entries) {
+    tester()->test_ukm_recorder().ExpectEntrySourceHasUrl(
+        kv.second.get(), GURL("https://www.test-engine.com/"));
+    tester()->test_ukm_recorder().ExpectEntryMetric(
+        kv.second.get(), Navigation_TypedAndDefault::kIsSameAsDefaultName, 1);
+  }
+}
+
+TEST_F(UkmPageLoadMetricsObserverTest, TypedAndDefaultSearchDiffers) {
+  using Navigation_TypedAndDefault = ukm::builders::Navigation_TypedAndDefault;
+
+  TemplateURLService* model = TemplateURLServiceFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()));
+  ASSERT_TRUE(model);
+  search_test_utils::WaitForTemplateURLServiceToLoad(model);
+  ASSERT_TRUE(model->loaded());
+
+  // Register Default Search Engine: test-engine.com.
+  TemplateURLData default_engine_data;
+  default_engine_data.SetShortName(u"Engine");
+  default_engine_data.SetKeyword(u"test-engine.com");
+  default_engine_data.SetURL(
+      "https://www.test-engine.com/search?q={searchTerms}");
+  TemplateURL* default_engine_turl =
+      model->Add(std::make_unique<TemplateURL>(default_engine_data));
+  ASSERT_TRUE(default_engine_turl);
+  model->SetUserSelectedDefaultSearchProvider(default_engine_turl);
+
+  // Register another search engine: othersearch.com.
+  TemplateURLData other_data;
+  other_data.SetShortName(u"OtherSearch");
+  other_data.SetKeyword(u"othersearch.com");
+  other_data.SetURL("https://www.othersearch.com/search?q={searchTerms}");
+  TemplateURL* other_turl =
+      model->Add(std::make_unique<TemplateURL>(other_data));
+  ASSERT_TRUE(other_turl);
+
+  // Simulate typed navigation to the other search engine (differs).
+  tester()->NavigateWithPageTransitionAndCommit(
+      GURL("https://www.othersearch.com/"),
+      ui::PageTransitionFromInt(ui::PAGE_TRANSITION_TYPED |
+                                ui::PAGE_TRANSITION_FROM_ADDRESS_BAR));
+
+  // Simulate closing the tab to flush metrics.
+  DeleteContents();
+
+  std::map<ukm::SourceId, ukm::mojom::UkmEntryPtr> merged_entries =
+      tester()->test_ukm_recorder().GetMergedEntriesByName(
+          Navigation_TypedAndDefault::kEntryName);
+  EXPECT_EQ(1ul, merged_entries.size());
+
+  for (const auto& kv : merged_entries) {
+    tester()->test_ukm_recorder().ExpectEntrySourceHasUrl(
+        kv.second.get(), GURL("https://www.othersearch.com/"));
+    tester()->test_ukm_recorder().ExpectEntryMetric(
+        kv.second.get(), Navigation_TypedAndDefault::kIsSameAsDefaultName, 0);
+  }
+}
+
+TEST_F(UkmPageLoadMetricsObserverTest, TypedAndDefaultSearchIgnored) {
+  using Navigation_TypedAndDefault = ukm::builders::Navigation_TypedAndDefault;
+
+  TemplateURLService* model = TemplateURLServiceFactory::GetForProfile(
+      Profile::FromBrowserContext(browser_context()));
+  ASSERT_TRUE(model);
+  search_test_utils::WaitForTemplateURLServiceToLoad(model);
+  ASSERT_TRUE(model->loaded());
+
+  // Register Default Search Engine: test-engine.com.
+  TemplateURLData default_engine_data;
+  default_engine_data.SetShortName(u"test-engine");
+  default_engine_data.SetKeyword(u"test-engine.com");
+  default_engine_data.SetURL(
+      "https://www.test-engine.com/search?q={searchTerms}");
+  TemplateURL* default_engine_turl =
+      model->Add(std::make_unique<TemplateURL>(default_engine_data));
+  ASSERT_TRUE(default_engine_turl);
+  model->SetUserSelectedDefaultSearchProvider(default_engine_turl);
+
+  // Simulate LINK navigation (not typed via address bar).
+  tester()->NavigateWithPageTransitionAndCommit(GURL("https://www.google.com/"),
+                                                ui::PAGE_TRANSITION_LINK);
+
+  // Simulate closing the tab to flush metrics.
+  DeleteContents();
+
+  std::map<ukm::SourceId, ukm::mojom::UkmEntryPtr> merged_entries =
+      tester()->test_ukm_recorder().GetMergedEntriesByName(
+          Navigation_TypedAndDefault::kEntryName);
+  EXPECT_EQ(0ul, merged_entries.size());
 }
 
 TEST_F(UkmPageLoadMetricsObserverTest, NavigationIsScopedSearchLikeNavigation) {
@@ -2754,7 +2903,7 @@ TEST_F(UkmPageLoadMetricsObserverTest, CLSNeverForegroundedNoReport) {
   web_contents()->WasHidden();
   NavigateAndCommit(GURL(kTestUrl1));
 
-  page_load_metrics::mojom::FrameRenderDataUpdate render_data(1.0, 1.0, {});
+  page_load_metrics::mojom::FrameRenderDataUpdate render_data;
   tester()->SimulateRenderDataUpdate(render_data);
 
   // Simulate closing the tab.
@@ -2788,7 +2937,10 @@ class CLSUkmPageLoadMetricsObserverTest
 void CLSUkmPageLoadMetricsObserverTest::SimulateShiftDelta(
     float delta,
     content::RenderFrameHost* frame) {
-  page_load_metrics::mojom::FrameRenderDataUpdate render_data(delta, delta, {});
+  page_load_metrics::mojom::FrameRenderDataUpdate render_data;
+  render_data.new_layout_shifts.push_back(
+      page_load_metrics::mojom::LayoutShift::New(base::TimeTicks::Now(), delta,
+                                                 false, /*navigation_id=*/1u));
   tester()->SimulateRenderDataUpdate(render_data, frame);
 }
 

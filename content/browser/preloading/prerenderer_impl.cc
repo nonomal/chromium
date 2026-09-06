@@ -20,6 +20,7 @@
 #include "content/browser/preloading/prerender/prerender_attributes.h"
 #include "content/browser/preloading/prerender/prerender_features.h"
 #include "content/browser/preloading/prerender/prerender_final_status.h"
+#include "content/browser/preloading/prerender/prerender_host.h"
 #include "content/browser/preloading/prerender/prerender_host_registry.h"
 #include "content/browser/preloading/prerender/prerender_metrics.h"
 #include "content/browser/preloading/prerender/prerender_navigation_utils.h"
@@ -47,14 +48,11 @@ PreloadingType ConvertSpeculationActionToPreloadingType(
 
 }  // namespace
 
-// TODO(crbug.com/428500219): We should allow prerender-until-script to be
-// upgraded to prerender.
 struct PrerendererImpl::PrerenderInfo {
   blink::mojom::SpeculationInjectionType injection_type;
   blink::mojom::SpeculationEagerness eagerness;
   blink::mojom::SpeculationAction action;
   bool is_target_blank;
-  FrameTreeNodeId prerender_frame_tree_node_id;
   PrerenderHostId prerender_host_id;
   GURL url;
 
@@ -86,7 +84,7 @@ bool PrerendererImpl::PrerenderInfo::PrerenderInfoComparator(
 }
 
 // `prerender_host_id` is not provided by `SpeculationCandidatePtr`, so
-// FrameTreeNodeId() is assigned instead. The value should be updated once it is
+// PrerenderHostId() is assigned instead. The value should be updated once it is
 // available.
 PrerendererImpl::PrerenderInfo::PrerenderInfo(
     const blink::mojom::SpeculationCandidatePtr& candidate)
@@ -100,7 +98,7 @@ PrerendererImpl::PrerenderInfo::PrerenderInfo(
 PrerendererImpl::PrerendererImpl(RenderFrameHost& render_frame_host)
     : WebContentsObserver(WebContents::FromRenderFrameHost(&render_frame_host)),
       render_frame_host_(render_frame_host) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M159);
   auto& rfhi = static_cast<RenderFrameHostImpl&>(render_frame_host);
   registry_ = rfhi.delegate()->GetPrerenderHostRegistry()->GetWeakPtr();
   if (registry_) {
@@ -114,7 +112,7 @@ PrerendererImpl::PrerendererImpl(RenderFrameHost& render_frame_host)
 }
 
 PrerendererImpl::~PrerendererImpl() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M159);
   CancelStartedPrerenders();
   RecordReceivedPrerendersCountToMetrics();
   ResetReceivedPrerendersCountForMetrics();
@@ -129,10 +127,35 @@ void PrerendererImpl::PrimaryPageChanged(Page& page) {
   // deleted asynchronously, but we want to make sure to cancel prerendering
   // before the next primary page swaps in so that the next page can trigger a
   // new prerender without hitting the max number of running prerenders.
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  CHECK_CURRENTLY_ON(BrowserThread::UI, base::NotFatalUntil::M159);
   CancelStartedPrerenders();
   RecordReceivedPrerendersCountToMetrics();
   ResetReceivedPrerendersCountForMetrics();
+}
+
+bool PrerendererImpl::TryUpgradePrerenderUntilScriptToFull(
+    PrerenderInfo& prerender_info) {
+  CHECK(base::FeatureList::IsEnabled(features::kPrerenderUntilScriptUpgrade));
+  if (prerender_info.prerender_host_id.is_null()) {
+    return false;
+  }
+  if (prerender_info.action !=
+      blink::mojom::SpeculationAction::kPrerenderUntilScript) {
+    return false;
+  }
+  PrerenderHost* host =
+      registry_->FindNonReservedHostById(prerender_info.prerender_host_id);
+  if (!host) {
+    return false;
+  }
+  host->UpgradeToFullPrerender();
+  prerender_info.action = blink::mojom::SpeculationAction::kPrerender;
+  render_frame_host_->AddMessageToConsole(
+      blink::mojom::ConsoleMessageLevel::kInfo,
+      base::StringPrintf("Prerender-until-script for %s was upgraded to "
+                         "full prerender. JavaScript execution has resumed.",
+                         host->GetInitialUrl().spec().c_str()));
+  return true;
 }
 
 // TODO(isaboori) Part of the logic in |ProcessCandidatesForPrerender| method is
@@ -141,13 +164,17 @@ void PrerendererImpl::PrimaryPageChanged(Page& page) {
 void PrerendererImpl::ProcessCandidatesForPrerender(
     const std::vector<blink::mojom::SpeculationCandidatePtr>& candidates,
     bool enable_cross_origin_prerender_iframes) {
-  if (!registry_)
+  if (!registry_) {
     return;
+  }
+
+  CHECK(render_frame_host_->IsActive());
 
   // Extract only the candidates which apply to prerender, and sort them by URL
   // so we can efficiently compare them to `started_prerenders_`.
-  // TODO(https://crbug.com/428500219): Add warning message if prerender and
-  // prerender-until-script are applied to the same URL.
+  // If both prerender and prerender-until-script are applied to the same URL,
+  // the existing prerender-until-script host will be upgraded to a full
+  // prerender.
   std::vector<std::pair<size_t, blink::mojom::SpeculationCandidatePtr>>
       prerender_candidates;
   for (const auto& candidate : candidates) {
@@ -161,15 +188,26 @@ void PrerendererImpl::ProcessCandidatesForPrerender(
   enable_cross_origin_prerender_iframes_ |=
       enable_cross_origin_prerender_iframes;
 
-  std::ranges::stable_sort(
-      prerender_candidates, std::less<>(),
-      [](const auto& p) { return PrerenderInfo(p.second); });
+  // Sort by PrerenderInfo (URL + target hint), with kPrerender before
+  // kPrerenderUntilScript as tiebreaker so that when both are candidates
+  // for the same URL, the dedup loop prefers starting a full prerender.
+  std::ranges::stable_sort(prerender_candidates,
+                           [](const auto& a, const auto& b) {
+                             PrerenderInfo pa(a.second), pb(b.second);
+                             if (pa != pb) {
+                               return pa < pb;
+                             }
+                             // Within the same group, prefer kPrerender (action
+                             // value 2) over kPrerenderUntilScript (action
+                             // value 3).
+                             return a.second->action < b.second->action;
+                           });
   std::vector<std::pair<size_t, blink::mojom::SpeculationCandidatePtr>>
       candidates_to_start;
 
   // Collects the host ids corresponding to the URLs that are removed from the
   // speculation rules. These hosts are cancelled later.
-  std::vector<FrameTreeNodeId> removed_prerender_rules;
+  std::vector<PrerenderHostId> removed_prerender_rules;
 
   // Compare the sorted candidate and started prerender lists to one another.
   // Since they are sorted, we process the lexicographically earlier of the two
@@ -211,7 +249,7 @@ void PrerendererImpl::ProcessCandidatesForPrerender(
 
     // Decide what started prerenders to cancel.
     for (PrerenderInfo& prerender : matching_prerenders) {
-      if (prerender.prerender_frame_tree_node_id.is_null()) {
+      if (prerender.prerender_host_id.is_null()) {
         continue;
       }
       // TODO(jbroman): This doesn't currently care about other aspects, like
@@ -219,8 +257,7 @@ void PrerendererImpl::ProcessCandidatesForPrerender(
       // want to cancel if there are candidates which match by PrerenderInfo but
       // none of which permit this prerender.
       if (matching_candidates.empty()) {
-        removed_prerender_rules.push_back(
-            prerender.prerender_frame_tree_node_id);
+        removed_prerender_rules.push_back(prerender.prerender_host_id);
       }
     }
 
@@ -241,6 +278,23 @@ void PrerendererImpl::ProcessCandidatesForPrerender(
           candidates_to_start.push_back(std::move(matching_candidate));
         }
       }
+    } else if (!matching_candidates.empty() &&
+               base::FeatureList::IsEnabled(
+                   features::kPrerenderUntilScriptUpgrade)) {
+      // Check if we should upgrade an existing prerender-until-script host to
+      // a full prerender. This handles the case where both actions target the
+      // same URL and the prerender-until-script host was started in an earlier
+      // update.
+      bool has_full_prerender_candidate =
+          std::ranges::any_of(matching_candidates, [](const auto& c) {
+            return c.second->action ==
+                   blink::mojom::SpeculationAction::kPrerender;
+          });
+      if (has_full_prerender_candidate) {
+        for (PrerenderInfo& prerender : matching_prerenders) {
+          TryUpgradePrerenderUntilScriptToFull(prerender);
+        }
+      }
     }
 
     // Advance the iterators past all matching entries.
@@ -249,27 +303,25 @@ void PrerendererImpl::ProcessCandidatesForPrerender(
   }
 
   std::vector<std::pair<GURL, PreloadingType>> to_be_cancelled_prerender_list;
-  for (auto ftn_id : removed_prerender_rules) {
+  for (PrerenderHostId id : removed_prerender_rules) {
     if (PrerenderHost* prerender_host =
-            registry_->FindNonReservedHostById(ftn_id)) {
+            registry_->FindNonReservedHostById(id)) {
       to_be_cancelled_prerender_list.emplace_back(
           prerender_host->GetInitialUrl(),
           ConvertSpeculationActionToPreloadingType(
               prerender_host->speculation_action()));
     }
   }
-  std::set<FrameTreeNodeId> canceled_prerender_rules_set =
+  std::set<PrerenderHostId> canceled_prerender_rules_set =
       registry_->CancelHosts(
           removed_prerender_rules,
           PrerenderCancellationReason(
               PrerenderFinalStatus::kSpeculationRuleRemoved));
   if (base::FeatureList::IsEnabled(
           features::kPrerender2FallbackPrefetchSpecRules)) {
-    WebContents* web_contents =
-        WebContents::FromRenderFrameHost(&render_frame_host_.get());
     auto* prefetch_document_manager =
         content::PrefetchDocumentManager::GetOrCreateForCurrentDocument(
-            web_contents->GetPrimaryMainFrame());
+            render_frame_host_->GetOutermostMainFrame());
     for (const auto& [url, preloading_type] : to_be_cancelled_prerender_list) {
       prefetch_document_manager->ResetPrefetchAheadOfPrerenderIfExist(
           preloading_type, url);
@@ -277,11 +329,11 @@ void PrerendererImpl::ProcessCandidatesForPrerender(
   }
 
   // Canceled prerenders by kSpeculationRuleRemoved should have already been
-  // removed from `started_prerenders_` via `OnCancel`.
+  // removed from `started_prerenders_` via `OnRetriggerable`.
   CHECK(std::find_if(started_prerenders_.begin(), started_prerenders_.end(),
                      [&](const PrerenderInfo& x) {
-                       return base::Contains(canceled_prerender_rules_set,
-                                             x.prerender_frame_tree_node_id);
+                       return canceled_prerender_rules_set.contains(
+                           x.prerender_host_id);
                      }) == started_prerenders_.end());
 
   // Actually start the candidates in their original order once the diffing is
@@ -300,6 +352,7 @@ void PrerendererImpl::ProcessCandidatesForPrerender(
 }
 
 void PrerendererImpl::OnLCPPredicted() {
+  CHECK(render_frame_host_->IsActive());
   blocked_ = false;
   for (auto& [candidate, enacting_predictor, confidence] :
        std::move(blocked_candidates_)) {
@@ -311,6 +364,10 @@ bool PrerendererImpl::MaybePrerender(
     const blink::mojom::SpeculationCandidatePtr& candidate,
     const PreloadingPredictor& enacting_predictor,
     PreloadingConfidence confidence) {
+  if (!render_frame_host_->IsActive()) {
+    return false;
+  }
+
   // Check actions. Only Prerender and PrerenderUntilScript are allowed.
   switch (candidate->action) {
     case blink::mojom::SpeculationAction::kPrerender:
@@ -340,12 +397,9 @@ bool PrerendererImpl::MaybePrerender(
     return false;
   }
 
-  // Prerendering frames should not trigger any prerender request.
-  CHECK(!render_frame_host_->IsInLifecycleState(
-      RenderFrameHost::LifecycleState::kPrerendering));
-
-  if (!registry_)
+  if (!registry_) {
     return false;
+  }
 
   auto& rfhi = static_cast<RenderFrameHostImpl&>(render_frame_host_.get());
 
@@ -357,6 +411,19 @@ bool PrerendererImpl::MaybePrerender(
       PrerenderInfo::PrerenderInfoComparator);
   // cannot currently start a second prerender with the same URL and target_hint
   if (begin != end) {
+    // Check if we should upgrade an existing prerender-until-script host
+    // to full prerender. This handles the case where a prerender candidate is
+    // enacted after a prerender-until-script host is already running for the
+    // same URL, e.g. prerender-until-script triggered on hover (moderate
+    // eagerness) followed by prerender on click (conservative).
+    if (candidate->action == blink::mojom::SpeculationAction::kPrerender &&
+        base::FeatureList::IsEnabled(features::kPrerenderUntilScriptUpgrade)) {
+      for (auto it = begin; it != end; ++it) {
+        if (TryUpgradePrerenderUntilScriptToFull(*it)) {
+          return true;
+        }
+      }
+    }
     return false;
   }
 
@@ -372,6 +439,11 @@ bool PrerendererImpl::MaybePrerender(
       break;
     default:
       NOTREACHED();
+  }
+
+  if (candidate->form_submission) {
+    GetContentClient()->browser()->LogWebFeatureForCurrentPage(
+        &rfhi, blink::mojom::WebFeature::kPrerenderActivationByFormSubmission);
   }
 
   IncrementReceivedPrerendersCountForMetrics(
@@ -404,16 +476,31 @@ bool PrerendererImpl::MaybePrerender(
           ? features::kPrerender2WarmUpCompositorForImmediate
           : features::kPrerender2WarmUpCompositorForNonImmediate);
 
+  // `SpeculationCandidate::tags` must never be empty: rules that specify no
+  // tags carry a single null tag instead (see blink.mojom).
+  // Candidates arriving over IPC are checked by SpeculationHostImpl's
+  // CandidatesAreValid(), and PreloadingDecider only ever overwrites `tags`
+  // with a non-empty merge, so an empty list here means a browser-side bug
+  // rather than a misbehaving renderer. This is where crbug.com/550345163
+  // crashed; the equivalent guard for prefetch lives in
+  // PrefetchDocumentManager's TagsFromCandidate().
+  CHECK(!candidate->tags.empty());
+
   PrerenderAttributes attributes(
       candidate->url,
       PreloadingTriggerTypeFromSpeculationInjectionType(
           candidate->injection_type),
-      /*embedder_histogram_suffix=*/"",
+      /*histogram_suffix=*/"",
       SpeculationRulesParams(candidate->target_browsing_context_name_hint,
                              candidate->eagerness,
                              SpeculationRulesTags(candidate->tags)),
       Referrer{*candidate->referrer}, no_vary_search_hint, &rfhi,
-      web_contents->GetWeakPtr(), ui::PAGE_TRANSITION_LINK,
+      web_contents->GetWeakPtr(),
+      candidate->form_submission &&
+              candidate->target_browsing_context_name_hint !=
+                  blink::mojom::SpeculationTargetHint::kBlank
+          ? ui::PAGE_TRANSITION_FORM_SUBMIT
+          : ui::PAGE_TRANSITION_LINK,
       should_warm_up_compositor,
       /*should_prepare_paint_tree=*/false, candidate->action,
       /*url_match_predicate=*/{},
@@ -453,7 +540,7 @@ bool PrerendererImpl::MaybePrerender(
 
           auto* prefetch_document_manager =
               content::PrefetchDocumentManager::GetOrCreateForCurrentDocument(
-                  web_contents->GetPrimaryMainFrame());
+                  render_frame_host_->GetOutermostMainFrame());
           prefetch_document_manager->PrefetchAheadOfPrerender(
               attributes.preload_pipeline_info, candidate.Clone(),
               enacting_predictor);
@@ -471,15 +558,13 @@ bool PrerendererImpl::MaybePrerender(
                 creating_predictor, enacting_predictor,
                 ConvertSpeculationActionToPreloadingType(candidate->action),
                 std::move(same_url_matcher),
-                web_contents->GetPrimaryMainFrame()->GetPageUkmSourceId()));
+                render_frame_host_->GetOutermostMainFrame()
+                    ->GetPageUkmSourceId()));
         preloading_attempt->SetSpeculationEagerness(candidate->eagerness);
         return registry_->CreateAndStartHost(attributes, preloading_attempt);
       }
     }
   }();
-
-  prerender_info.prerender_frame_tree_node_id =
-      PrerenderHost::GetFrameTreeNodeIdForId(prerender_info.prerender_host_id);
 
   // An existing prerender may be canceled to start a new prerender, and
   // `started_prerenders_` may be modified through this cancellation. Therefore,
@@ -504,25 +589,26 @@ bool PrerendererImpl::ShouldWaitForPrerenderResult(const GURL& url) {
       started_prerenders_.begin(), started_prerenders_.end(), url,
       std::less<>(), &PrerenderInfo::url);
   for (auto it = begin; it != end; ++it) {
-    if (it->prerender_frame_tree_node_id.is_null()) {
+    if (it->prerender_host_id.is_null()) {
       return false;
     }
   }
   return begin != end;
 }
 
-void PrerendererImpl::OnCancel(FrameTreeNodeId host_frame_tree_node_id,
-                               const PrerenderCancellationReason& reason) {
+void PrerendererImpl::OnRetriggerable(
+    PrerenderHostId host_id,
+    const PrerenderCancellationReason& reason) {
   switch (reason.final_status()) {
     // TODO(crbug.com/40275452): Support other final status cases.
+    case PrerenderFinalStatus::kActivated:
     case PrerenderFinalStatus::kTimeoutBackgrounded:
     case PrerenderFinalStatus::kMaxNumOfRunningNonImmediatePrerendersExceeded:
     case PrerenderFinalStatus::kSpeculationRuleRemoved: {
       auto erasing_prerender_it =
           std::find_if(started_prerenders_.begin(), started_prerenders_.end(),
                        [&](const PrerenderInfo& prerender_info) {
-                         return prerender_info.prerender_frame_tree_node_id ==
-                                host_frame_tree_node_id;
+                         return prerender_info.prerender_host_id == host_id;
                        });
 
       if (erasing_prerender_it != started_prerenders_.end()) {
@@ -551,10 +637,9 @@ void PrerendererImpl::SetPrerenderCancellationCallback(
 
 void PrerendererImpl::CancelStartedPrerenders() {
   if (registry_) {
-    std::vector<FrameTreeNodeId> started_prerender_ids;
+    std::vector<PrerenderHostId> started_prerender_ids;
     for (auto& prerender_info : started_prerenders_) {
-      started_prerender_ids.push_back(
-          prerender_info.prerender_frame_tree_node_id);
+      started_prerender_ids.push_back(prerender_info.prerender_host_id);
     }
     registry_->CancelHosts(
         started_prerender_ids,

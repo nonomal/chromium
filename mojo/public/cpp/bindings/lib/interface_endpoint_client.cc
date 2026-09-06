@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/debug/alias.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
@@ -722,7 +721,7 @@ bool InterfaceEndpointClient::SendMessageWithResponder(
   }
   // Make sure that this instance hasn't been destroyed.
   if (weak_self) {
-    DCHECK(base::Contains(sync_responses_, request_id));
+    DCHECK(sync_responses_.contains(request_id));
     auto iter = sync_responses_.find(request_id);
     DCHECK_EQ(&response_received, iter->second->response_received);
     if (response_received) {
@@ -978,10 +977,7 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
         info->set_payload_size(message->payload_num_bytes());
         info->set_data_num_bytes(message->data_num_bytes());
 
-        static const uint8_t* flow_enabled =
-            TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED(
-                "toplevel.flow,mojom.flow");
-        if (!*flow_enabled)
+        if (!TRACE_EVENT_CATEGORY_ENABLED("toplevel.flow,mojom.flow"))
           return;
 
         perfetto::Flow::Global(message->GetTraceId())(ctx);

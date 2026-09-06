@@ -4,8 +4,10 @@
 
 #include "chrome/browser/ui/views/tabs/fake_tab_slot_controller.h"
 
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/views/tabs/tab_container.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
+#include "components/tab_groups/tab_group_id.h"
 #include "ui/views/view_utils.h"
 
 FakeTabSlotController::FakeTabSlotController(
@@ -24,6 +26,13 @@ void FakeTabSlotController::ToggleTabGroupCollapsedState(
     const tab_groups::TabGroupId group,
     ToggleTabGroupCollapsedStateOrigin origin) {}
 
+int FakeTabSlotController::GetTabCount() const {
+  if (tab_count_.has_value()) {
+    return tab_count_.value();
+  }
+  return tab_container_ ? tab_container_->GetTabCount() : 0;
+}
+
 bool FakeTabSlotController::IsActiveTab(const TabSlotView* tab) const {
   return active_tab_ == views::AsViewClass<Tab>(tab);
 }
@@ -32,20 +41,8 @@ bool FakeTabSlotController::IsTabSelected(const TabSlotView* tab) const {
   return false;
 }
 
-bool FakeTabSlotController::IsTabPinned(const TabSlotView* tab) const {
+bool FakeTabSlotController::IsFocusInTabStrip() const {
   return false;
-}
-
-bool FakeTabSlotController::IsTabFirst(const TabSlotView* tab) const {
-  return false;
-}
-
-bool FakeTabSlotController::IsFocusInTabs() const {
-  return false;
-}
-
-bool FakeTabSlotController::ShouldCompactLeadingEdge() const {
-  return true;
 }
 
 TabSlotController::Liveness FakeTabSlotController::ContinueDrag(
@@ -70,7 +67,8 @@ std::vector<Tab*> FakeTabSlotController::GetTabsInSplit(const Tab* tab) {
   return {};
 }
 
-bool FakeTabSlotController::HoverCardIsShowingForTab(Tab* tab) {
+bool FakeTabSlotController::HoverCardIsShowing(
+    HoverCardAnchorTarget* anchor_target) {
   return false;
 }
 
@@ -82,17 +80,12 @@ bool FakeTabSlotController::CanPaintThrobberToLayer() const {
   return paint_throbber_to_layer_;
 }
 
-bool FakeTabSlotController::HasVisibleBackgroundTabShapes() const {
-  return false;
+bool FakeTabSlotController::IsGlassFrame() const {
+  return is_glass_;
 }
 
 SkColor FakeTabSlotController::GetTabSeparatorColor() const {
   return SK_ColorBLACK;
-}
-
-std::optional<int> FakeTabSlotController::GetCustomBackgroundId(
-    BrowserFrameActiveState active_state) const {
-  return std::nullopt;
 }
 
 std::u16string FakeTabSlotController::GetAccessibleTabName(
@@ -129,26 +122,22 @@ bool FakeTabSlotController::IsGroupCollapsed(
   return tab_strip_controller_->IsGroupCollapsed(group);
 }
 
+std::optional<tab_groups::TabGroupId> FakeTabSlotController::GetFocusedGroup()
+    const {
+  return tab_strip_controller_->GetFocusedGroup();
+}
+
 SkColor FakeTabSlotController::GetPaintedGroupColor(
     const tab_groups::TabGroupColorId& color_id) const {
   return SkColor();
 }
 
-Browser* FakeTabSlotController::GetBrowser() {
+BrowserWindowInterface* FakeTabSlotController::GetBrowserWindowInterface() {
   return nullptr;
-}
-
-bool FakeTabSlotController::IsFrameCondensed() const {
-  return false;
 }
 
 TabGroup* FakeTabSlotController::GetTabGroup(
     const tab_groups::TabGroupId& group_id) const {
-  return nullptr;
+  return tab_strip_controller_ ? tab_strip_controller_->GetTabGroup(group_id)
+                               : nullptr;
 }
-
-#if BUILDFLAG(IS_CHROMEOS)
-bool FakeTabSlotController::IsLockedForOnTask() {
-  return on_task_locked_;
-}
-#endif

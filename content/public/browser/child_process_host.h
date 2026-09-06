@@ -15,7 +15,7 @@
 #include "build/chromecast_buildflags.h"
 #include "content/common/buildflags.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/child_process_id.h"
+#include "content/public/common/child_process_id.h"
 #include "content/public/common/content_constants.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
 
@@ -79,10 +79,13 @@ class CONTENT_EXPORT ChildProcessHost {
     // gdb). In this case, you'd use GetChildPath to get the real executable
     // file name, and then prepend the GDB command to the command line.
     CHILD_ALLOW_SELF = 1 << 0,
+
+    // Indicates that the child process to be launched is a separate renderer.
+    CHILD_RENDERER = 1 << 1,
 #elif BUILDFLAG(IS_MAC)
     // Note, on macOS these are not bitwise flags and each value is mutually
-    // exclusive with the others. Each one of these options should correspond
-    // to a value in //content/public/app/mac_helpers.gni.
+    // exclusive with the others. Each one of these options must correspond to a
+    // value in //content/public/app/mac_helpers.gni.
 
     // Starts a child process with the macOS entitlement that allows JIT (i.e.
     // memory that is writable and executable). In order to make use of this,
@@ -97,19 +100,11 @@ class CONTENT_EXPORT ChildProcessHost {
     // allow-jit entitlement instead.
     CHILD_GPU,
 
-    // Starts a child process with the macOS entitlement that ignores the
-    // library validation code signing enforcement. Library validation mandates
-    // that all executable pages be backed by a code signature that either 1)
-    // is signed by Apple, or 2) signed by the same Team ID as the main
-    // executable. Binary plug-ins that are not always signed by the same Team
-    // ID as the main binary, so this flag should be used when needing to load
-    // third-party plug-ins.
-    CHILD_PLUGIN,
-
     // Marker for the start of embedder-specific helper child process types.
-    // Values greater than CHILD_EMBEDDER_FIRST are reserved to be used by the
-    // embedder to add custom process types and will be resolved via
-    // ContentClient::GetChildPath().
+    // Values greater than CHILD_EMBEDDER_FIRST are reserved for embedder
+    // process types. Content provides no fallback resolution for these types;
+    // embedders must handle them in
+    // ContentBrowserClient::GetChildProcessPath().
     CHILD_EMBEDDER_FIRST,
 #endif
   };

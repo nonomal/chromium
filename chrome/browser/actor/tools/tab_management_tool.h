@@ -14,13 +14,14 @@
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "ui/base/window_open_disposition.h"
 
+class BrowserWindowInterface;
+
 namespace actor {
 
 class ObservationDelayController;
 
 // A tool to manage the tabs in a browser window, e.g. create, close,
 // activate, etc.
-// TODO(crbug.com/445993857): Implement actions other than create.
 class TabManagementTool : public Tool, public TabStripModelObserver {
  public:
   enum Action { kCreate, kActivate, kClose };
@@ -46,6 +47,8 @@ class TabManagementTool : public Tool, public TabStripModelObserver {
   std::unique_ptr<ObservationDelayController> GetObservationDelayer(
       ObservationDelayController::PageStabilityConfig page_stability_config)
       override;
+  void UpdateTaskBeforeInvoke(ActorTask& task,
+                              ToolCallback callback) const override;
   void UpdateTaskAfterInvoke(ActorTask& task,
                              mojom::ActionResultPtr result,
                              ToolCallback callback) const override;
@@ -57,6 +60,10 @@ class TabManagementTool : public Tool, public TabStripModelObserver {
                               const TabStripSelectionChange& selection) final;
 
  private:
+  void CreateTab(BrowserWindowInterface* browser_window_interface);
+  void ActivateTab(BrowserWindowInterface* browser_window_interface);
+  void CloseTab();
+
   // Called when the browser with `window_id_` has closed.
   void OnBrowserDidClose(BrowserWindowInterface* browser);
 
@@ -74,8 +81,8 @@ class TabManagementTool : public Tool, public TabStripModelObserver {
   // If creating a tab, the window in which to create the tab.
   std::optional<int32_t> window_id_;
 
-  // Subscription to the close event for the Browser corresponding to
-  // `window_id_`.
+  // Subscription to the close event for the BrowserWindowInterface
+  // corresponding to `window_id_`.
   base::CallbackListSubscription browser_did_close_subscription_;
 
   base::WeakPtrFactory<TabManagementTool> weak_ptr_factory_{this};

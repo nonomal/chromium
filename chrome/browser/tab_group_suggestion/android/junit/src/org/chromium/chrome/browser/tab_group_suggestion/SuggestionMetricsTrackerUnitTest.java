@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.tab_group_suggestion;
 
 import static org.junit.Assert.assertFalse;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import static org.chromium.chrome.browser.tab_group_suggestion.SuggestionMetricsTracker.PER_GROUP_SWITCHES_HISTOGRAM_PREFIX;
@@ -17,15 +16,11 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Captor;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.shadows.ShadowSystemClock;
 
-import org.chromium.base.Callback;
 import org.chromium.base.Token;
 import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.SettableNullableObservableSupplier;
@@ -50,12 +45,8 @@ public class SuggestionMetricsTrackerUnitTest {
     @Mock private Tab mTab3;
     @Mock private Tab mTabWithNoGroup;
 
-    @Captor private ArgumentCaptor<Callback<Tab>> mTabObserverCaptor;
-
-    @Spy
     private final SettableNullableObservableSupplier<Tab> mCurrentTabSupplier =
             ObservableSuppliers.createNullable();
-
     private final Token mGtsGroupId = new Token(1, 1);
     private final Token mCpaGroupId = new Token(2, 2);
     private final Token mUnknownGroupId = new Token(3, 3);
@@ -68,7 +59,6 @@ public class SuggestionMetricsTrackerUnitTest {
         when(mTabModel.getCurrentTabSupplier()).thenReturn(mCurrentTabSupplier);
 
         mSuggestionMetricsTracker = new SuggestionMetricsTracker(mTabModelSelector);
-        verify(mCurrentTabSupplier).addObserver(mTabObserverCaptor.capture());
 
         when(mTab1.getTabGroupId()).thenReturn(mGtsGroupId);
         when(mTab2.getTabGroupId()).thenReturn(mCpaGroupId);
@@ -339,7 +329,8 @@ public class SuggestionMetricsTrackerUnitTest {
     }
 
     private void selectTab(Tab tab) {
-        when(mCurrentTabSupplier.get()).thenReturn(tab);
-        mTabObserverCaptor.getValue().onResult(tab);
+        // Set to null so that seclectTab() with the same tab will trigger another callback.
+        mCurrentTabSupplier.set(null);
+        mCurrentTabSupplier.set(tab);
     }
 }

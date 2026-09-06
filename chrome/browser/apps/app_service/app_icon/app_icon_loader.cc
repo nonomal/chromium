@@ -4,11 +4,11 @@
 
 #include "chrome/browser/apps/app_service/app_icon/app_icon_loader.h"
 
+#include <algorithm>
 #include <memory>
 #include <string_view>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/containers/span.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -25,7 +25,6 @@
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/apps/app_service/app_icon/app_icon_factory.h"
 #include "chrome/browser/apps/app_service/app_icon/dip_px_util.h"
-#include "chrome/browser/apps/icon_standardizer.h"
 #include "chrome/browser/extensions/chrome_app_icon.h"
 #include "chrome/browser/extensions/chrome_app_icon_loader.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
@@ -49,6 +48,7 @@
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/gfx/image/icon_standardizer.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
@@ -275,7 +275,7 @@ apps::IconValuePtr ApplyEffects(apps::IconEffects icon_effects,
   if (icon_effects & apps::IconEffects::kCrOsStandardIcon) {
     // We should never reapply the icon shaping logic.
     DCHECK(!(icon_effects & apps::IconEffects::kCrOsStandardMask));
-    iv->uncompressed = apps::CreateStandardIconImage(iv->uncompressed);
+    iv->uncompressed = gfx::CreateStandardAppIconImage(iv->uncompressed);
   }
 #if BUILDFLAG(IS_CHROMEOS)
   if (icon_effects & apps::IconEffects::kMdIconStyle) {
@@ -421,18 +421,6 @@ void AppIconLoader::ApplyBadges(IconEffects icon_effects,
                                 const std::optional<std::string>& app_id,
                                 IconValuePtr iv) {
   TRACE_EVENT0("ui", "AppIconLoader::ApplyBadges");
-#if BUILDFLAG(IS_CHROMEOS)
-  if (icon_effects & apps::IconEffects::kGuestOsBadge) {
-    CHECK(profile_ != nullptr && app_id.has_value());
-    auto* registry =
-        guest_os::GuestOsRegistryServiceFactory::GetForProfile(profile_);
-    if (registry) {
-      registry->ApplyContainerBadge(app_id, &iv->uncompressed);
-    }
-    std::move(callback_).Run(std::move(iv));
-    return;
-  }
-#endif  // BUILDFLAG(IS_CHROMEOS)
 
   const bool rounded_corners = icon_effects & apps::IconEffects::kRoundCorners;
 
@@ -523,7 +511,8 @@ void AppIconLoader::LoadWebAppIcon(const std::string& web_app_id,
                 size_hint_in_dip_,
                 ui::GetScaleForResourceScaleFactor(scale_factor)));
         DCHECK(size_and_purpose.has_value());
-        if (!base::Contains(icon_pixel_sizes, size_and_purpose->size_px)) {
+        if (!std::ranges::contains(icon_pixel_sizes,
+                                   size_and_purpose->size_px)) {
           icon_pixel_sizes.emplace_back(size_and_purpose->size_px);
         }
       }
@@ -1095,7 +1084,8 @@ void AppIconLoader::CompleteWithIconValue(IconValuePtr iv) {
 }
 
 // Callback for reading uncompressed web app icons.
-void AppIconLoader::OnReadWebAppIcon(std::map<int, SkBitmap> icon_bitmaps) {
+void AppIconLoader::OnReadWebAppIcon(
+    web_app::OrderedSizeToBitmap icon_bitmaps) {
   TRACE_EVENT0("ui", "AppIconLoader::OnReadWebAppIcon");
   if (icon_bitmaps.empty()) {
     MaybeApplyEffectsAndComplete(gfx::ImageSkia());
@@ -1136,7 +1126,7 @@ void AppIconLoader::OnReadWebAppIcon(std::map<int, SkBitmap> icon_bitmaps) {
 
 void AppIconLoader::OnReadWebAppForCompressedIconData(
     bool is_maskable_icon,
-    std::map<int, SkBitmap> icon_bitmaps) {
+    web_app::OrderedSizeToBitmap icon_bitmaps) {
   TRACE_EVENT0("ui", "AppIconLoader::OnReadWebAppForCompressedIconData");
   if (icon_bitmaps.empty()) {
     MaybeLoadFallbackOrCompleteEmpty();

@@ -9,12 +9,12 @@
 #include <string>
 #include <string_view>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/string_util.h"
 #include "base/version.h"
+#include "components/variations/experiment_group_ids.h"
 #include "components/variations/proto/study.pb.h"
 #include "entropy_provider.h"
 #include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
@@ -95,7 +95,7 @@ bool ValidateExperimentNames(const Study& study) {
   // Specifying a default experiment is optional, so finding it in the
   // experiment list is only required when it is specified.
   if (!study.default_experiment_name().empty() &&
-      !base::Contains(experiment_names, study.default_experiment_name())) {
+      !experiment_names.contains(study.default_experiment_name())) {
     LogInvalidReason(InvalidStudyReason::kMissingDefaultExperimentInList);
     DVLOG(1) << study.name() << " is missing default experiment ("
              << study.default_experiment_name() << ") in its experiment list";
@@ -165,9 +165,7 @@ bool ValidateAndComputeTotalProbability(
       return false;
     }
 
-    if (experiment.has_google_web_experiment_id() ||
-        experiment.has_google_web_trigger_experiment_id() ||
-        experiment.has_google_app_experiment_id()) {
+    if (HasExperimentId(experiment)) {
       if (study.activation_type() == Study::STICKY_AFTER_QUERY) {
         LogInvalidReason(InvalidStudyReason::kExperimentIdInStickyStudy);
         DVLOG(1) << study.name() << " with sticky activation has experiment ("

@@ -68,14 +68,14 @@ public class PreloadPagesSettingsFragment extends PreloadPagesSettingsFragmentBa
     @Override
     public void onPreloadPagesStateDetailsRequested(@PreloadPagesState int preloadPagesState) {
         if (preloadPagesState == PreloadPagesState.EXTENDED_PRELOADING) {
-            SettingsNavigationFactory.createSettingsNavigation()
+            SettingsNavigationFactory.createSettingsNavigation(requireContext())
                     .startSettings(
                             getActivity(),
                             ExtendedPreloadingSettingsFragment.class,
                             /* fragmentArgs= */ null,
                             /* addToBackStack= */ true);
         } else if (preloadPagesState == PreloadPagesState.STANDARD_PRELOADING) {
-            SettingsNavigationFactory.createSettingsNavigation()
+            SettingsNavigationFactory.createSettingsNavigation(requireContext())
                     .startSettings(
                             getActivity(),
                             StandardPreloadingSettingsFragment.class,
@@ -116,9 +116,8 @@ public class PreloadPagesSettingsFragment extends PreloadPagesSettingsFragmentBa
         return AnimationType.PROPERTY;
     }
 
-    // TODO(crbug.com/444470792): Determine what pieces of logic are dynamic and need handling. For
-    // this one, it's going to be the disclaimer text. But check for other prefs.
     public static final ChromeBaseSearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
             new ChromeBaseSearchIndexProvider(
-                    PreloadPagesSettingsFragment.class.getName(), R.xml.preload_pages_preferences);
+                    PreloadPagesSettingsFragment.class.getName(),
+                    ChromeBaseSearchIndexProvider.INDEX_OPT_OUT);
 }

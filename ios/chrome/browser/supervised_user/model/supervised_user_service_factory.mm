@@ -7,37 +7,24 @@
 #import "base/check_deref.h"
 #import "base/no_destructor.h"
 #import "components/prefs/pref_service.h"
-#import "components/supervised_user/core/browser/kids_chrome_management_url_checker_client.h"
-#import "components/supervised_user/core/browser/supervised_user_settings_service.h"
-#import "components/supervised_user/core/browser/supervised_user_url_filter.h"
+#import "components/supervised_user/core/browser/device_parental_controls.h"
+#import "components/supervised_user/core/browser/supervised_user_service.h"
 #import "components/variations/service/variations_service.h"
 #import "ios/chrome/browser/first_run/model/first_run.h"
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/signin/model/identity_manager_factory.h"
 #import "ios/chrome/browser/supervised_user/model/supervised_user_service_platform_delegate.h"
-#import "ios/chrome/browser/supervised_user/model/supervised_user_settings_service_factory.h"
-#import "ios/chrome/browser/sync/model/sync_service_factory.h"
 #import "ios/chrome/common/channel_info.h"
 #import "url/gurl.h"
 
-namespace {
-
-// Implementation of the supervised user filter delegate interface.
-class FilterDelegateImpl
-    : public supervised_user::SupervisedUserURLFilter::Delegate {
- public:
-  bool SupportsWebstoreURL(const GURL& url) const override { return false; }
-};
-
-}  // namespace
+namespace supervised_user {
 
 // static
-supervised_user::SupervisedUserService*
-SupervisedUserServiceFactory::GetForProfile(ProfileIOS* profile) {
-  return GetInstance()
-      ->GetServiceForProfileAs<supervised_user::SupervisedUserService>(
-          profile, /*create=*/true);
+SupervisedUserService* SupervisedUserServiceFactory::GetForProfile(
+    ProfileIOS* profile) {
+  return GetInstance()->GetServiceForProfileAs<SupervisedUserService>(
+      profile, /*create=*/true);
 }
 
 // static
@@ -49,8 +36,6 @@ SupervisedUserServiceFactory* SupervisedUserServiceFactory::GetInstance() {
 SupervisedUserServiceFactory::SupervisedUserServiceFactory()
     : ProfileKeyedServiceFactoryIOS("SupervisedUserService") {
   DependsOn(IdentityManagerFactory::GetInstance());
-  DependsOn(SyncServiceFactory::GetInstance());
-  DependsOn(SupervisedUserSettingsServiceFactory::GetInstance());
 }
 
 std::unique_ptr<KeyedService>
@@ -62,19 +47,10 @@ SupervisedUserServiceFactory::BuildServiceInstanceFor(
       IdentityManagerFactory::GetForProfile(profile);
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory =
       profile->GetSharedURLLoaderFactory();
-  return std::make_unique<supervised_user::SupervisedUserService>(
+  return std::make_unique<SupervisedUserService>(
       identity_manager, url_loader_factory, CHECK_DEREF(profile->GetPrefs()),
-      CHECK_DEREF(SupervisedUserSettingsServiceFactory::GetForProfile(profile)),
-      /*content_settings_service=*/nullptr,
-      &CHECK_DEREF(SyncServiceFactory::GetForProfile(profile)),
-      std::make_unique<supervised_user::SupervisedUserURLFilter>(
-          CHECK_DEREF(profile->GetPrefs()),
-          std::make_unique<FilterDelegateImpl>(),
-          std::make_unique<
-              supervised_user::KidsChromeManagementURLCheckerClient>(
-              identity_manager, url_loader_factory,
-              CHECK_DEREF(profile->GetPrefs()),
-              platform_delegate->GetCountryCode(),
-              platform_delegate->GetChannel())),
-      std::move(platform_delegate));
+      std::move(platform_delegate),
+      GetApplicationContext()->GetDeviceParentalControls());
 }
+
+}  // namespace supervised_user

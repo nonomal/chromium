@@ -11,6 +11,8 @@
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/app_window/native_app_window.h"
 #include "third_party/skia/include/core/SkRegion.h"
+#include "ui/base/page_transition_types.h"
+#include "ui/base/window_open_disposition.h"
 
 namespace extensions {
 
@@ -28,7 +30,7 @@ using AppWindowFrameBrowserTest = PlatformAppBrowserTest;
 #endif
 
 // Verifies that the NativeAppWindows implement GetFrameInsets() correctly.
-// See http://crbug.com/346115
+// See http://crbug.com/40352783
 IN_PROC_BROWSER_TEST_F(AppWindowFrameBrowserTest,
                        MAYBE_FrameInsetsForDefaultFrame) {
   AppWindow* app_window = CreateTestAppWindow("{}");
@@ -43,7 +45,7 @@ IN_PROC_BROWSER_TEST_F(AppWindowFrameBrowserTest,
 }
 
 // Verifies that the NativeAppWindows implement GetFrameInsets() correctly.
-// See http://crbug.com/346115
+// See http://crbug.com/40352783
 IN_PROC_BROWSER_TEST_F(AppWindowFrameBrowserTest, FrameInsetsForColoredFrame) {
   AppWindow* app_window =
       CreateTestAppWindow("{ \"frame\": { \"color\": \"#ffffff\" } }");
@@ -116,7 +118,7 @@ IN_PROC_BROWSER_TEST_F(AppWindowFrameBrowserTest, DraggableFramelessWindow) {
 
 #if BUILDFLAG(IS_CHROMEOS)
 
-// Disabled due to flake. https://crbug.com/1416579
+// Disabled due to flake. https://crbug.com/40256924
 IN_PROC_BROWSER_TEST_F(AppWindowFrameBrowserTest,
                        DISABLED_ShouldShowStaleContentOnEviction) {
   AppWindow* app_window = CreateTestAppWindow("{}");

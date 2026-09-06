@@ -11,7 +11,6 @@
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "base/check_is_test.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/metrics/histogram_functions.h"
@@ -52,6 +51,7 @@
 #include "components/services/app_service/public/cpp/intent.h"
 #include "components/services/app_service/public/cpp/types_util.h"
 #include "ui/display/display.h"
+#include "ui/display/types/display_constants.h"
 #include "ui/wm/public/activation_client.h"
 
 namespace ash::app_restore {
@@ -250,7 +250,7 @@ void ArcAppQueueRestoreHandler::LaunchApp(const std::string& app_id) {
 
 bool ArcAppQueueRestoreHandler::IsAppPendingRestore(
     const std::string& app_id) const {
-  return base::Contains(app_ids_, app_id);
+  return app_ids_.contains(app_id);
 }
 
 void ArcAppQueueRestoreHandler::OnAppUpdate(const apps::AppUpdate& update) {
@@ -266,7 +266,7 @@ void ArcAppQueueRestoreHandler::OnAppUpdate(const apps::AppUpdate& update) {
   if (update.Readiness() != apps::Readiness::kReady)
     return;
 
-  if (is_shelf_ready_ && base::Contains(app_ids_, update.AppId())) {
+  if (is_shelf_ready_ && app_ids_.contains(update.AppId())) {
     AddWindows(update.AppId());
     PrepareAppLaunching(update.AppId());
   }
@@ -407,7 +407,7 @@ void ArcAppQueueRestoreHandler::PrepareLaunchApps() {
   cache.ForEachApp([&app_ids, this](const apps::AppUpdate& update) {
     if (update.Readiness() == apps::Readiness::kReady &&
         update.AppType() == apps::AppType::kArc &&
-        base::Contains(app_ids_, update.AppId())) {
+        app_ids_.contains(update.AppId())) {
       app_ids.insert(update.AppId());
     }
   });

@@ -15,7 +15,7 @@ import {CrWebApi, gCrWeb} from '//ios/web/public/js_messaging/resources/gcrweb.j
 * functions to native-side tests.
 */
 
-const fillApi = new CrWebApi();
+const fillApi = new CrWebApi('fill_test_api');
 
 // go/keep-sorted start block=yes
 fillApi.addFunction(
@@ -48,12 +48,19 @@ fillApi.addFunction(
 fillApi.addFunction(
     'inferLabelFromTableRow', elementInferenceUtil.inferLabelFromTableRow);
 fillApi.addFunction(
+    'insertInputElementValueAtCursor',
+    fillUtil.insertInputElementValueAtCursor);
+fillApi.addFunction(
     'isAutofillableElement', inferenceUtil.isAutofillableElement);
 fillApi.addFunction(
     'isAutofillableInputElement', inferenceUtil.isAutofillableInputElement);
-fillApi.addFunction('isCheckableElement', inferenceUtil.isCheckableElement);
+fillApi.addFunction('isContentEditable', fillUtil.isContentEditable);
 fillApi.addFunction('isSelectElement', inferenceUtil.isSelectElement);
 fillApi.addFunction('registerAllChildFrames', registerAllChildFrames);
+fillApi.addFunction(
+    'sanitizeValueForInputElement', fillUtil.sanitizeValueForInputElement);
+fillApi.addFunction(
+    'setContentEditableValue', fillUtil.setContentEditableValue);
 fillApi.addFunction('setInputElementValue', fillUtil.setInputElementValue);
 fillApi.addFunction('setUniqueIDIfNeeded', setUniqueIDIfNeeded);
 fillApi.addFunction('shouldAutocomplete', fillUtil.shouldAutocomplete);
@@ -64,4 +71,4 @@ fillApi.addFunction('webFormElementToFormData', webFormElementToFormData);
 // go/keep-sorted end
 
 
-gCrWeb.registerApi('fill_test_api', fillApi);
+gCrWeb.registerApi(fillApi);

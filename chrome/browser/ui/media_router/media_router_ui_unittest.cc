@@ -4,12 +4,12 @@
 
 #include "chrome/browser/ui/media_router/media_router_ui.h"
 
+#include <algorithm>
 #include <initializer_list>
 #include <memory>
 #include <utility>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -38,6 +38,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/page_transition_types.h"
 #include "ui/display/display.h"
 #include "url/origin.h"
 
@@ -292,8 +293,7 @@ TEST_F(MediaRouterViewsUITest, NotifyObserver) {
         EXPECT_EQ(sink.id(), ui_sink.id);
         EXPECT_EQ(base::UTF8ToUTF16(sink.name()), ui_sink.friendly_name);
         EXPECT_EQ(UIMediaSinkState::AVAILABLE, ui_sink.state);
-        EXPECT_TRUE(
-            base::Contains(ui_sink.cast_modes, MediaCastMode::TAB_MIRROR));
+        EXPECT_TRUE(ui_sink.cast_modes.contains(MediaCastMode::TAB_MIRROR));
         EXPECT_EQ(sink.icon_type(), ui_sink.icon_type);
       }));
   NotifyUiOnSinksUpdated({sink_with_cast_modes});
@@ -726,7 +726,8 @@ TEST_F(MediaRouterViewsUITest, UpdateSinksWhenDialogMovesToAnotherDisplay) {
       .WillOnce(WithArg<0>([&](const CastDialogModel& model) {
         const auto& sinks = model.media_sinks();
         EXPECT_EQ(2u, sinks.size());
-        EXPECT_FALSE(base::Contains(sinks, display_sink_id1, &UIMediaSink::id));
+        EXPECT_FALSE(
+            std::ranges::contains(sinks, display_sink_id1, &UIMediaSink::id));
       }));
   ui_->UpdateSinks();
   Mock::VerifyAndClearExpectations(&observer);
@@ -737,7 +738,8 @@ TEST_F(MediaRouterViewsUITest, UpdateSinksWhenDialogMovesToAnotherDisplay) {
       .WillOnce(WithArg<0>([&](const CastDialogModel& model) {
         const auto& sinks = model.media_sinks();
         EXPECT_EQ(2u, sinks.size());
-        EXPECT_FALSE(base::Contains(sinks, display_sink_id2, &UIMediaSink::id));
+        EXPECT_FALSE(
+            std::ranges::contains(sinks, display_sink_id2, &UIMediaSink::id));
       }));
   display_observer->set_display(display2);
   ui_->UpdateSinks();

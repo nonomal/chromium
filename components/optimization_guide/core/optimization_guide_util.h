@@ -17,7 +17,6 @@
 #include "components/optimization_guide/core/optimization_guide_switches.h"
 #include "components/optimization_guide/proto/common_types.pb.h"
 #include "components/optimization_guide/proto/model_execution.pb.h"
-#include "components/optimization_guide/proto/models.pb.h"
 
 #define OPTIMIZATION_GUIDE_LOG(log_source, optimization_guide_logger, message) \
   do {                                                                         \
@@ -38,6 +37,10 @@ struct ResourceRequest;
 }  // namespace network
 
 namespace optimization_guide {
+
+namespace proto {
+enum ChromePlatform : int;
+}  // namespace proto
 
 enum class OptimizationGuideDecision;
 
@@ -90,6 +93,9 @@ std::optional<T> ParsedAnyMetadata(const proto::Any& any_metadata) {
 // Returns client's origin info, including platform and milestone.
 proto::OriginInfo GetClientOriginInfo();
 
+// Returns the Chrome platform the client is running on.
+proto::ChromePlatform GetChromePlatform();
+
 // Logs info about the common optimization guide feature flags.
 void LogFeatureFlagsInfo(OptimizationGuideLogger* optimization_guide_logger,
                          bool is_off_the_record,
@@ -111,11 +117,6 @@ void PopulateApiKeyRequestHeader(network::ResourceRequest* resource_request,
 void PopulateServerTimeoutRequestHeader(
     network::ResourceRequest* resource_request,
     base::TimeDelta timeout);
-
-// Returns whether model validator service should be started to validate various
-// model executions such as, TFLite, server-side AI, on-device AI models. Used
-// for integration testing purposes.
-bool ShouldStartModelValidator();
 
 }  // namespace optimization_guide
 

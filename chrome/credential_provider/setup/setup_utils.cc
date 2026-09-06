@@ -47,7 +47,7 @@ const wchar_t kMsiInstall[] = L"msi";
 
 // Parses the json data and returns it as a dictionary. If the json data isn't
 // valid, returns std::nullopt.
-std::optional<base::Value::Dict> ParseDistributionPreferences(
+std::optional<base::DictValue> ParseDistributionPreferences(
     const std::string& json_data) {
   JSONStringValueDeserializer json(json_data);
   std::string error;
@@ -311,7 +311,7 @@ bool StandaloneInstallerConfigurator::InitializeFromInstallerData(
     return false;
   }
 
-  std::optional<base::Value::Dict> prefs =
+  std::optional<base::DictValue> prefs =
       ParseDistributionPreferences(json_data);
   if (!prefs) {
     LOGFN(WARNING) << "Installer data isn't formatted correctly";
@@ -321,6 +321,16 @@ bool StandaloneInstallerConfigurator::InitializeFromInstallerData(
   installer_data_dictionary_ = std::move(prefs).value();
 
   return true;
+}
+
+bool EnableSecureDllLoading() {
+#if defined(COMPONENT_BUILD)
+  const DWORD directory_flags = LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
+#else
+  const DWORD directory_flags = LOAD_LIBRARY_SEARCH_SYSTEM32;
+#endif
+
+  return ::SetDefaultDllDirectories(directory_flags);
 }
 
 }  // namespace credential_provider

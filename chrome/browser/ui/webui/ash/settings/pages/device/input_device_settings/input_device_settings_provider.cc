@@ -17,7 +17,6 @@
 #include "ash/system/keyboard_brightness_control_delegate.h"
 #include "base/containers/flat_set.h"
 #include "base/metrics/histogram_functions.h"
-#include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_ash.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/apps/app_service/package_id_util.h"
@@ -27,6 +26,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/dbus/power_manager/backlight.pb.h"
 #include "components/prefs/pref_service.h"
+#include "components/services/app_service/public/cpp/app_launch_params.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "components/services/app_service/public/cpp/package_id.h"
 #include "content/public/browser/web_contents.h"
@@ -218,11 +218,9 @@ InputDeviceSettingsProvider::InputDeviceSettingsProvider() {
 
 InputDeviceSettingsProvider::~InputDeviceSettingsProvider() {
   if (auto* controller = InputDeviceSettingsController::Get()) {
-    if (features::IsPeripheralCustomizationEnabled()) {
-      controller->StopObservingButtons();
-      if (widget_) {
-        widget_->RemoveObserver(this);
-      }
+    controller->StopObservingButtons();
+    if (widget_) {
+      widget_->RemoveObserver(this);
     }
     controller->RemoveObserver(this);
   }
@@ -236,7 +234,7 @@ InputDeviceSettingsProvider::~InputDeviceSettingsProvider() {
 }
 
 void InputDeviceSettingsProvider::Initialize(content::WebUI* web_ui) {
-  if (features::IsPeripheralCustomizationEnabled() && !widget_) {
+  if (!widget_) {
     widget_ = views::Widget::GetWidgetForNativeWindow(
         web_ui->GetWebContents()->GetTopLevelNativeWindow());
     if (widget_) {
@@ -319,7 +317,6 @@ void InputDeviceSettingsProvider::OnShellDestroying() {
 }
 
 void InputDeviceSettingsProvider::StartObserving(uint32_t device_id) {
-  DCHECK(features::IsPeripheralCustomizationEnabled());
   observing_devices_.insert(device_id);
   if (!observing_paused_) {
     InputDeviceSettingsController::Get()->StartObservingButtons(device_id);
@@ -327,7 +324,6 @@ void InputDeviceSettingsProvider::StartObserving(uint32_t device_id) {
 }
 
 void InputDeviceSettingsProvider::StopObserving() {
-  DCHECK(features::IsPeripheralCustomizationEnabled());
   observing_devices_.clear();
   InputDeviceSettingsController::Get()->StopObservingButtons();
 }
@@ -390,7 +386,6 @@ void InputDeviceSettingsProvider::SetTouchpadSettings(
 void InputDeviceSettingsProvider::SetGraphicsTabletSettings(
     uint32_t device_id,
     ::ash::mojom::GraphicsTabletSettingsPtr settings) {
-  DCHECK(features::IsPeripheralCustomizationEnabled());
   DCHECK(InputDeviceSettingsController::Get());
   if (!InputDeviceSettingsController::Get()->SetGraphicsTabletSettings(
           device_id, std::move(settings))) {
@@ -491,7 +486,6 @@ void InputDeviceSettingsProvider::ObserveGraphicsTabletSettings(
 
 void InputDeviceSettingsProvider::ObserveButtonPresses(
     mojo::PendingRemote<mojom::ButtonPressObserver> observer) {
-  DCHECK(features::IsPeripheralCustomizationEnabled());
   button_press_observers_.Add(std::move(observer));
 }
 
@@ -583,49 +577,41 @@ void InputDeviceSettingsProvider::OnCustomizableTabletButtonPressed(
 
 void InputDeviceSettingsProvider::OnKeyboardBatteryInfoChanged(
     const ::ash::mojom::Keyboard& keyboard) {
-  CHECK(features::IsWelcomeExperienceEnabled());
   NotifyKeyboardsUpdated();
 }
 
 void InputDeviceSettingsProvider::OnGraphicsTabletBatteryInfoChanged(
     const ::ash::mojom::GraphicsTablet& graphics_tablet) {
-  CHECK(features::IsWelcomeExperienceEnabled());
   NotifyGraphicsTabletUpdated();
 }
 
 void InputDeviceSettingsProvider::OnMouseBatteryInfoChanged(
     const ::ash::mojom::Mouse& mouse) {
-  CHECK(features::IsWelcomeExperienceEnabled());
   NotifyMiceUpdated();
 }
 
 void InputDeviceSettingsProvider::OnTouchpadBatteryInfoChanged(
     const ::ash::mojom::Touchpad& touchpad) {
-  CHECK(features::IsWelcomeExperienceEnabled());
   NotifyTouchpadsUpdated();
 }
 
 void InputDeviceSettingsProvider::OnMouseCompanionAppInfoChanged(
     const ::ash::mojom::Mouse& mouse) {
-  CHECK(features::IsWelcomeExperienceEnabled());
   NotifyMiceUpdated();
 }
 
 void InputDeviceSettingsProvider::OnKeyboardCompanionAppInfoChanged(
     const ::ash::mojom::Keyboard& keyboard) {
-  CHECK(features::IsWelcomeExperienceEnabled());
   NotifyKeyboardsUpdated();
 }
 
 void InputDeviceSettingsProvider::OnTouchpadCompanionAppInfoChanged(
     const ::ash::mojom::Touchpad& touchpad) {
-  CHECK(features::IsWelcomeExperienceEnabled());
   NotifyTouchpadsUpdated();
 }
 
 void InputDeviceSettingsProvider::OnGraphicsTabletCompanionAppInfoChanged(
     const ::ash::mojom::GraphicsTablet& graphics_tablet) {
-  CHECK(features::IsWelcomeExperienceEnabled());
   NotifyGraphicsTabletUpdated();
 }
 
@@ -756,7 +742,6 @@ void InputDeviceSettingsProvider::NotifyMiceUpdated() {
 }
 
 void InputDeviceSettingsProvider::NotifyGraphicsTabletUpdated() {
-  CHECK(features::IsPeripheralCustomizationEnabled());
   DCHECK(InputDeviceSettingsController::Get());
   auto graphics_tablets = SanitizeAndSortDeviceList(
       InputDeviceSettingsController::Get()->GetConnectedGraphicsTablets());
@@ -780,7 +765,6 @@ void InputDeviceSettingsProvider::OnReceiveDeviceImage(
 void InputDeviceSettingsProvider::GetDeviceIconImage(
     const std::string& device_key,
     GetDeviceIconImageCallback callback) {
-  CHECK(features::IsWelcomeExperienceEnabled());
   CHECK(InputDeviceSettingsController::Get());
   InputDeviceSettingsController::Get()->GetDeviceImageDataUrl(
       device_key,
@@ -790,7 +774,6 @@ void InputDeviceSettingsProvider::GetDeviceIconImage(
 
 void InputDeviceSettingsProvider::LaunchCompanionApp(
     const std::string& package_id_str) {
-  CHECK(features::IsWelcomeExperienceEnabled());
   auto* profile = ProfileManager::GetActiveUserProfile();
   auto package_id = apps::PackageId::FromString(package_id_str);
   CHECK(package_id.has_value());

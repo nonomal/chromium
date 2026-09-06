@@ -25,11 +25,13 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/frame/browser_frame_view.h"
+#include "chrome/browser/ui/views/frame/browser_frame_view_win.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/browser_widget.h"
 #include "chrome/browser/ui/views/frame/browser_window_property_manager_win.h"
 #include "chrome/browser/ui/views/frame/system_menu_insertion_delegate_win.h"
 #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
+#include "chrome/browser/ui/views/frame/windows_caption_button.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/win/app_icon.h"
 #include "chrome/browser/win/titlebar_config.h"
@@ -40,10 +42,12 @@
 #include "ui/base/mojom/window_show_state.mojom.h"
 #include "ui/base/theme_provider.h"
 #include "ui/base/win/hwnd_metrics.h"
+#include "ui/display/screen.h"
 #include "ui/display/win/screen_win.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/image/image_family.h"
 #include "ui/gfx/win/icon_util.h"
+#include "ui/gfx/win/msg_util.h"
 #include "ui/views/controls/menu/native_menu_win.h"
 
 class VirtualDesktopHelper
@@ -260,7 +264,16 @@ BrowserDesktopWindowTreeHostWin::AsDesktopWindowTreeHost() {
 }
 
 bool BrowserDesktopWindowTreeHostWin::UsesNativeSystemMenu() const {
-  return true;
+  return !features::IsMenuSimplificationEnabled();
+}
+
+void BrowserDesktopWindowTreeHostWin::ShowCustomSystemMenu(
+    const gfx::Point& screen_point) {
+  gfx::Point dip_point =
+      gfx::ToFlooredPoint(display::win::GetScreenWin()->ScreenToDIPPoint(
+          gfx::PointF(screen_point)));
+  browser_widget_->non_client_view()->ShowContextMenu(
+      dip_point, ui::mojom::MenuSourceType::kMouse);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -322,13 +335,6 @@ bool BrowserDesktopWindowTreeHostWin::GetClientAreaInsets(
     return false;
   }
 
-  // Use default insets for popups and apps, unless we are custom drawing the
-  // titlebar.
-  if (!ShouldBrowserCustomDrawTitlebar(browser_view_) &&
-      !browser_view_->GetIsNormalType()) {
-    return false;
-  }
-
   if (GetWidget()->IsFullscreen()) {
     // In fullscreen mode there is no frame.
     *insets = gfx::Insets();
@@ -343,8 +349,7 @@ bool BrowserDesktopWindowTreeHostWin::GetClientAreaInsets(
     // area, Windows will draw a full native titlebar outside the client area.
     // (This doesn't occur in the maximized case.)
     int top_thickness = 0;
-    if (ShouldBrowserCustomDrawTitlebar(browser_view_) &&
-        GetWidget()->IsMaximized()) {
+    if (GetWidget()->IsMaximized()) {
       top_thickness = frame_thickness;
     }
     *insets = gfx::Insets::TLBR(top_thickness, frame_thickness, frame_thickness,
@@ -370,19 +375,7 @@ bool BrowserDesktopWindowTreeHostWin::GetDwmFrameInsetsInPixels(
   }
 
   // Don't extend the glass in at all if it won't be visible.
-  if (!ShouldUseNativeFrame() || GetWidget()->IsFullscreen() ||
-      ShouldBrowserCustomDrawTitlebar(browser_view_)) {
-    *insets = gfx::Insets();
-  } else {
-    // The glass should extend to the bottom of the tabstrip.
-    gfx::Rect tabstrip_region_bounds(
-        browser_widget_->GetFrameView()->GetBoundsForTabStripRegion(
-            browser_view_->tab_strip_view()->GetMinimumSize()));
-    tabstrip_region_bounds = display::win::GetScreenWin()->DIPToClientRect(
-        GetHWND(), tabstrip_region_bounds);
-
-    *insets = gfx::Insets::TLBR(tabstrip_region_bounds.bottom(), 0, 0, 0);
-  }
+  *insets = gfx::Insets();
   return true;
 }
 
@@ -420,8 +413,31 @@ bool BrowserDesktopWindowTreeHostWin::PreHandleMSG(UINT message,
       chrome::SessionEnding();
       return true;
     case WM_INITMENUPOPUP:
-      GetSystemMenu()->UpdateStates();
+      if (UsesNativeSystemMenu()) {
+        GetSystemMenu()->UpdateStates();
+      }
+      // Delegate to the base class so that capture exclusion propagation and
+      // other native menu handlers in the base class can process the message.
+      DesktopWindowTreeHostWin::PreHandleMSG(message, w_param, l_param, result);
+      // We always return true to indicate the message was handled,
+      // regardless of the base class result.
       return true;
+    case WM_SYSCOMMAND:
+      if ((w_param & 0xFFF0) == SC_KEYMENU && l_param == ' ') {
+        if (!UsesNativeSystemMenu()) {
+          ShowViewsSystemMenuAtDefaultLocation();
+          *result = 0;
+          return true;
+        }
+      }
+      break;
+    case WM_SYSCHAR:
+      if (w_param == VK_SPACE && !UsesNativeSystemMenu()) {
+        ShowViewsSystemMenuAtDefaultLocation();
+        *result = 0;
+        return true;
+      }
+      break;
   }
   return DesktopWindowTreeHostWin::PreHandleMSG(message, w_param, l_param,
                                                 result);
@@ -476,9 +492,7 @@ views::FrameMode BrowserDesktopWindowTreeHostWin::GetFrameMode() const {
   }
 
   const views::FrameMode system_frame_mode =
-      ShouldBrowserCustomDrawTitlebar(browser_view_)
-          ? views::FrameMode::SYSTEM_DRAWN_NO_CONTROLS
-          : views::FrameMode::SYSTEM_DRAWN;
+      views::FrameMode::SYSTEM_DRAWN_NO_CONTROLS;
 
   // We don't theme popup or app windows, so regardless of whether or not a
   // theme is active for normal browser windows, we don't want to use the custom
@@ -521,8 +535,7 @@ bool BrowserDesktopWindowTreeHostWin::ShouldUseNativeFrame() const {
 bool BrowserDesktopWindowTreeHostWin::ShouldWindowContentsBeTransparent()
     const {
   CHECK(browser_view_);
-  return !ShouldBrowserCustomDrawTitlebar(browser_view_) &&
-         views::DesktopWindowTreeHostWin::ShouldWindowContentsBeTransparent();
+  return false;
 }
 
 void BrowserDesktopWindowTreeHostWin::ClientDestroyedWidget() {
@@ -542,7 +555,7 @@ void BrowserDesktopWindowTreeHostWin::OnProfileAvatarChanged(
   // If we're currently badging the window icon (>1 available profile),
   // and this window's profile's avatar changed, update the window icon.
   CHECK(browser_view_);
-  if (browser_view_->browser()->profile()->GetPath() == profile_path &&
+  if (browser_view_->browser()->GetProfile()->GetPath() == profile_path &&
       g_browser_process->profile_manager()
               ->GetProfileAttributesStorage()
               .GetNumberOfProfiles() > 1) {
@@ -618,7 +631,7 @@ void BrowserDesktopWindowTreeHostWin::SetWindowIcon(bool badged) {
   if (badged) {
     CHECK(browser_view_);
     icon_handle_ = IconUtil::CreateHICONFromSkBitmap(
-        GetBadgedIconBitmapForProfile(browser_view_->browser()->profile()));
+        GetBadgedIconBitmapForProfile(browser_view_->browser()->GetProfile()));
   } else {
     icon_handle_.reset(GetAppIcon());
   }
@@ -626,6 +639,14 @@ void BrowserDesktopWindowTreeHostWin::SetWindowIcon(bool badged) {
               reinterpret_cast<LPARAM>(icon_handle_.get()));
   SendMessage(GetHWND(), WM_SETICON, ICON_BIG,
               reinterpret_cast<LPARAM>(icon_handle_.get()));
+}
+
+void BrowserDesktopWindowTreeHostWin::ShowViewsSystemMenuAtDefaultLocation() {
+  gfx::Point point = browser_widget_->non_client_view()
+                         ->frame_view()
+                         ->GetKeyboardContextMenuLocation();
+  browser_widget_->non_client_view()->ShowContextMenu(
+      point, ui::mojom::MenuSourceType::kKeyboard);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

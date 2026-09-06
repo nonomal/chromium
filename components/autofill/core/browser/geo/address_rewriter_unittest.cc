@@ -6,6 +6,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
+#include "build/build_config.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -34,7 +35,14 @@ TEST(AddressRewriterTest, LastRule) {
   EXPECT_EQ(large_rewrite.Rewrite(u"2"), large_rewrite.Rewrite(u"short"));
 }
 
-TEST(AddressRewriterTest, AutofillFixRewriterRulesEnabled) {
+// TODO(crbug.com/483953320): Re-enable this test on iOS.
+#if BUILDFLAG(IS_IOS)
+#define MAYBE_AutofillFixRewriterRulesEnabled \
+  DISABLED_AutofillFixRewriterRulesEnabled
+#else
+#define MAYBE_AutofillFixRewriterRulesEnabled AutofillFixRewriterRulesEnabled
+#endif
+TEST(AddressRewriterTest, MAYBE_AutofillFixRewriterRulesEnabled) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitAndEnableFeature(features::kAutofillFixRewriterRules);
   AddressRewriter de_fixed =
@@ -77,8 +85,8 @@ TEST(AddressRewriterTest, BE) {
       AddressRewriter::ForCountryCode(AddressCountryCode("be"));
   EXPECT_EQ(be.Rewrite(u"brussels hoofdstedelijk gewest"),
             be.Rewrite(u"region de bruxelles capitale"));
-  EXPECT_EQ(be.Rewrite(u"arrondissement administratif de foo"),
-            be.Rewrite(u"foo"));
+  EXPECT_EQ(be.Rewrite(u"berchem sainte agathe"),
+            be.Rewrite(u"st agatha berchem"));
 }
 
 TEST(AddressRewriterTest, BR) {
@@ -94,7 +102,7 @@ TEST(AddressRewriterTest, CA) {
   EXPECT_EQ(ca.Rewrite(u"prince edward island"), ca.Rewrite(u"pei"));
   EXPECT_EQ(ca.Rewrite(u"prince edward island"),
             ca.Rewrite(u"ile du prince edouard"));
-  EXPECT_EQ(ca.Rewrite(u"cul-de-sac"), ca.Rewrite(u"cul de sac"));
+  EXPECT_EQ(ca.Rewrite(u"cul de sac"), ca.Rewrite(u"cds"));
   EXPECT_EQ(ca.Rewrite(u"st"), ca.Rewrite(u"street"));
   EXPECT_EQ(ca.Rewrite(u"sainte"), ca.Rewrite(u"saint"));
 }
@@ -272,7 +280,7 @@ TEST(AddressRewriterTest, RU) {
       AddressRewriter::ForCountryCode(AddressCountryCode("ru"));
   EXPECT_EQ(ru.Rewrite(u"россия"), ru.Rewrite(u"russia"));
   EXPECT_EQ(ru.Rewrite(u"набережная"), ru.Rewrite(u"наб"));
-  EXPECT_EQ(ru.Rewrite(u"булв"), ru.Rewrite(u"б-р"));
+  EXPECT_EQ(ru.Rewrite(u"булв"), ru.Rewrite(u"б р"));
 }
 
 TEST(AddressRewriterTest, SE) {
@@ -318,6 +326,23 @@ TEST(AddressRewriterTest, ZA) {
       AddressRewriter::ForCountryCode(AddressCountryCode("za"));
   EXPECT_EQ(za.Rewrite(u"republic of south africa"),
             za.Rewrite(u"south africa"));
+}
+
+TEST(AddressRewriterTest, GLOBAL) {
+  base::test::ScopedFeatureList feature_list(
+      features::kAutofillIntroduceGlobalEmptyValueRewriterRules);
+
+  AddressRewriter global = AddressRewriter::ForGlobalRules();
+
+  EXPECT_EQ(global.Rewrite(u"null"), u"");
+  EXPECT_EQ(global.Rewrite(u"none"), u"");
+  EXPECT_EQ(global.Rewrite(u"nan"), u"");
+  EXPECT_EQ(global.Rewrite(u"undefined"), u"");
+  EXPECT_EQ(global.Rewrite(u"not applicable"), u"");
+  EXPECT_EQ(global.Rewrite(u"n a"), u"");
+  EXPECT_EQ(global.Rewrite(u"null null"), u"");
+
+  EXPECT_EQ(AddressRewriter::RewriteUsingGlobalRules(u"null"), u"");
 }
 
 }  // namespace

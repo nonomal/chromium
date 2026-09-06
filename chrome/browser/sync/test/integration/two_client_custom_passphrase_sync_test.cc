@@ -10,6 +10,8 @@
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/updated_progress_marker_checker.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/browser_sync/browser_sync_switches.h"
+#include "components/signin/public/base/signin_switches.h"
 #include "components/sync/test/nigori_test_utils.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/test_launcher.h"
@@ -27,6 +29,7 @@ static const int kDecryptingClientId = 1;
 using bookmarks_helper::AddURL;
 using bookmarks_helper::AllModelsMatch;
 using bookmarks_helper::BookmarksMatchChecker;
+using bookmarks_helper::StoreType;
 
 // These tests consider the client as a black-box; they are not concerned with
 // whether the data is committed to the server correctly encrypted. Rather, they
@@ -40,8 +43,10 @@ class TwoClientCustomPassphraseSyncTest
  public:
   TwoClientCustomPassphraseSyncTest() : SyncTest(TWO_CLIENT) {
     if (GetSetupSyncMode() == SetupSyncMode::kSyncTransportOnly) {
-      scoped_feature_list_.InitAndEnableFeature(
-          syncer::kReplaceSyncPromosWithSignInPromos);
+      scoped_feature_list_.InitWithFeatures(
+          {syncer::kReplaceSyncPromosWithSignInPromos,
+           switches::kSyncEnableBookmarksInTransportMode},
+          {});
     }
   }
   ~TwoClientCustomPassphraseSyncTest() override = default;
@@ -61,16 +66,16 @@ class TwoClientCustomPassphraseSyncTest
   }
 
   void AddTestBookmarksToClient(int index) {
-    bookmarks::BookmarkModel* bookmark_model =
-        bookmarks_helper::GetBookmarkModel(0);
-    const bookmarks::BookmarkNode* bar =
-        (GetSetupSyncMode() == SetupSyncMode::kSyncTheFeature)
-            ? bookmark_model->bookmark_bar_node()
-            : bookmark_model->account_bookmark_bar_node();
-    ASSERT_TRUE(AddURL(index, bar, 0, u"What are you syncing about?",
-                       GURL("https://google.com/synced-bookmark-1")));
-    ASSERT_TRUE(AddURL(index, bar, 1, u"Test bookmark",
-                       GURL("https://google.com/synced-bookmark-2")));
+    StoreType store_type =
+        GetSetupSyncMode() == SyncTest::SetupSyncMode::kSyncTransportOnly
+            ? StoreType::kAccountStore
+            : StoreType::kLocalOrSyncableStore;
+    ASSERT_TRUE(AddURL(index, 0, u"What are you syncing about?",
+                       GURL("https://google.com/synced-bookmark-1"),
+                       store_type));
+    ASSERT_TRUE(AddURL(index, 1, u"Test bookmark",
+                       GURL("https://google.com/synced-bookmark-2"),
+                       store_type));
   }
 
  private:
@@ -125,7 +130,7 @@ IN_PROC_BROWSER_TEST_P(TwoClientCustomPassphraseSyncTest,
   if (GetSetupSyncMode() == SetupSyncMode::kSyncTheFeature) {
     ASSERT_TRUE(GetClient(kEncryptingClientId)->SetupSync());
   } else {
-    ASSERT_TRUE(GetClient(kEncryptingClientId)->SignInPrimaryAccount());
+    ASSERT_TRUE(GetClient(kEncryptingClientId)->SignInNoWaitForCompletion());
     ASSERT_TRUE(GetClient(kEncryptingClientId)->AwaitSyncTransportActive());
   }
 
@@ -144,7 +149,7 @@ IN_PROC_BROWSER_TEST_P(TwoClientCustomPassphraseSyncTest,
   if (GetSetupSyncMode() == SetupSyncMode::kSyncTheFeature) {
     ASSERT_TRUE(GetClient(kDecryptingClientId)->SetupSyncNoWaitForCompletion());
   } else {
-    ASSERT_TRUE(GetClient(kDecryptingClientId)->SignInPrimaryAccount());
+    ASSERT_TRUE(GetClient(kDecryptingClientId)->SignInNoWaitForCompletion());
   }
   ASSERT_TRUE(
       PassphraseRequiredChecker(GetSyncService(kDecryptingClientId)).Wait());

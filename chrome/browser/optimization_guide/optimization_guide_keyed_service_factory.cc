@@ -11,6 +11,10 @@
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
+#include "chrome/common/chrome_features.h"
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/private_ai/private_ai_service_factory.h"
+#endif
 #include "components/optimization_guide/core/optimization_guide_features.h"
 #include "content/public/browser/browser_context.h"
 
@@ -53,6 +57,9 @@ OptimizationGuideKeyedServiceFactory::OptimizationGuideKeyedServiceFactory()
               .Build()) {
   DependsOn(BackgroundDownloadServiceFactory::GetInstance());
   DependsOn(IdentityManagerFactory::GetInstance());
+#if !BUILDFLAG(IS_ANDROID)
+  DependsOn(private_ai::PrivateAiServiceFactory::GetInstance());
+#endif
 }
 
 OptimizationGuideKeyedServiceFactory::~OptimizationGuideKeyedServiceFactory() =
@@ -66,6 +73,11 @@ OptimizationGuideKeyedServiceFactory::BuildServiceInstanceForBrowserContext(
 
 bool OptimizationGuideKeyedServiceFactory::ServiceIsCreatedWithBrowserContext()
     const {
+  if (base::FeatureList::IsEnabled(
+          ::features::kLazyKeyedServiceInstantiation) &&
+      ::features::kLazyKeyedServiceInstantiationOptimizationGuide.Get()) {
+    return false;
+  }
   return optimization_guide::features::IsOptimizationHintsEnabled();
 }
 

@@ -10,13 +10,16 @@ import {WebUiListenerMixinLit} from '//resources/cr_elements/web_ui_listener_mix
 import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
 import type {PropertyValues} from '//resources/lit/v3_0/lit.rollup.js';
 
+import type {VisualBrowserProxy} from '../app/visual_browser_proxy.js';
+import {VisualBrowserProxyImpl} from '../app/visual_browser_proxy.js';
 import type {SettingsPrefs, ShowAtConfigPrefs} from '../content/read_anything_types.js';
+import {DEFAULT_SETTINGS, ToolbarEvent} from '../content/read_anything_types.js';
 import {ReadAnythingSettingsChange} from '../shared/metrics_browser_proxy.js';
 import {ReadAnythingLogger} from '../shared/read_anything_logger.js';
 
 import {getHtml} from './font_menu.html.js';
 import {getIndexOrDefault} from './menu_util.js';
-import type {MenuStateItem} from './menu_util.js';
+import type {MenuStateItem, ToolbarMenu} from './menu_util.js';
 import type {SimpleActionMenuElement} from './simple_action_menu.js';
 
 export interface FontMenuElement {
@@ -29,7 +32,8 @@ const FontMenuElementBase = WebUiListenerMixinLit(I18nMixinLit(CrLitElement));
 
 // Stores and propagates the data for the font menu used when read aloud is
 // enabled.
-export class FontMenuElement extends FontMenuElementBase {
+export class FontMenuElement extends FontMenuElementBase implements
+    ToolbarMenu {
   static get is() {
     return 'font-menu';
   }
@@ -52,17 +56,11 @@ export class FontMenuElement extends FontMenuElementBase {
 
   accessor areFontsLoaded: boolean = false;
   accessor pageLanguage: string = '';
-  accessor settingsPrefs: SettingsPrefs = {
-    letterSpacing: 0,
-    lineSpacing: 0,
-    theme: 0,
-    speechRate: 0,
-    font: '',
-    highlightGranularity: 0,
-    lineFocus: 0,
-  };
+  accessor settingsPrefs: SettingsPrefs = DEFAULT_SETTINGS;
   accessor nonModal: boolean = false;
 
+  private visualBrowserProxy_: VisualBrowserProxy =
+      VisualBrowserProxyImpl.getInstance();
   private logger_: ReadAnythingLogger = ReadAnythingLogger.getInstance();
 
   override updated(changedProperties: PropertyValues<this>) {
@@ -70,7 +68,7 @@ export class FontMenuElement extends FontMenuElementBase {
     if (changedProperties.has('pageLanguage') ||
         changedProperties.has('areFontsLoaded') ||
         changedProperties.has('settingsPrefs')) {
-      this.setFontOptions_(chrome.readingMode.supportedFonts);
+      this.setFontOptions_(this.visualBrowserProxy_.getSupportedFonts());
     }
   }
 
@@ -83,19 +81,21 @@ export class FontMenuElement extends FontMenuElementBase {
   }
 
   protected currentFontIndex_(): number {
-    return getIndexOrDefault(this.options_, chrome.readingMode.fontName);
+    return getIndexOrDefault(
+        this.options_, this.visualBrowserProxy_.getFontName());
   }
 
   protected onFontChange_(event: CustomEvent<{data: string}>) {
-    chrome.readingMode.onFontChange(event.detail.data);
+    this.visualBrowserProxy_.onFontChange(event.detail.data);
     this.logger_.logTextSettingsChange(ReadAnythingSettingsChange.FONT_CHANGE);
+    this.fire(ToolbarEvent.CLOSE_ALL_MENUS);
   }
 
   private setFontOptions_(fontList: string[]) {
     this.options_ = fontList.map(font => ({
                                    title: this.getFontItemLabel_(font),
                                    data: font,
-                                   style: 'font-family:' + font,
+                                   style: `font-family:${font}`,
                                  }));
   }
 

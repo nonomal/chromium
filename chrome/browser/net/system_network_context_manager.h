@@ -13,7 +13,6 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
-#include "chrome/browser/enterprise/encryption/cache_encryption_provider_impl.h"
 #include "chrome/browser/net/cert_verifier_service_time_updater.h"
 #include "chrome/browser/net/proxy_config_monitor.h"
 #include "chrome/browser/net/stub_resolver_config_reader.h"
@@ -114,7 +113,9 @@ class SystemNetworkContextManager {
 
   // Called when content creates a NetworkService. Creates the
   // SystemNetworkContext, if the network service is enabled.
-  void OnNetworkServiceCreated(network::mojom::NetworkService* network_service);
+  static void OnNetworkServiceCreated(
+      network::mojom::NetworkService* network_service,
+      PrefService* pref_service);
 
   // Permanently disables QUIC, both for NetworkContexts using the IOThread's
   // NetworkService, and for those using the network service (if enabled).
@@ -128,11 +129,6 @@ class SystemNetworkContextManager {
   // Adds a CookieEncryptionManager mojo remote to the specified
   // `network_context_params`.
   void AddCookieEncryptionManagerToNetworkContextParams(
-      network::mojom::NetworkContextParams* network_context_params);
-
-  // Adds a CacheEncryptionProvider mojo remote to the specified
-  // `network_context_params`.
-  void AddCacheEncryptionProviderToNetworkContextParams(
       network::mojom::NetworkContextParams* network_context_params);
 
   // Populates |initial_ssl_config| and |ssl_config_client_receiver| members of
@@ -159,12 +155,16 @@ class SystemNetworkContextManager {
   // or destroyed, and so that it's destroyed before Mojo is shut down.
   net_log::NetExportFileWriter* GetNetExportFileWriter();
 
-  // Updates the network service with the given list of |trust_anchor_ids|
-  // and |mtc_trust_anchor_ids| (lists of TLS Trust Anchor IDs in binary
-  // representation).
+  // Updates the network service with the given list of
+  // |classic_trust_anchor_ids| and |mtc_standalone_only_trust_anchor_ids|
+  // (lists of TLS Trust Anchor IDs in binary representation).
+  // |mtc_landmark_info| may optionally provide trust anchor id configuration
+  // for landmark-relative MTCs.
   void UpdateTrustAnchorIDs(
-      std::vector<std::vector<uint8_t>> trust_anchor_ids,
-      std::vector<std::vector<uint8_t>> mtc_trust_anchor_ids);
+      base::span<const std::vector<uint8_t>> classic_trust_anchor_ids,
+      base::span<const std::vector<uint8_t>>
+          mtc_standalone_only_trust_anchor_ids,
+      std::optional<SSLConfigServiceMtcLandmarkInfo> mtc_landmark_info);
 
   // Returns whether the network sandbox is enabled. This depends on policy but
   // also feature status from sandbox. Called before there is an instance of
@@ -246,6 +246,9 @@ class SystemNetworkContextManager {
   // Constructor. |pref_service| must out live this object.
   explicit SystemNetworkContextManager(PrefService* pref_service);
 
+  void OnNetworkServiceCreatedInternal(
+      network::mojom::NetworkService* network_service);
+
   void UpdateReferrersEnabled();
 
   // Creates parameters for the NetworkContext. May only be called once, since
@@ -309,9 +312,6 @@ class SystemNetworkContextManager {
 #endif  // BUILDFLAG(IS_LINUX)
 
   std::unique_ptr<CookieEncryptionProviderImpl> cookie_encryption_provider_;
-
-  std::unique_ptr<enterprise_encryption::CacheEncryptionProviderImpl>
-      cache_encryption_provider_;
 
   std::unique_ptr<CertVerifierServiceTimeUpdater> cert_verifier_time_updater_;
 };

@@ -8,7 +8,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
 #include "base/observer_list.h"
@@ -46,6 +45,8 @@ bool IsValidTransform(const gfx::Transform& transform) {
     // If testing with unexpectedly high values, catch on debug builds rather
     // than silently change data.  On release builds its better to be safe and
     // validate.
+    // CHECK-exclusion: See the above comment. Intentionally leveraging the
+    // nature of DCHECK.
     DCHECK(false);
     return false;
   }
@@ -103,10 +104,14 @@ device::mojom::XRViewPtr ValidateXRView(const device::mojom::XRView* view) {
   int kMinSize = 2;
   // DCHECK on debug builds to catch legitimate large sizes, but clamp on
   // release builds to ensure valid state.
-  DCHECK_LT(view->viewport.width() + view->viewport.x(), kMaxSize);
-  DCHECK_LT(view->viewport.height() + view->viewport.y(), kMaxSize);
-  DCHECK_GT(view->viewport.width() + view->viewport.x(), kMinSize);
-  DCHECK_GT(view->viewport.height() + view->viewport.y(), kMinSize);
+  CHECK_LT(view->viewport.width() + view->viewport.x(), kMaxSize,
+           base::NotFatalUntil::M159);
+  CHECK_LT(view->viewport.height() + view->viewport.y(), kMaxSize,
+           base::NotFatalUntil::M159);
+  CHECK_GT(view->viewport.width() + view->viewport.x(), kMinSize,
+           base::NotFatalUntil::M159);
+  CHECK_GT(view->viewport.height() + view->viewport.y(), kMinSize,
+           base::NotFatalUntil::M159);
   ret->viewport =
       gfx::Rect(std::clamp(view->viewport.x(), 0, kMaxSize),
                 std::clamp(view->viewport.y(), 0, kMaxSize),
@@ -128,8 +133,6 @@ BrowserXRRuntimeImpl::BrowserXRRuntimeImpl(
 
   runtime_->ListenToDeviceChanges(receiver_.BindNewEndpointAndPassRemote());
 
-  // TODO(crbug.com/40662458): Convert this to a query for the client off of
-  // ContentBrowserClient once BrowserXRRuntimeImpl moves to content.
   auto* integration_client = GetXrIntegrationClient();
 
   if (integration_client) {
@@ -150,7 +153,7 @@ BrowserXRRuntimeImpl::~BrowserXRRuntimeImpl() {
   }
 
   if (install_finished_callback_) {
-    std::move(install_finished_callback_).Run(false);
+    std::move(install_finished_callback_).Run(XrInstallResult::kFailed);
   }
 }
 
@@ -168,7 +171,7 @@ bool BrowserXRRuntimeImpl::SupportsFeature(
      id_ == device::mojom::XRDeviceId::FAKE_DEVICE_ID)
       return true;
 
-  return base::Contains(device_data_->supported_features, feature);
+  return std::ranges::contains(device_data_->supported_features, feature);
 }
 
 bool BrowserXRRuntimeImpl::SupportsAllFeatures(
@@ -271,7 +274,7 @@ void BrowserXRRuntimeImpl::OnServiceAdded(VRServiceImpl* service) {
 
 void BrowserXRRuntimeImpl::OnServiceRemoved(VRServiceImpl* service) {
   DVLOG(2) << __func__ << ": id=" << id_;
-  DCHECK(service);
+  CHECK(service, base::NotFatalUntil::M159);
   services_.erase(service);
   if (service == presenting_service_) {
     // Our presenting service is no longer valid, so we need to clear it before
@@ -362,10 +365,10 @@ void BrowserXRRuntimeImpl::OnRequestSessionResult(
         }
 
         // The overlay code requires the left and right views to render.
-        if (!base::Contains(views, device::mojom::XREye::kLeft,
-                            &device::mojom::XRView::eye) ||
-            !base::Contains(views, device::mojom::XREye::kRight,
-                            &device::mojom::XRView::eye)) {
+        if (!std::ranges::contains(views, device::mojom::XREye::kLeft,
+                                   &device::mojom::XRView::eye) ||
+            !std::ranges::contains(views, device::mojom::XREye::kRight,
+                                   &device::mojom::XRView::eye)) {
           // Notify the service to cleanup any session that it's started to
           // setup, and when that and our corresponding runtime shutdown have
           // finished, notify the page that the session request failed.
@@ -382,8 +385,8 @@ void BrowserXRRuntimeImpl::OnRequestSessionResult(
       }
 
       immersive_session_has_camera_access_ =
-          base::Contains(session_result->session->enabled_features,
-                         device::mojom::XRSessionFeature::CAMERA_ACCESS);
+          std::ranges::contains(session_result->session->enabled_features,
+                                device::mojom::XRSessionFeature::CAMERA_ACCESS);
       if (immersive_session_has_camera_access_) {
         for (Observer& observer : observers_) {
           observer.WebXRCameraInUseChanged(web_contents, true);
@@ -404,14 +407,13 @@ void BrowserXRRuntimeImpl::OnRequestSessionResult(
 }
 
 void BrowserXRRuntimeImpl::EnsureInstalled(
-    int render_process_id,
-    int render_frame_id,
-    base::OnceCallback<void(bool)> install_callback) {
+    const content::GlobalRenderFrameHostId& frame_id,
+    base::OnceCallback<void(XrInstallResult)> install_callback) {
   DVLOG(2) << __func__;
 
   // If there's no install helper, then we can assume no install is needed.
   if (!install_helper_) {
-    std::move(install_callback).Run(true);
+    std::move(install_callback).Run(XrInstallResult::kSuccessAlreadyInstalled);
     return;
   }
 
@@ -419,7 +421,7 @@ void BrowserXRRuntimeImpl::EnsureInstalled(
   bool had_outstanding_callback = false;
   if (install_finished_callback_) {
     had_outstanding_callback = true;
-    std::move(install_finished_callback_).Run(false);
+    std::move(install_finished_callback_).Run(XrInstallResult::kFailed);
   }
 
   install_finished_callback_ = std::move(install_callback);
@@ -430,15 +432,14 @@ void BrowserXRRuntimeImpl::EnsureInstalled(
     return;
 
   install_helper_->EnsureInstalled(
-      render_process_id, render_frame_id,
-      base::BindOnce(&BrowserXRRuntimeImpl::OnInstallFinished,
-                     weak_ptr_factory_.GetWeakPtr()));
+      frame_id, base::BindOnce(&BrowserXRRuntimeImpl::OnInstallFinished,
+                               weak_ptr_factory_.GetWeakPtr()));
 }
 
-void BrowserXRRuntimeImpl::OnInstallFinished(bool succeeded) {
-  DCHECK(install_finished_callback_);
+void BrowserXRRuntimeImpl::OnInstallFinished(XrInstallResult result) {
+  CHECK(install_finished_callback_, base::NotFatalUntil::M159);
 
-  std::move(install_finished_callback_).Run(succeeded);
+  std::move(install_finished_callback_).Run(result);
 }
 
 void BrowserXRRuntimeImpl::OnImmersiveSessionError() {

@@ -7,7 +7,6 @@
 
 #include "base/containers/span.h"
 #include "media/base/video_types.h"
-#include "media/capture/mojom/image_capture.mojom.h"
 #include "media/capture/video/video_capture_device_info.h"
 
 namespace media {
@@ -15,15 +14,6 @@ namespace media {
 CAPTURE_EXPORT
 void LogCaptureDeviceMetrics(
     base::span<const media::VideoCaptureDeviceInfo> devices_info);
-
-void LogCaptureDeviceHashedModelId(
-    const media::VideoCaptureDeviceDescriptor& descriptor);
-
-CAPTURE_EXPORT
-void LogCaptureDeviceEffects(mojom::PhotoStatePtr photo_state);
-
-CAPTURE_EXPORT
-void LogCaptureCurrentDeviceResolution(int width, int height);
 
 CAPTURE_EXPORT
 void LogCaptureCurrentDevicePixelFormat(

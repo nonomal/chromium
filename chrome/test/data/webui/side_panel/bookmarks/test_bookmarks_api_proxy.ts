@@ -23,12 +23,13 @@ export class TestBookmarksApiProxy extends TestBrowserProxy implements
   constructor() {
     super([
       'getActiveUrl',
+      'getIncognitoAvailableCount',
       'isActiveTabInSplit',
       'bookmarkCurrentTabInFolder',
       'openBookmark',
       'contextMenuOpenBookmarkInNewTab',
       'contextMenuOpenBookmarkInNewWindow',
-      'contextMenuOpenBookmarkInIncognitoWindow',
+      'contextMenuOpenBookmarkInOffTheRecordWindow',
       'contextMenuOpenBookmarkInNewTabGroup',
       'contextMenuOpenBookmarkInSplitView',
       'contextMenuEdit',
@@ -64,6 +65,11 @@ export class TestBookmarksApiProxy extends TestBrowserProxy implements
     return Promise.resolve('http://www.test.com');
   }
 
+  getIncognitoAvailableCount(ids: string[]) {
+    this.methodCalled('getIncognitoAvailableCount', ids);
+    return Promise.resolve({incognitoCount: 1});
+  }
+
   isActiveTabInSplit() {
     this.methodCalled('isActiveTabInSplit');
     return Promise.resolve(false);
@@ -87,9 +93,10 @@ export class TestBookmarksApiProxy extends TestBrowserProxy implements
     this.methodCalled('contextMenuOpenBookmarkInNewWindow', ids, source);
   }
 
-  contextMenuOpenBookmarkInIncognitoWindow(
+  contextMenuOpenBookmarkInOffTheRecordWindow(
       ids: string[], source: ActionSource) {
-    this.methodCalled('contextMenuOpenBookmarkInIncognitoWindow', ids, source);
+    this.methodCalled(
+        'contextMenuOpenBookmarkInOffTheRecordWindow', ids, source);
   }
 
   contextMenuOpenBookmarkInNewTabGroup(ids: string[], source: ActionSource) {

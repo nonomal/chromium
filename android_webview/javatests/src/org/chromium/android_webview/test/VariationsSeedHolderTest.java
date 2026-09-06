@@ -12,6 +12,7 @@ import static org.chromium.android_webview.test.OnlyRunIn.ProcessMode.EITHER_PRO
 import android.os.ParcelFileDescriptor;
 
 import androidx.test.filters.MediumTest;
+import androidx.test.filters.SmallTest;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -21,9 +22,12 @@ import org.junit.runner.RunWith;
 
 import org.chromium.android_webview.common.VariationsFastFetchModeUtils;
 import org.chromium.android_webview.common.variations.VariationsUtils;
+import org.chromium.android_webview.proto.AwVariationsSeedOuterClass.AwVariationsSeed;
+import org.chromium.android_webview.services.AwEntropyState;
 import org.chromium.android_webview.services.VariationsSeedHolder;
 import org.chromium.android_webview.test.util.VariationsTestUtils;
 import org.chromium.base.test.util.CallbackHelper;
+import org.chromium.base.test.util.DoNotBatch;
 import org.chromium.components.variations.firstrun.VariationsSeedFetcher.SeedInfo;
 
 import java.io.File;
@@ -38,6 +42,7 @@ import java.util.concurrent.TimeoutException;
 /** Test VariationsSeedHolder. */
 @RunWith(AwJUnit4ClassRunner.class)
 @OnlyRunIn(EITHER_PROCESS) // These tests don't use the renderer process
+@DoNotBatch(reason = "Requires process restart for each test.")
 public class VariationsSeedHolderTest {
     private static class TestHolder extends VariationsSeedHolder {
         private final CallbackHelper mWriteFinished; // notified after each writeSeedIfNewer
@@ -90,6 +95,23 @@ public class VariationsSeedHolderTest {
     @After
     public void tearDown() throws IOException {
         VariationsTestUtils.deleteSeeds();
+    }
+
+    @Test
+    @SmallTest
+    public void testConstructorInitializesEntropySources() {
+        new TestHolder();
+
+        // Verify the entropy sources exist.
+        int lowSource = AwEntropyState.getLowEntropySource();
+        Assert.assertTrue(
+                "Low entropy source should be non-negative, but was " + lowSource, lowSource >= 0);
+        Assert.assertTrue(
+                "Low entropy source should be less than 8000, but was " + lowSource,
+                lowSource < 8000);
+
+        String limitedSource = AwEntropyState.getLimitedEntropyRandomizationSource();
+        Assert.assertNotNull("Limited entropy source should not be null", limitedSource);
     }
 
     // Request that the seed holder write its current seed to a file when the holder has no seed. No
@@ -349,6 +371,73 @@ public class VariationsSeedHolderTest {
                     VariationsSeedHolder.getInstance().isSeedFileFresh());
         } finally {
             VariationsTestUtils.deleteSeeds(); // Remove the stamp file.
+        }
+    }
+
+    // Test that updateSeed() saves the seed to the service's internal storage
+    // with the entropy sources, so SafeMode clients querying the seed will stay
+    // synchronized.
+    @Test
+    @MediumTest
+    public void testUpdateSeed_HasEntropy() throws IOException, TimeoutException {
+        TestHolder holder = new TestHolder();
+        int expectedLowEntropy = AwEntropyState.getLowEntropySource();
+        Assert.assertTrue(expectedLowEntropy >= 0);
+        String expectedLimitedEntropy = AwEntropyState.getLimitedEntropyRandomizationSource();
+        Assert.assertNotNull(expectedLimitedEntropy);
+        holder.updateSeedBlocking(VariationsTestUtils.createMockSeed());
+
+        File internalSeedFile = VariationsUtils.getSeedFile();
+        Assert.assertTrue("Internal seed file should exist", internalSeedFile.exists());
+        AwVariationsSeed readProto = VariationsTestUtils.readProtoFromFile(internalSeedFile);
+
+        // The internal file should have the entropy sources.
+        Assert.assertTrue(
+                "Internal seed file should contain low entropy source",
+                readProto.hasLowEntropySource());
+        Assert.assertEquals(
+                "Internal seed file has wrong low entropy source",
+                expectedLowEntropy,
+                readProto.getLowEntropySource());
+        Assert.assertTrue(
+                "Internal seed file should contain limited entropy source",
+                readProto.hasLimitedEntropyRandomizationSource());
+        Assert.assertEquals(
+                "Internal seed file has wrong limited entropy source",
+                expectedLimitedEntropy,
+                readProto.getLimitedEntropyRandomizationSource());
+    }
+
+    // Test that writeSeedIfNewer() serves the seed to the app with the entropy
+    // sources included.
+    @Test
+    @MediumTest
+    public void testWriteSeed_HasEntropy() throws IOException, TimeoutException {
+        TestHolder holder = new TestHolder();
+        int expectedLowEntropy = AwEntropyState.getLowEntropySource();
+        Assert.assertTrue(expectedLowEntropy >= 0);
+        String expectedLimitedEntropy = AwEntropyState.getLimitedEntropyRandomizationSource();
+        Assert.assertNotNull(expectedLimitedEntropy);
+        holder.updateSeedBlocking(VariationsTestUtils.createMockSeed());
+
+        File appSeedFile = null;
+        try {
+            appSeedFile = File.createTempFile("seed", null, null);
+
+            holder.writeSeedIfNewerBlocking(appSeedFile, Long.MIN_VALUE);
+
+            // The file written for the app should have the entropy sources.
+            AwVariationsSeed readProto = VariationsTestUtils.readProtoFromFile(appSeedFile);
+            Assert.assertEquals(
+                    "App seed file has wrong low entropy source",
+                    expectedLowEntropy,
+                    readProto.getLowEntropySource());
+            Assert.assertEquals(
+                    "App seed file has wrong limited entropy source",
+                    expectedLimitedEntropy,
+                    readProto.getLimitedEntropyRandomizationSource());
+        } finally {
+            if (appSeedFile != null) appSeedFile.delete();
         }
     }
 }

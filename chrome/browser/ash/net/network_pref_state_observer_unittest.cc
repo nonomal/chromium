@@ -18,6 +18,7 @@
 #include "chromeos/ash/components/network/network_handler.h"
 #include "chromeos/ash/components/network/network_handler_test_helper.h"
 #include "chromeos/ash/components/network/proxy/ui_proxy_config_service.h"
+#include "chromeos/ash/components/sync_wifi/wifi_configuration_sync_service_provider.h"
 #include "components/onc/onc_constants.h"
 #include "components/prefs/pref_service.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
@@ -35,6 +36,18 @@ namespace {
 
 const char kUserId[] = "test@example.com";
 const char kNetworkId[] = "wifi1_guid";  // Matches FakeShillManagerClient
+
+// Installs a no-op WifiConfigurationSyncServiceProvider so the observer can
+// resolve the service without depending on the //chrome factory. The service
+// is never created in tests, matching the production create=false behavior.
+class FakeWifiConfigurationSyncServiceProvider
+    : public WifiConfigurationSyncServiceProvider {
+ public:
+  sync_wifi::WifiConfigurationSyncService* Find(
+      const AccountId& account_id) override {
+    return nullptr;
+  }
+};
 
 }  // namespace
 
@@ -83,6 +96,8 @@ class NetworkPrefStateObserverTest : public testing::Test {
   user_manager::TypedScopedUserManager<FakeChromeUserManager>
       fake_user_manager_;
   std::unique_ptr<TestingProfileManager> profile_manager_;
+  FakeWifiConfigurationSyncServiceProvider
+      wifi_configuration_sync_service_provider_;
   std::unique_ptr<NetworkPrefStateObserver> network_pref_state_observer_;
 };
 
@@ -92,7 +107,7 @@ TEST_F(NetworkPrefStateObserverTest, LoginUser) {
       NetworkHandler::GetUiProxyConfigService();
   ASSERT_TRUE(device_ui_proxy_config_service);
   // There should be no proxy config available.
-  base::Value::Dict ui_proxy_config;
+  base::DictValue ui_proxy_config;
   EXPECT_FALSE(device_ui_proxy_config_service->MergeEnforcedProxyConfig(
       kNetworkId, &ui_proxy_config));
 
@@ -103,12 +118,12 @@ TEST_F(NetworkPrefStateObserverTest, LoginUser) {
       NetworkHandler::GetUiProxyConfigService();
   ASSERT_TRUE(profile_ui_proxy_config_service);
   ASSERT_NE(device_ui_proxy_config_service, profile_ui_proxy_config_service);
-  ui_proxy_config = base::Value::Dict();
+  ui_proxy_config = base::DictValue();
   EXPECT_FALSE(profile_ui_proxy_config_service->MergeEnforcedProxyConfig(
       kNetworkId, &ui_proxy_config));
 
   // Set the profile pref to PAC script mode.
-  auto proxy_config = base::Value::Dict()
+  auto proxy_config = base::DictValue()
                           .Set("mode", ProxyPrefs::kPacScriptProxyModeName)
                           .Set("pac_url", "http://proxy");
   profile->GetPrefs()->Set(proxy_config::prefs::kProxy,

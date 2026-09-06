@@ -46,24 +46,11 @@ STATIC_ASSERT_ENUM_MATCH(DOLBYVISION_PROFILE5);
 STATIC_ASSERT_ENUM_MATCH(DOLBYVISION_PROFILE7);
 STATIC_ASSERT_ENUM_MATCH(DOLBYVISION_PROFILE8);
 STATIC_ASSERT_ENUM_MATCH(DOLBYVISION_PROFILE9);
+STATIC_ASSERT_ENUM_MATCH(DOLBYVISION_PROFILE10);
+STATIC_ASSERT_ENUM_MATCH(DOLBYVISION_PROFILE20);
 STATIC_ASSERT_ENUM_MATCH(AV1PROFILE_PROFILE_MAIN);
 STATIC_ASSERT_ENUM_MATCH(AV1PROFILE_PROFILE_HIGH);
 STATIC_ASSERT_ENUM_MATCH(AV1PROFILE_PROFILE_PRO);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MAIN10);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MAIN12);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MAIN12_INTRA);
-STATIC_ASSERT_ENUM_MATCH(VVCPROIFLE_MULTILAYER_MAIN10);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MAIN10_444);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MAIN12_444);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MAIN16_444);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MAIN12_444_INTRA);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MAIN16_444_INTRA);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MULTILAYER_MAIN10_444);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MAIN10_STILL_PICTURE);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MAIN12_STILL_PICTURE);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MAIN10_444_STILL_PICTURE);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MAIN12_444_STILL_PICTURE);
-STATIC_ASSERT_ENUM_MATCH(VVCPROFILE_MAIN16_444_STILL_PICTURE);
 STATIC_ASSERT_ENUM_MATCH(VIDEO_CODEC_PROFILE_MAX);
 
 // static
@@ -154,6 +141,11 @@ GpuVideoAcceleratorUtil::ConvertGpuToMediaEncodeProfiles(
     // If VBR is supported in the future, remove this hard-coding of CBR.
     profile.rate_control_modes = media::VideoEncodeAccelerator::kConstantMode;
     profile.is_software_codec = gpu_profile.is_software_codec;
+    if (gpu_profile.chroma_sampling.has_value()) {
+      profile.chroma_sampling =
+          static_cast<VideoChromaSampling>(gpu_profile.chroma_sampling.value());
+    }
+    profile.bit_depth = gpu_profile.bit_depth;
     profiles.push_back(profile);
   }
   return profiles;
@@ -173,6 +165,11 @@ GpuVideoAcceleratorUtil::ConvertMediaToGpuEncodeProfiles(
     profile.max_framerate_numerator = media_profile.max_framerate_numerator;
     profile.max_framerate_denominator = media_profile.max_framerate_denominator;
     profile.is_software_codec = media_profile.is_software_codec;
+    if (media_profile.chroma_sampling.has_value()) {
+      profile.chroma_sampling =
+          static_cast<uint8_t>(media_profile.chroma_sampling.value());
+    }
+    profile.bit_depth = media_profile.bit_depth;
     profiles.push_back(profile);
   }
   return profiles;

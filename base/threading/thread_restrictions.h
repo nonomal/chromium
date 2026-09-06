@@ -137,6 +137,7 @@ class Profile;
 class ProfileImpl;
 class ScopedAllowBlockingForProfile;
 #if BUILDFLAG(IS_WIN)
+class ProfileLoadTracker;
 class ScopedAllowBlockingForMediaFoundation;
 #endif
 class StartupTabProviderImpl;
@@ -159,7 +160,7 @@ StartupProfilePathInfo GetStartupProfilePath(
     bool ignore_profile_picker);
 
 #if BUILDFLAG(IS_IOS)
-class BrowserStateDirectoryBuilder;
+class ProfileIOSDirectoryBuilder;
 #endif
 
 Profile* GetLastProfileMac();
@@ -236,7 +237,6 @@ class ContentMainRunnerImpl;
 class DesktopCaptureDevice;
 class DWriteFontCollectionProxy;
 class DWriteFontProxyImpl;
-class EmergencyTraceFinalisationCoordinator;
 class InProcessUtilityThread;
 class NestedMessagePumpAndroid;
 class NetworkServiceInstancePrivate;
@@ -267,6 +267,9 @@ class ScopedAllowBlockingForNSS;
 }
 namespace dbus {
 class Bus;
+}
+namespace dbus_xdg {
+class FileTransferPortal;
 }
 namespace drive {
 class FakeDriveService;
@@ -307,7 +310,7 @@ namespace gpu {
 class MappableBufferAHB;
 class MappableBufferDXGI;
 class GpuPersistentCache;
-}
+}  // namespace gpu
 namespace history_report {
 class HistoryReportJniBridge;
 }
@@ -370,6 +373,9 @@ class MojoTrap;
 }
 }  // namespace core
 }  // namespace mojo
+namespace mojo_legacy::core {
+class ScopedIPCSupport;
+}  // namespace mojo_legacy
 namespace net {
 class GSSAPISharedLibrary;
 class MultiThreadedCertVerifierScopedAllowBaseSyncPrimitives;
@@ -388,9 +394,11 @@ class LocalPrinterHandlerDefault;
 #if BUILDFLAG(IS_MAC)
 class PrintBackendServiceImpl;
 #endif
+class MetafilePlayer;
 class PrintBackendServiceManager;
 class PrintPreviewUIUntrusted;
 class PrinterQuery;
+void DumpMetafileIfDebugEnabled(const std::u16string&, const MetafilePlayer*);
 base::FilePath GetAbsoluteSystemDestinationLocation(const base::FilePath&);
 }  // namespace printing
 namespace proxy_resolver {
@@ -428,6 +436,7 @@ class GetLocalChangesRequest;
 class HttpBridge;
 }  // namespace syncer
 namespace tracing {
+class EmergencyTraceFinalisationCoordinator;
 class FuchsiaPerfettoProducerConnector;
 }
 namespace ui {
@@ -583,6 +592,7 @@ class BASE_EXPORT ScopedAllowBlocking {
   friend class ::ProfileImpl;
   friend class ::ScopedAllowBlockingForProfile;
 #if BUILDFLAG(IS_WIN)
+  friend class ::ProfileLoadTracker;
   friend class ::ScopedAllowBlockingForMediaFoundation;
 #endif
   friend class ::StartupTabProviderImpl;
@@ -662,7 +672,7 @@ class BASE_EXPORT ScopedAllowBlocking {
   friend class gfx::WUCBackdrop;
 #endif
 #if BUILDFLAG(IS_IOS)
-  friend class ::BrowserStateDirectoryBuilder;
+  friend class ::ProfileIOSDirectoryBuilder;
 #endif
 
   // Sorted by function name (with namespace), ignoring the return type.
@@ -688,6 +698,9 @@ class BASE_EXPORT ScopedAllowBlocking {
       base::FilePath* file_path);  // http://crbug.com/110709
   friend bool disk_cache::CleanupDirectorySync(const base::FilePath&);
   friend bool gl::init::InitializeStaticGLBindings(gl::GLImplementationParts);
+  friend void printing::DumpMetafileIfDebugEnabled(
+      const std::u16string&,
+      const printing::MetafilePlayer*);
   friend base::FilePath printing::GetAbsoluteSystemDestinationLocation(
       const base::FilePath&);
 
@@ -787,6 +800,7 @@ class BASE_EXPORT ScopedAllowBaseSyncPrimitives {
   friend class media::CodecWorkerImpl;
   friend class media::MojoVideoEncodeAccelerator;
   friend class mojo::core::ScopedIPCSupport;
+  friend class mojo_legacy::core::ScopedIPCSupport;
   friend class net::MultiThreadedCertVerifierScopedAllowBaseSyncPrimitives;
   friend class rlz_lib::FinancialPing;
   friend class shell_integration_linux::
@@ -858,7 +872,6 @@ class BASE_EXPORT
   friend class cc::CategorizedWorkerPool;
   friend class cc::TileTaskManagerImpl;
   friend class content::DesktopCaptureDevice;
-  friend class content::EmergencyTraceFinalisationCoordinator;
   friend class content::InProcessUtilityThread;
   friend class content::RenderProcessHost;
   friend class content::SandboxHostLinux;
@@ -877,6 +890,7 @@ class BASE_EXPORT
   friend class mojo::SyncCallRestrictions;
   friend class mojo::core::ipcz_driver::MojoTrap;
   friend class net::NetworkConfigWatcherAppleThread;
+  friend class ::tracing::EmergencyTraceFinalisationCoordinator;
   friend class ui::DrmThreadProxy;
   friend class vr::VrShell;
 
@@ -886,9 +900,10 @@ class BASE_EXPORT
   friend class base::Thread;                      // http://crbug.com/918039
   friend class cc::CompletionEvent;               // http://crbug.com/902653
   friend class content::
-      BrowserGpuChannelHostFactory;          // http://crbug.com/125248
-  friend class content::TextInputClientMac;  // http://crbug.com/121917
-  friend class dbus::Bus;                    // http://crbug.com/125222
+      BrowserGpuChannelHostFactory;           // http://crbug.com/125248
+  friend class content::TextInputClientMac;   // http://crbug.com/121917
+  friend class dbus::Bus;                     // http://crbug.com/125222
+  friend class dbus_xdg::FileTransferPortal;  // https://crbug.com/40398800
   friend class discardable_memory::
       ClientDiscardableSharedMemoryManager;  // http://crbug.com/1396355
   friend class disk_cache::BackendImpl;      // http://crbug.com/74623

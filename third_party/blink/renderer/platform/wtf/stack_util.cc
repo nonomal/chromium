@@ -122,7 +122,8 @@ void* GetStackStartImpl() {
     error = pthread_attr_getstack(&attr, &base, &size);
     CHECK(!error);
     pthread_attr_destroy(&attr);
-    return UNSAFE_TODO(reinterpret_cast<uint8_t*>(base) + size);
+    // SAFETY: Computation on the results of pthread_attr_getstack().
+    return UNSAFE_BUFFERS(reinterpret_cast<uint8_t*>(base) + size);
   }
 #if BUILDFLAG(IS_FREEBSD)
   pthread_attr_destroy(&attr);
@@ -180,12 +181,14 @@ bool IsOnStack(void* address) {
   // Fall through as there is still a regular stack present even when running
   // with ASAN fake stacks.
 #endif  // defined(ADDRESS_SANITIZER)
+#if defined(__has_feature)
 #if __has_feature(safe_stack)
   if (__builtin___get_unsafe_stack_ptr() <= address &&
       address <= __builtin___get_unsafe_stack_top()) {
     return true;
   }
 #endif  // __has_feature(safe_stack)
+#endif  // defined(__has_feature)
   return (GetCurrentStackPosition() <= reinterpret_cast<uintptr_t>(address)) &&
          (address <= GetStackStart());
 }
@@ -222,8 +225,7 @@ size_t ThreadStackSize() {
   // Notice that we cannot use the TIB's StackLimit for the stack end, as i
   // tracks the end of the committed range. We're after the end of the reserved
   // stack area (most of which will be uncommitted, most times.)
-  MEMORY_BASIC_INFORMATION stack_info;
-  UNSAFE_TODO(memset(&stack_info, 0, sizeof(MEMORY_BASIC_INFORMATION)));
+  MEMORY_BASIC_INFORMATION stack_info = {};
   size_t result_size =
       VirtualQuery(&stack_info, &stack_info, sizeof(MEMORY_BASIC_INFORMATION));
   DCHECK_GE(result_size, sizeof(MEMORY_BASIC_INFORMATION));

@@ -8,8 +8,6 @@ import static org.hamcrest.Matchers.is;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
-import android.app.Instrumentation.ActivityMonitor;
-
 import androidx.test.filters.LargeTest;
 
 import org.junit.Before;
@@ -54,7 +52,6 @@ public class DigitalCredentialProviderTest {
     public FreshCtaTransitTestRule mActivityTestRule =
             ChromeTransitTestRules.freshChromeTabbedActivityRule();
 
-    private ActivityMonitor mActivityMonitor;
     private EmbeddedTestServer mTestServer;
 
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule().strictness(Strictness.STRICT_STUBS);
@@ -80,8 +77,7 @@ public class DigitalCredentialProviderTest {
                                 Promise.fulfilled(
                                         new DigitalCredential(
                                                 "protocol",
-                                                ("{\"token\": \"" + EXPECTED_MDOC + "\"}")
-                                                        .getBytes())));
+                                                "{\"token\": \"" + EXPECTED_MDOC + "\"}")));
 
         mActivityTestRule.loadUrl(mTestServer.getURL(TEST_PAGE));
         DOMUtils.clickNode(mActivityTestRule.getWebContents(), "request_age_only_button");

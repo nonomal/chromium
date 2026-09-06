@@ -15,28 +15,24 @@ import org.chromium.build.annotations.Nullable;
 @NullMarked
 @SuppressWarnings("NullAway")
 class BaseObservableSupplierImpl<T extends @Nullable Object>
-        implements ObservableSupplier<T>, NonNullObservableSupplier<T> {
-    protected @Nullable T mObject;
-    // TODO(455874046): Make this non-nullable once ObservableSupplierImpl is no longer directly
-    // used.
-    protected @Nullable Boolean mAllowSetToNull;
+        implements MonotonicObservableSupplier<T> {
+    protected final boolean mAllowSetToNull;
 
-    BaseObservableSupplierImpl(@Nullable T initialValue, @Nullable Boolean allowSetToNull) {
-        mObject = initialValue;
+    BaseObservableSupplierImpl(boolean allowSetToNull) {
         mAllowSetToNull = allowSetToNull;
     }
 
     @Override
     public T addObserver(Callback<T> obs, @NotifyBehavior int behavior) {
-        return mObject;
+        return null;
     }
 
     @Override
     public void removeObserver(Callback<T> obs) {}
 
     @Override
-    public T get() {
-        return mObject;
+    public @Nullable T get() {
+        return null;
     }
 
     @Override
@@ -47,13 +43,13 @@ class BaseObservableSupplierImpl<T extends @Nullable Object>
     /**
      * If |thing| is a BaseObservableSupplierImpl, returns mAllowSetToNull. Otherwise, returns
      * whether |thing| is an instance of ObservableSupplier. E.g. this assumes that classes that do
-     * not extend BaseObservableSupplierImpl will no implement conflicting interfaces like
+     * not extend BaseObservableSupplierImpl will not implement conflicting interfaces like
      * ObservableSupplierImpl does.
      */
-    static <T> @Nullable Boolean allowsSetToNull(NullableObservableSupplier<T> thing) {
+    static <T> boolean allowsSetToNull(NullableObservableSupplier<T> thing) {
         if (thing instanceof BaseObservableSupplierImpl<T> impl) {
             return impl.mAllowSetToNull;
         }
-        return !(thing instanceof ObservableSupplier<T>);
+        return !(thing instanceof MonotonicObservableSupplier<T>);
     }
 }

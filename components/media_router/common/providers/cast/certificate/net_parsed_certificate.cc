@@ -4,8 +4,9 @@
 
 #include "components/media_router/common/providers/cast/certificate/net_parsed_certificate.h"
 
+#include <algorithm>
+
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/strings/string_view_util.h"
 #include "crypto/evp.h"
 #include "net/cert/time_conversions.h"
@@ -25,7 +26,7 @@ ErrorOr<std::unique_ptr<ParsedCertificate>> ParsedCertificate::ParseFromDER(
   std::shared_ptr<const bssl::ParsedCertificate> cert =
       bssl::ParsedCertificate::Create(
           net::x509_util::CreateCryptoBuffer(der_cert),
-          cast_certificate::GetCertParsingOptions(), nullptr);
+          net::x509_util::DefaultParseCertificateOptions(), nullptr);
   if (!cert) {
     return Error::Code::kErrCertsParse;
   }
@@ -69,21 +70,6 @@ bool GetCommonNameFromSubject(const bssl::der::Input& subject_tlv,
 
 }  // namespace
 
-bssl::ParseCertificateOptions GetCertParsingOptions() {
-  bssl::ParseCertificateOptions options;
-
-  // Some cast intermediate certificates contain serial numbers that are
-  // 21 octets long, and might also not use valid DER encoding for an
-  // INTEGER (non-minimal encoding).
-  //
-  // Allow these sorts of serial numbers.
-  //
-  // TODO(eroman): At some point in the future this workaround will no longer be
-  // necessary. Should revisit this for removal in 2017 if not earlier.  We will
-  // probably want an UMA histogram to be certain.
-  options.allow_invalid_serial_numbers = true;
-  return options;
-}
 
 NetParsedCertificate::NetParsedCertificate(
     std::shared_ptr<const bssl::ParsedCertificate> cert)
@@ -191,7 +177,7 @@ bool NetParsedCertificate::HasPolicyOid(const openscreen::ByteView& oid) const {
     return false;
   }
   const std::vector<bssl::der::Input>& policies = cert_->policy_oids();
-  return base::Contains(policies, bssl::der::Input(oid));
+  return std::ranges::contains(policies, bssl::der::Input(oid));
 }
 
 void NetParsedCertificate::SetNotBeforeTimeForTesting(time_t not_before) {

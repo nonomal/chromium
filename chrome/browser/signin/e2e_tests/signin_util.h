@@ -5,17 +5,19 @@
 #ifndef CHROME_BROWSER_SIGNIN_E2E_TESTS_SIGNIN_UTIL_H_
 #define CHROME_BROWSER_SIGNIN_E2E_TESTS_SIGNIN_UTIL_H_
 
+#include <cstddef>
+
+#include "base/functional/callback.h"
 #include "base/time/time.h"
-#include "chrome/browser/ui/browser.h"
 #include "components/signin/core/browser/account_reconcilor.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/test_accounts.h"
 #include "components/sync/service/sync_service.h"
 #include "content/public/browser/web_contents.h"
+#include "ui/base/page_transition_types.h"
+#include "url/gurl.h"
 
-namespace content {
-class WebContents;
-}
+class BrowserWindowInterface;
 
 namespace signin::test {
 
@@ -26,16 +28,27 @@ inline constexpr base::TimeDelta kDialogTimeout = base::Seconds(10);
 inline constexpr char kSettingsScriptWrapperFormat[] =
     "import('./settings.js').then(settings => {%s});";
 
-signin::IdentityManager* identity_manager(Browser* browser);
+signin::IdentityManager* identity_manager(BrowserWindowInterface* browser);
 
-syncer::SyncService* sync_service(Browser* browser);
+syncer::SyncService* sync_service(BrowserWindowInterface* browser);
 
-AccountReconcilor* account_reconcilor(Browser* browser);
+AccountReconcilor* account_reconcilor(BrowserWindowInterface* browser);
 
 class SignInFunctions {
  public:
+  // Depending on the feature `syncer::kReplaceSyncPromosWithSignInPromos`,
+  // at sign-in, the user is presented with the choice to sync all the optional
+  // data types. When the feature is enabled the only optional data types are
+  // history and tabs, while then the feature is disabled all user configurable
+  // data types are available. This class represents either accepting or
+  // rejecting syncing of all available data types.
+  enum class SyncChoice : int {
+    kAcceptAllOptionalDataTypesSync = 0,
+    kRejectOptionalDateTypesSync = 1,
+  };
+
   SignInFunctions(
-      const base::RepeatingCallback<Browser*()> browser,
+      const base::RepeatingCallback<BrowserWindowInterface*()> browser,
       const base::RepeatingCallback<bool(int, const GURL&, ui::PageTransition)>
           add_tab_function);
 
@@ -45,23 +58,24 @@ class SignInFunctions {
                      int previously_signed_in_accounts);
 
   void SignInFromSettings(const TestAccountSigninCredentials& test_account,
-                          int previously_signed_in_accounts);
+                          int previously_signed_in_accounts,
+                          bool complete_signin_operation = true);
+
+  void SignInFromSettingsWithSyncChoice(
+      const TestAccountSigninCredentials& test_account,
+      int previously_signed_in_accounts,
+      SyncChoice sync_choice);
 
   void SignInFromCurrentPage(content::WebContents* web_contents,
                              const TestAccountSigninCredentials& test_account,
                              int previously_signed_in_accounts);
 
-  void TurnOnSync(const TestAccountSigninCredentials& test_account,
-                  int previously_signed_in_accounts);
-
   void SignOutFromWeb();
 
-  void TurnOffSync();
-
-  void StartSignInFromSettings();
+  void SignOut();
 
  private:
-  const base::RepeatingCallback<Browser*()> browser_;
+  const base::RepeatingCallback<BrowserWindowInterface*()> browser_;
   const base::RepeatingCallback<bool(int, const GURL&, ui::PageTransition)>
       add_tab_function_;
 };

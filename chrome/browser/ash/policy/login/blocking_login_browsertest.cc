@@ -20,7 +20,6 @@
 #include "chrome/browser/profiles/profile_manager_observer.h"
 #include "chrome/browser/ui/ash/login/login_display_host.h"
 #include "chrome/browser/ui/webui/ash/login/gaia_screen_handler.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/ash/components/install_attributes/install_attributes.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
@@ -83,7 +82,8 @@ struct BlockingLoginTestParam {
 // when we made an entirely different set of network calls on startup. As a
 // result it generates random failures in startup network requests, then waits
 // to see if the profile finishes loading which is not at all what it is
-// intended to test. We need to fix this test or remove it (crbug.com/580537).
+// intended to test. We need to fix this test or remove it
+// (crbug.com/274707332).
 class BlockingLoginTest
     : public ash::OobeBaseTest,
       public ProfileManagerObserver,
@@ -310,7 +310,7 @@ const BlockingLoginTestParam kBlockinLoginTestCases[] = {
 };
 
 // TODO(poromov): Disabled because it has become flaky due to incorrect mock
-// network requests - re-enable this when https://crbug.com/580537 is fixed.
+// network requests - re-enable this when https://crbug.com/274707332 is fixed.
 INSTANTIATE_TEST_SUITE_P(DISABLED_BlockingLoginTestInstance,
                          BlockingLoginTest,
                          testing::ValuesIn(kBlockinLoginTestCases));

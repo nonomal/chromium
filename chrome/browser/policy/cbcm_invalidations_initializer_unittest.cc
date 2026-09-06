@@ -15,6 +15,7 @@
 #include "components/prefs/testing_pref_service.h"
 #include "content/public/test/browser_task_environment.h"
 #include "google_apis/gaia/gaia_urls.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -91,7 +92,7 @@ class CBCMInvalidationsInitializerTest
 
   std::string MakeTokensFromAuthCodesResponse(const std::string& refresh_token,
                                               const std::string& access_token) {
-    base::Value::Dict dict;
+    base::DictValue dict;
     dict.Set("access_token", access_token);
     dict.Set("refresh_token", refresh_token);
     dict.Set("expires_in", 9999);

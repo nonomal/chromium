@@ -7,7 +7,8 @@
 
 #include <memory>
 
-class Browser;
+#include "build/build_config.h"
+
 class BrowserWindowInterface;
 class Profile;
 
@@ -30,7 +31,7 @@ bool IsBrowserInForeground(BrowserWindowInterface* bwi);
 BrowserWindowInterface* GetActiveGlicEligibleBrowser(Profile* profile);
 
 // Returns whether 'browser' is visible with a valid widget and window.
-bool IsBrowserVisible(Browser* browser);
+bool IsBrowserVisible(BrowserWindowInterface* browser);
 
 // Observes changes to what value FindBrowserForAttachment() would return.
 class BrowserAttachObserver {
@@ -55,11 +56,13 @@ class BrowserAttachObservation {
   virtual bool CanAttachToBrowser() const = 0;
 };
 
+#if !BUILDFLAG(IS_ANDROID)
 // Observes BrowserAttachObserver events until the returned observation is
 // destroyed.
 std::unique_ptr<BrowserAttachObservation> ObserveBrowserForAttachment(
     Profile* profile,
     BrowserAttachObserver* observer);
+#endif
 
 }  // namespace glic
 

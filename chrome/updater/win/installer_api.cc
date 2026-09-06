@@ -14,7 +14,6 @@
 
 #include "base/check_op.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -275,7 +274,7 @@ bool DeleteInstallerOutput(UpdaterScope updater_scope,
       delete_value(kRegValueInstallerResultUIString),
       delete_value(kRegValueInstallerSuccessLaunchCmdLine),
   };
-  return !base::Contains(results, false);
+  return !std::ranges::contains(results, false);
 }
 
 std::optional<InstallerOutcome> GetInstallerOutcome(UpdaterScope updater_scope,
@@ -369,7 +368,7 @@ bool SetInstallerOutcomeForTesting(UpdaterScope updater_scope,
   if (installer_outcome.installer_result) {
     if (key->WriteValue(
             kRegValueInstallerResult,
-            static_cast<DWORD>(*installer_outcome.installer_result)) !=
+            std::to_underlying(*installer_outcome.installer_result)) !=
         ERROR_SUCCESS) {
       return false;
     }
@@ -535,7 +534,7 @@ InstallerResult RunApplicationInstaller(
     int exit_code = -1;
     base::TerminationStatus final_status =
         base::TerminationStatus::TERMINATION_STATUS_MAX_ENUM;
-    std::ignore = base::GetAppOutputWithExitCodeAndTimeout(
+    base::GetAppOutputWithExitCodeAndTimeout(
         cmdline, true, nullptr, &exit_code, timeout - timer.Elapsed(), options,
         [&](const base::Process& process, std::string_view partial_output) {
           if (!partial_output.empty()) {

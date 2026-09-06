@@ -144,13 +144,14 @@ TEST_F(DriveUploaderTest, FetchAccessTokenFailure) {
 
   uploader->Start();
   test_env()->WaitForAccessTokenRequestIfNecessaryAndRespondWithError(
-      GoogleServiceAuthError(GoogleServiceAuthError::CONNECTION_FAILED));
+      GoogleServiceAuthError::FromConnectionError(net::ERR_FAILED));
 }
 
 TEST_F(DriveUploaderTest, NoRefreshToken) {
-  AccountInfo account_info;
-  account_info.email = "test@example.com";
-  account_info.account_id = CoreAccountId::FromGaiaId(GaiaId("12345"));
+  AccountInfo account_info =
+      AccountInfo::Builder(GaiaId("12345"), "test@example.com")
+          .SetAccountId(CoreAccountId::FromGaiaId(GaiaId("12345")))
+          .Build();
 
   auto uploader = std::make_unique<FakeDriveUploader>(
       "test_title", account_info, progress_callback_.Get(), profile_.get(),
@@ -183,7 +184,7 @@ TEST_F(DriveUploaderTest, OnRefreshTokenRemovedForAccount) {
       .Times(2);
 
   uploader->Start();
-  test_env()->RemoveRefreshTokenForAccount(account_info.account_id);
+  test_env()->RemoveRefreshTokenForAccount(account_info.GetAccountId());
 }
 
 TEST_F(DriveUploaderTest, NotifyUploadInProgressIsRateLimited) {
@@ -288,7 +289,7 @@ class FetchParentFolderTest : public DriveUploaderTest {
 };
 
 TEST_F(FetchParentFolderTest, Success) {
-  base::Value::Dict response;
+  base::DictValue response;
   response.Set("id", kTestFileId);
   response.Set("name", kTestFolderName);
   std::optional<std::string> response_string = base::WriteJson(response);
@@ -312,7 +313,7 @@ TEST_F(FetchParentFolderTest, InternalError) {
 }
 
 TEST_F(FetchParentFolderTest, MissingId) {
-  base::Value::Dict response;
+  base::DictValue response;
   response.Set("name", kTestFolderName);
   std::optional<std::string> response_string = base::WriteJson(response);
   ASSERT_TRUE(response_string.has_value());
@@ -321,7 +322,7 @@ TEST_F(FetchParentFolderTest, MissingId) {
 }
 
 TEST_F(FetchParentFolderTest, MissingName) {
-  base::Value::Dict response;
+  base::DictValue response;
   response.Set("id", kTestFileId);
   std::optional<std::string> response_string = base::WriteJson(response);
   ASSERT_TRUE(response_string.has_value());

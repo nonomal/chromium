@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_AUTOFILL_PRIVATE_AUTOFILL_PRIVATE_API_H_
 #define CHROME_BROWSER_EXTENSIONS_API_AUTOFILL_PRIVATE_AUTOFILL_PRIVATE_API_H_
 
+#include "components/autofill/core/browser/data_model/autofill_ai/entity_instance.h"
+#include "components/one_time_tokens/core/browser/user_data_processing_consent_states.h"
 #include "components/prefs/pref_service.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/browser/extension_function_histogram_value.h"
@@ -12,8 +14,13 @@
 namespace autofill {
 class AddressDataManager;
 class ContentAutofillClient;
+class EntityDataManager;
 class PaymentsDataManager;
 }  // namespace autofill
+
+namespace device_reauth {
+class DeviceAuthenticator;
+}  // namespace device_reauth
 
 namespace extensions {
 
@@ -424,24 +431,6 @@ class AutofillPrivateBulkDeleteAllCvcsFunction
   ResponseAction Run() override;
 };
 
-class AutofillPrivateSetAutofillSyncToggleEnabledFunction
-    : public AutofillPrivateExtensionFunction {
- public:
-  AutofillPrivateSetAutofillSyncToggleEnabledFunction() = default;
-  AutofillPrivateSetAutofillSyncToggleEnabledFunction(
-      const AutofillPrivateSetAutofillSyncToggleEnabledFunction&) = delete;
-  AutofillPrivateSetAutofillSyncToggleEnabledFunction& operator=(
-      const AutofillPrivateSetAutofillSyncToggleEnabledFunction&) = delete;
-  DECLARE_EXTENSION_FUNCTION("autofillPrivate.setAutofillSyncToggleEnabled",
-                             AUTOFILLPRIVATE_SETAUTOFILLSYNCTOGGLEENABLED)
-
- protected:
-  ~AutofillPrivateSetAutofillSyncToggleEnabledFunction() override = default;
-
-  // ExtensionFunction overrides.
-  ResponseAction Run() override;
-};
-
 class AutofillPrivateAddOrUpdateEntityInstanceFunction
     : public AutofillPrivateExtensionFunction {
  public:
@@ -458,6 +447,25 @@ class AutofillPrivateAddOrUpdateEntityInstanceFunction
 
   // ExtensionFunction overrides.
   ResponseAction Run() override;
+
+ private:
+  // Helper to initiate an asynchronous save request of a private pass
+  // `entity_instance` through the Wallet API. Returns true if the async request
+  // was started, false otherwise.
+  bool TrySavePrivatePassWithWalletAPI(
+      const autofill::EntityInstance& entity_instance);
+
+  // Callback for the WalletPassAccessManager::SaveWalletEntityInstance request
+  // for private passes.
+  void OnSavePrivatePassToWalletFinished(
+      autofill::EntityInstance original_entity,
+      std::optional<autofill::EntityInstance> saved_entity);
+
+  // Helper to save the entity locally and show a notification informing the
+  // user that the private pass couldn't be saved to wallet.
+  void SavePrivatePassLocallyAndNotifyAsFallback(
+      autofill::EntityDataManager& manager,
+      autofill::EntityInstance entity);
 };
 
 class AutofillPrivateRemoveEntityInstanceFunction
@@ -499,7 +507,7 @@ class AutofillPrivateLoadEntityInstancesFunction
 class AutofillPrivateGetEntityInstanceByGuidFunction
     : public AutofillPrivateExtensionFunction {
  public:
-  AutofillPrivateGetEntityInstanceByGuidFunction() = default;
+  AutofillPrivateGetEntityInstanceByGuidFunction();
   AutofillPrivateGetEntityInstanceByGuidFunction(
       const AutofillPrivateGetEntityInstanceByGuidFunction&) = delete;
   AutofillPrivateGetEntityInstanceByGuidFunction& operator=(
@@ -508,10 +516,16 @@ class AutofillPrivateGetEntityInstanceByGuidFunction
                              AUTOFILLPRIVATE_GETENTITYINSTANCEBYGUID)
 
  protected:
-  ~AutofillPrivateGetEntityInstanceByGuidFunction() override = default;
+  ~AutofillPrivateGetEntityInstanceByGuidFunction() override;
 
   // ExtensionFunction overrides.
   ResponseAction Run() override;
+
+ private:
+  void OnReauthCompleted(const autofill::EntityInstance& entity_instance,
+                         bool auth_succeeded);
+
+  std::unique_ptr<device_reauth::DeviceAuthenticator> authenticator_;
 };
 
 class AutofillPrivateGetWritableEntityTypesFunction
@@ -549,6 +563,28 @@ class AutofillPrivateGetAllAttributeTypesForEntityTypeNameFunction
  protected:
   ~AutofillPrivateGetAllAttributeTypesForEntityTypeNameFunction() override =
       default;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+};
+
+class AutofillPrivateGetRequiredAttributeTypesForEntityTypeNameFunction
+    : public AutofillPrivateExtensionFunction {
+ public:
+  AutofillPrivateGetRequiredAttributeTypesForEntityTypeNameFunction() = default;
+  AutofillPrivateGetRequiredAttributeTypesForEntityTypeNameFunction(
+      const AutofillPrivateGetRequiredAttributeTypesForEntityTypeNameFunction&) =
+      delete;
+  AutofillPrivateGetRequiredAttributeTypesForEntityTypeNameFunction& operator=(
+      const AutofillPrivateGetRequiredAttributeTypesForEntityTypeNameFunction&) =
+      delete;
+  DECLARE_EXTENSION_FUNCTION(
+      "autofillPrivate.getRequiredAttributeTypesForEntityTypeName",
+      AUTOFILLPRIVATE_GETREQUIREDATTRIBUTETYPESFORENTITYTYPENAME)
+
+ protected:
+  ~AutofillPrivateGetRequiredAttributeTypesForEntityTypeNameFunction()
+      override = default;
 
   // ExtensionFunction overrides.
   ResponseAction Run() override;
@@ -632,6 +668,79 @@ class AutofillPrivateSetWalletablePassDetectionOptInStatusFunction
 
   // ExtensionFunction overrides.
   ResponseAction Run() override;
+};
+
+class AutofillPrivateAuthenticateUserBeforeViewingEntityDataFunction
+    : public AutofillPrivateExtensionFunction {
+ public:
+  AutofillPrivateAuthenticateUserBeforeViewingEntityDataFunction();
+  AutofillPrivateAuthenticateUserBeforeViewingEntityDataFunction(
+      const AutofillPrivateAuthenticateUserBeforeViewingEntityDataFunction&) =
+      delete;
+  AutofillPrivateAuthenticateUserBeforeViewingEntityDataFunction& operator=(
+      const AutofillPrivateAuthenticateUserBeforeViewingEntityDataFunction&) =
+      delete;
+  DECLARE_EXTENSION_FUNCTION(
+      "autofillPrivate.authenticateUserBeforeViewingEntityData",
+      AUTOFILLPRIVATE_AUTHENTICATEUSERBEFOREVIEWINGENTITYDATA)
+
+ protected:
+  ~AutofillPrivateAuthenticateUserBeforeViewingEntityDataFunction() override;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+
+ private:
+  void OnReauthCompleted(bool auth_succeeded);
+
+  std::unique_ptr<device_reauth::DeviceAuthenticator> authenticator_;
+};
+
+class AutofillPrivateToggleAutofillAiReauthRequirementFunction
+    : public AutofillPrivateExtensionFunction {
+ public:
+  AutofillPrivateToggleAutofillAiReauthRequirementFunction();
+  AutofillPrivateToggleAutofillAiReauthRequirementFunction(
+      const AutofillPrivateToggleAutofillAiReauthRequirementFunction&) = delete;
+  AutofillPrivateToggleAutofillAiReauthRequirementFunction& operator=(
+      const AutofillPrivateToggleAutofillAiReauthRequirementFunction&) = delete;
+  DECLARE_EXTENSION_FUNCTION(
+      "autofillPrivate.toggleAutofillAiReauthRequirement",
+      AUTOFILLPRIVATE_TOGGLEAUTOFILLAIREAUTHREQUIREMENT)
+
+ protected:
+  ~AutofillPrivateToggleAutofillAiReauthRequirementFunction() override;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+
+ private:
+  void OnReauthCompleted(bool auth_succeeded);
+
+  std::unique_ptr<device_reauth::DeviceAuthenticator> authenticator_;
+};
+
+class AutofillPrivateFetchUserDataProcessingConsentFunction
+    : public AutofillPrivateExtensionFunction {
+ public:
+  AutofillPrivateFetchUserDataProcessingConsentFunction() = default;
+  AutofillPrivateFetchUserDataProcessingConsentFunction(
+      const AutofillPrivateFetchUserDataProcessingConsentFunction&) = delete;
+  AutofillPrivateFetchUserDataProcessingConsentFunction& operator=(
+      const AutofillPrivateFetchUserDataProcessingConsentFunction&) = delete;
+  DECLARE_EXTENSION_FUNCTION("autofillPrivate.fetchUserDataProcessingConsent",
+                             AUTOFILLPRIVATE_FETCHUSERDATAPROCESSINGCONSENT)
+
+ protected:
+  ~AutofillPrivateFetchUserDataProcessingConsentFunction() override = default;
+
+  // ExtensionFunction overrides.
+  ResponseAction Run() override;
+
+ private:
+  void OnConsentFetched(
+      std::optional<one_time_tokens::UserDataProcessingConsentStates>
+          consent_states);
 };
 
 }  // namespace extensions

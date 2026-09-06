@@ -23,17 +23,10 @@ namespace blink {
   }
   auto* tracker =
       scheduler::TaskAttributionTracker::From(context->GetIsolate());
-  // `tracker` is null if `context` is not a Window or if
+  // `tracker` is null when `context` has no task attribution tracker: only
+  // Windows and dedicated/shared workers have one, and not when
   // TaskAttributionInfrastructureDisabledForTesting is enabled.
   return tracker ? tracker->CurrentTaskState() : nullptr;
-}
-
-[[nodiscard]] inline scheduler::TaskAttributionInfo*
-CaptureCurrentTaskStateIfMainWorld(ScriptState* script_state) {
-  if (!script_state || !script_state->World().IsMainWorld()) {
-    return nullptr;
-  }
-  return CaptureCurrentTaskState(ExecutionContext::From(script_state));
 }
 
 [[nodiscard]] inline std::optional<scheduler::TaskAttributionTracker::TaskScope>
@@ -43,7 +36,8 @@ SetCurrentTaskStateIfTopLevel(scheduler::TaskAttributionInfo* task_state,
   if (!context || context->IsContextDestroyed()) {
     return std::nullopt;
   }
-  // `tracker` is null if `context` is not a Window or if
+  // `tracker` is null when `context` has no task attribution tracker: only
+  // Windows and dedicated/shared workers have one, and not when
   // TaskAttributionInfrastructureDisabledForTesting is enabled.
   auto* tracker =
       scheduler::TaskAttributionTracker::From(context->GetIsolate());
@@ -51,6 +45,23 @@ SetCurrentTaskStateIfTopLevel(scheduler::TaskAttributionInfo* task_state,
                  : std::nullopt;
 }
 
+// Sets the given `resource_timing_context` in preparation for executing script
+// in `execution_context`. Does nothing if `execution_context` has no task
+// attribution tracker (only Windows and dedicated/shared workers have one) or
+// is detached.
+[[nodiscard]] inline std::optional<scheduler::TaskAttributionTracker::TaskScope>
+SetTaskStateVariable(ResourceTimingContext* resource_timing_context,
+                     ExecutionContext* context) {
+  if (!context || context->IsContextDestroyed()) {
+    return std::nullopt;
+  }
+  auto* tracker =
+      scheduler::TaskAttributionTracker::From(context->GetIsolate());
+  if (!tracker) {
+    return std::nullopt;
+  }
+  return tracker->SetTaskStateVariable(resource_timing_context);
+}
 }  // namespace blink
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_SCHEDULER_TASK_ATTRIBUTION_UTIL_H_

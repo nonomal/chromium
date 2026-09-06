@@ -8,10 +8,10 @@
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/notreached.h"
-#include "chrome/browser/enterprise/connectors/device_trust/signals/decorators/common/metrics_utils.h"
 #include "chrome/browser/enterprise/connectors/device_trust/signals/decorators/common/signals_utils.h"
 #include "chrome/browser/enterprise/signals/context_info_fetcher.h"
 #include "components/device_signals/core/common/signals_constants.h"
+#include "components/enterprise/device_trust/core/metrics_utils.h"
 
 namespace enterprise_connectors {
 
@@ -56,7 +56,7 @@ ContextSignalsDecorator::ContextSignalsDecorator(
 
 ContextSignalsDecorator::~ContextSignalsDecorator() = default;
 
-void ContextSignalsDecorator::Decorate(base::Value::Dict& signals,
+void ContextSignalsDecorator::Decorate(base::DictValue& signals,
                                        base::OnceClosure done_closure) {
   context_info_fetcher_->Fetch(base::BindOnce(
       &ContextSignalsDecorator::OnSignalsFetched,
@@ -65,7 +65,7 @@ void ContextSignalsDecorator::Decorate(base::Value::Dict& signals,
 }
 
 void ContextSignalsDecorator::OnSignalsFetched(
-    base::Value::Dict& signals,
+    base::DictValue& signals,
     base::TimeTicks start_time,
     base::OnceClosure done_closure,
     enterprise_signals::ContextInfo context_info) {

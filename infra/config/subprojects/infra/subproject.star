@@ -64,7 +64,7 @@ luci.bucket(
     bindings = [
         luci.binding(
             roles = "role/buildbucket.creator",
-            groups = "mdb/chrome-troopers",
+            groups = ["mdb/chrome-troopers", "mdb/pdeio-ds-team"],
         ),
     ],
     dynamic = True,
@@ -105,6 +105,7 @@ builders.builder(
             "android-x86-rel",
         ],
         "exclude_suites": [
+            "ash_pixeltests",
             "chrome_all_tast_tests",
         ],
         "target_runtime": 15.0,

@@ -8,11 +8,11 @@
 #import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_context_menu_interaction_handler.h"
 #import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_layout_attributes.h"
 #import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_module.h"
-#import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_module_background_view.h"
 #import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_module_container.h"
 #import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_module_container_delegate.h"
 #import "ios/chrome/browser/content_suggestions/public/content_suggestions_constants.h"
 #import "ios/chrome/browser/content_suggestions/ui/content_suggestions_collection_utils.h"
+#import "ios/chrome/browser/ntp/ui_bundled/ntp_card_background_view.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
@@ -25,25 +25,20 @@ const float kCornerRadius = 24;
 
 }  // namespace
 
-@interface MagicStackModuleCollectionViewCell ()
-
-@property(nonatomic, assign) ContentSuggestionsModuleType type;
-
-@end
-
 @implementation MagicStackModuleCollectionViewCell {
   // Container that holds the module contents.
   MagicStackModuleContainer* _moduleContainer;
   // Context menu interaction for cell interactions.
   UIContextMenuInteraction* _contextMenuInteraction;
   // Background view to show the proper colored vs blur effect background.
-  MagicStackModuleBackgroundView* _moduleBackgroundView;
+  NTPCardBackgroundView* _moduleBackgroundView;
+  MagicStackModule* _config;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
   self = [super initWithFrame:frame];
   if (self) {
-    _moduleBackgroundView = [[MagicStackModuleBackgroundView alloc] init];
+    _moduleBackgroundView = [[NTPCardBackgroundView alloc] init];
     self.backgroundView = _moduleBackgroundView;
     self.layer.cornerRadius = kCornerRadius;
     self.clipsToBounds = YES;
@@ -58,10 +53,10 @@ const float kCornerRadius = 24;
 }
 
 - (void)configureWithConfig:(MagicStackModule*)config {
-  if (_type == config.type) {
+  if (_config && ![_config hasDifferentContentsFromConfig:config]) {
     return;
   }
-  _type = config.type;
+  _config = [config copy];
   [_moduleContainer configureWithConfig:config];
   if (!_contextMenuInteraction) {
     _contextMenuInteraction = [[UIContextMenuInteraction alloc]
@@ -81,7 +76,7 @@ const float kCornerRadius = 24;
 
 - (void)prepareForReuse {
   [super prepareForReuse];
-  _type = ContentSuggestionsModuleType::kInvalid;
+  _config = nil;
   if (_contextMenuInteraction) {
     [_contextMenuInteraction dismissMenu];
     [self removeInteraction:_contextMenuInteraction];

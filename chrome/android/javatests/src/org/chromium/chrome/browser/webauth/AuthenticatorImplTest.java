@@ -4,6 +4,11 @@
 
 package org.chromium.chrome.browser.webauth;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+
 import android.app.Activity;
 import android.content.Context;
 import android.os.Build;
@@ -17,18 +22,23 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.TriState;
 import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Restriction;
 import org.chromium.blink.mojom.AuthenticatorStatus;
 import org.chromium.blink.mojom.GetCredentialOptions;
 import org.chromium.blink.mojom.MakeCredentialAuthenticatorResponse;
+import org.chromium.blink.mojom.Mediation;
 import org.chromium.blink.mojom.PrfValues;
 import org.chromium.blink.mojom.PublicKeyCredentialCreationOptions;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
@@ -41,12 +51,16 @@ import org.chromium.components.webauthn.AuthenticatorImpl;
 import org.chromium.components.webauthn.CreateConfirmationUiDelegate;
 import org.chromium.components.webauthn.Fido2ApiCallHelper;
 import org.chromium.components.webauthn.Fido2ApiTestHelper;
+import org.chromium.components.webauthn.Fido2CredentialRequest;
 import org.chromium.components.webauthn.GpmBrowserOptionsHelper;
 import org.chromium.components.webauthn.InternalAuthenticator;
 import org.chromium.components.webauthn.InternalAuthenticatorJni;
+import org.chromium.components.webauthn.WebauthnBrowserBridge;
+import org.chromium.components.webauthn.WebauthnBrowserBridgeJni;
 import org.chromium.components.webauthn.WebauthnMode;
 import org.chromium.components.webauthn.WebauthnModeProvider;
 import org.chromium.components.webauthn.cred_man.CredManSupportProvider;
+import org.chromium.content_public.browser.Visibility;
 import org.chromium.content_public.browser.test.mock.MockWebContents;
 import org.chromium.content_public.common.ContentSwitches;
 import org.chromium.net.test.EmbeddedTestServer;
@@ -70,8 +84,6 @@ import java.util.Arrays;
     DeviceRestriction.RESTRICTION_TYPE_NON_AUTO
 })
 public class AuthenticatorImplTest {
-    private static final String TAG = "AuthImplTest";
-
     @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
 
     @Rule
@@ -79,6 +91,7 @@ public class AuthenticatorImplTest {
             ChromeTransitTestRules.fastAutoResetCtaActivityRule();
 
     @Mock UkmRecorder.Natives mUkmRecorderJniMock;
+    @Mock WebauthnBrowserBridge.Natives mWebauthnBrowserBridgeNativesMock;
 
     private Context mContext;
     private WebauthnTestUtils.MockIntentSender mIntentSender;
@@ -117,6 +130,7 @@ public class AuthenticatorImplTest {
         mTestAuthenticatorImplJni = new WebauthnTestUtils.TestAuthenticatorImplJni(mCallback);
         InternalAuthenticatorJni.setInstanceForTesting(mTestAuthenticatorImplJni);
         UkmRecorderJni.setInstanceForTesting(mUkmRecorderJniMock);
+        WebauthnBrowserBridgeJni.setInstanceForTesting(mWebauthnBrowserBridgeNativesMock);
 
         mCreationOptions = Fido2ApiTestHelper.createDefaultMakeCredentialOptions();
         mRequestOptions = new GetCredentialOptions();
@@ -135,7 +149,7 @@ public class AuthenticatorImplTest {
 
         CredManSupportProvider.setupForTesting(
                 /* overrideAndroidVersion= */ Build.VERSION_CODES.TIRAMISU,
-                /* overrideForcesGpm= */ false);
+                /* overrideForcesGpm= */ TriState.FALSE);
     }
 
     @After
@@ -461,5 +475,126 @@ public class AuthenticatorImplTest {
                 mCallback.getStatus(), Integer.valueOf(AuthenticatorStatus.NOT_ALLOWED_ERROR));
         Assert.assertNull(mCallback.getGetAssertionResponse());
         Fido2ApiTestHelper.verifyRespondedBeforeTimeout(mStartTimeMs);
+    }
+
+    @Test
+    @SmallTest
+    public void testAuthenticatorImplMakeCredential_CloseBeforeBottomSheetCallback_NoCrash() {
+        CreateConfirmationUiDelegate createConfirmationUiDelegate =
+                Mockito.mock(CreateConfirmationUiDelegate.class);
+        Mockito.when(
+                        createConfirmationUiDelegate.show(
+                                ArgumentMatchers.any(), ArgumentMatchers.any()))
+                .thenReturn(true);
+
+        AuthenticatorImpl authenticator =
+                new AuthenticatorImpl(
+                        mContext,
+                        mWebContents,
+                        mIntentSender,
+                        createConfirmationUiDelegate,
+                        mFrameHost,
+                        mOrigin);
+
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    authenticator.makeCredential(
+                            mCreationOptions,
+                            (status, response, dom_exception) ->
+                                    mCallback.onRegisterResponse(status, response));
+                });
+
+        ArgumentCaptor<Runnable> rejectCaptor = ArgumentCaptor.forClass(Runnable.class);
+        Mockito.verify(createConfirmationUiDelegate)
+                .show(ArgumentMatchers.any(), rejectCaptor.capture());
+
+        // Simulate the race condition: Close the authenticator (e.g. tab closed)
+        ThreadUtils.runOnUiThreadBlocking(authenticator::close);
+
+        // Now simulate the bottom sheet being dismissed/cancelled
+        ThreadUtils.runOnUiThreadBlocking(rejectCaptor.getValue());
+    }
+
+    @Test
+    @SmallTest
+    public void testAuthenticatorImplMakeCredential_webContentsNotVisible_rejected() {
+        MockWebContents spyWebContents = Mockito.spy(mWebContents);
+        doReturn(Visibility.HIDDEN).when(spyWebContents).getVisibility();
+        AuthenticatorImpl authenticator =
+                new AuthenticatorImpl(
+                        mContext,
+                        spyWebContents,
+                        mIntentSender,
+                        /* createConfirmationUiDelegate= */ null,
+                        mFrameHost,
+                        mOrigin);
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    authenticator.makeCredential(
+                            mCreationOptions,
+                            (status, response, dom_exception) ->
+                                    mCallback.onRegisterResponse(status, response));
+                });
+
+        mCallback.blockUntilCalled();
+        Assert.assertEquals(
+                mCallback.getStatus(), Integer.valueOf(AuthenticatorStatus.NOT_FOCUSED));
+        Fido2ApiTestHelper.verifyRespondedBeforeTimeout(mStartTimeMs);
+        authenticator.close();
+    }
+
+    @Test
+    @SmallTest
+    public void testAuthenticatorImplGetAssertion_webContentsNotVisible_rejected() {
+        MockWebContents spyWebContents = Mockito.spy(mWebContents);
+        doReturn(Visibility.HIDDEN).when(spyWebContents).getVisibility();
+        AuthenticatorImpl authenticator =
+                new AuthenticatorImpl(
+                        mContext,
+                        spyWebContents,
+                        mIntentSender,
+                        /* createConfirmationUiDelegate= */ null,
+                        mFrameHost,
+                        mOrigin);
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    authenticator.getCredential(
+                            mRequestOptions,
+                            (getCredentialResponse) ->
+                                    Assert.assertEquals(
+                                            AuthenticatorStatus.NOT_FOCUSED,
+                                            getCredentialResponse.getGetAssertionResponse()
+                                                    .status));
+                });
+        authenticator.close();
+    }
+
+    @Test
+    @SmallTest
+    public void testAuthenticatorImplGetAssertion_webContentsNotVisibleConditional_notRejected() {
+        MockWebContents spyWebContents = Mockito.spy(mWebContents);
+        doReturn(Visibility.HIDDEN).when(spyWebContents).getVisibility();
+        Fido2CredentialRequest mockFido2CredentialRequest =
+                Mockito.mock(Fido2CredentialRequest.class);
+        AuthenticatorImpl.overrideFido2CredentialRequestForTesting(mockFido2CredentialRequest);
+
+        AuthenticatorImpl authenticator =
+                new AuthenticatorImpl(
+                        mContext,
+                        spyWebContents,
+                        mIntentSender,
+                        /* createConfirmationUiDelegate= */ null,
+                        mFrameHost,
+                        mOrigin);
+
+        GetCredentialOptions requestOptions = new GetCredentialOptions();
+        requestOptions.publicKey = Fido2ApiTestHelper.createDefaultGetAssertionOptions();
+        requestOptions.mediation = Mediation.CONDITIONAL;
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    authenticator.getCredential(requestOptions, (getCredentialResponse) -> {});
+                });
+        verify(mockFido2CredentialRequest, times(1))
+                .handleGetCredentialRequest(any(), any(), any(), any());
     }
 }

@@ -9,6 +9,7 @@
 #include "chrome/browser/policy/policy_test_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/smart_card/chromeos_smart_card_delegate.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/permissions/permission_prompt_bubble_base_view.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
 #include "chrome/test/interaction/webcontents_interaction_test_util.h"
@@ -23,6 +24,7 @@
 #include "net/dns/mock_host_resolver.h"
 #include "third_party/blink/public/common/features_generated.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/views_switches.h"
 
 namespace {
@@ -42,7 +44,7 @@ class SmartCardPermissionUiTest
   auto SetSmartCardConnectAllowedFor(const GURL& origin_url) {
     return Do([this, origin_url]() {
       SetPolicy(&policies_, policy::key::kSmartCardConnectAllowedForUrls,
-                base::Value(base::Value::List().Append(origin_url.spec())));
+                base::Value(base::ListValue().Append(origin_url.spec())));
       UpdateProviderPolicy(policies_);
     });
   }
@@ -50,7 +52,7 @@ class SmartCardPermissionUiTest
   auto SetSmartCardConnectBlockedFor(const GURL& origin_url) {
     return Do([this, origin_url]() {
       SetPolicy(&policies_, policy::key::kSmartCardConnectBlockedForUrls,
-                base::Value(base::Value::List().Append(origin_url.spec())));
+                base::Value(base::ListValue().Append(origin_url.spec())));
       UpdateProviderPolicy(policies_);
     });
   }
@@ -81,7 +83,7 @@ class SmartCardPermissionUiTest
   auto BlockPermission(const GURL& origin_url) {
     return Do([this, origin_url]() {
       auto* settings_map =
-          HostContentSettingsMapFactory::GetForProfile(browser()->profile());
+          HostContentSettingsMapFactory::GetForProfile(browser()->GetProfile());
       settings_map->SetContentSettingDefaultScope(
           origin_url, GURL(), ContentSettingsType::SMART_CARD_GUARD,
           ContentSetting::CONTENT_SETTING_BLOCK);
@@ -92,7 +94,7 @@ class SmartCardPermissionUiTest
     return CheckResult(
         [this, origin_url]() -> bool {
           return HostContentSettingsMapFactory::GetForProfile(
-                     browser()->profile())
+                     browser()->GetProfile())
               ->GetContentSetting(origin_url, GURL(),
                                   ContentSettingsType::SMART_CARD_GUARD);
         },
@@ -105,7 +107,7 @@ class SmartCardPermissionUiTest
     return CheckResult(
         [this, origin_url]() -> bool {
           return PermissionDecisionAutoBlockerFactory::GetForProfile(
-                     browser()->profile())
+                     browser()->GetProfile())
               ->IsEmbargoed(origin_url, ContentSettingsType::SMART_CARD_GUARD);
         },
         embargoed_expectation,

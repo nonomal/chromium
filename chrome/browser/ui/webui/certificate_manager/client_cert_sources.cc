@@ -18,16 +18,14 @@
 #include "base/task/bind_post_task.h"
 #include "base/task/thread_pool.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/resources/certificate_manager/certificate_manager.mojom-shared.h"
 #include "chrome/browser/resources/certificate_manager/certificate_manager.mojom.h"
-#include "chrome/browser/ui/chrome_select_file_policy.h"
+#include "chrome/browser/ui/select_file_policy/chrome_select_file_policy.h"
 #include "chrome/browser/ui/webui/certificate_manager/certificate_manager_utils.h"
 #include "chrome/common/net/x509_certificate_model.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/crypto_buildflags.h"
-#include "crypto/sha2.h"
 #include "net/base/hash_value.h"
 #include "net/base/net_errors.h"
 #include "net/cert/x509_certificate.h"
@@ -205,14 +203,10 @@ std::unique_ptr<ClientCertStoreLoader> CreateProvisionedClientCertLoader(
   }
 
   client_certificates::CertificateProvisioningService*
-      browser_provisioning_service = nullptr;
-  if (client_certificates::features::
-          IsManagedBrowserClientCertificateEnabled()) {
-    browser_provisioning_service =
-        g_browser_process->browser_policy_connector()
-            ->chrome_browser_cloud_management_controller()
-            ->GetCertificateProvisioningService();
-  }
+      browser_provisioning_service =
+          g_browser_process->browser_policy_connector()
+              ->chrome_browser_cloud_management_controller()
+              ->GetCertificateProvisioningService();
 
   if (!profile_provisioning_service && !browser_provisioning_service) {
     return nullptr;

@@ -12,13 +12,16 @@
 #include "build/build_config.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/base/ui_base_switches.h"
+#include "ui/views/controls/webview/webview.h"
+#include "ui/views/interaction/element_tracker_views.h"
+#include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
+#include "ui/webui/tracked_element/tracked_element_web_ui.h"
 
 #if defined(USE_AURA)
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/window.h"
 #include "ui/events/test/event_generator.h"  // nogncheck
-#include "ui/views/view.h"
-#include "ui/views/widget/widget.h"
 #endif
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
@@ -41,16 +44,6 @@
 
 namespace {
 
-// Extracts the |name| argument for ShowUi() from the current test case name.
-// E.g. for InvokeUi_name (or DISABLED_InvokeUi_name) returns "name".
-std::string NameFromTestCase() {
-  const std::string name = base::TestNameWithoutDisabledPrefix(
-      testing::UnitTest::GetInstance()->current_test_info()->name());
-  size_t underscore = name.find('_');
-  return underscore == std::string::npos ? std::string()
-                                         : name.substr(underscore + 1);
-}
-
 #if defined(USE_AURA)
 class ScopedMouseDisabler {
  public:
@@ -59,7 +52,7 @@ class ScopedMouseDisabler {
             view->GetWidget()->GetNativeWindow()->GetRootWindow())) {
     // Generate a mouse move event to remove any effects caused by mouse enter
     // (e.g. hover). This is necessary as hiding cursor may not emit mouse exit
-    // event. (crbug.com/723535).
+    // event. (crbug.com/40521214).
     ui::test::EventGenerator generator(
         view->GetWidget()->GetNativeWindow()->GetRootWindow());
     generator.MoveMouseTo({0, 0});
@@ -121,6 +114,41 @@ ui::test::ActionResult TestBrowserUi::VerifyPixelUi(
     const std::string& screenshot_prefix,
     const std::string& screenshot_name) {
   return VerifyPixelUi(view, {}, screenshot_prefix, screenshot_name);
+}
+
+ui::test::ActionResult TestBrowserUi::VerifyPixelUi(
+    ui::TrackedElement* element,
+    const std::string& screenshot_prefix,
+    const std::string& screenshot_name) {
+  return VerifyPixelUi(element, {}, screenshot_prefix, screenshot_name);
+}
+
+ui::test::ActionResult TestBrowserUi::VerifyPixelUi(
+    ui::TrackedElement* element,
+    const ScreenshotOptions& options,
+    const std::string& screenshot_prefix,
+    const std::string& screenshot_name) {
+  if (!element) {
+    return ui::test::ActionResult::kNotAttempted;
+  }
+  views::View* view = nullptr;
+  ScreenshotOptions effective_options = options;
+  if (auto* const view_el = element->AsA<views::TrackedElementViews>()) {
+    view = view_el->view();
+  } else if (auto* const webui_el = element->AsA<ui::TrackedElementWebUI>()) {
+    view = webui_el->GetWebView();
+    if (!effective_options.region.has_value()) {
+      effective_options.region = webui_el->GetBoundsInWebContents();
+    } else {
+      effective_options.region->Offset(
+          webui_el->GetBoundsInWebContents().OffsetFromOrigin());
+    }
+  }
+  if (!view) {
+    return ui::test::ActionResult::kNotAttempted;
+  }
+  return VerifyPixelUi(view, effective_options, screenshot_prefix,
+                       screenshot_name);
 }
 
 ui::test::ActionResult TestBrowserUi::VerifyPixelUi(
@@ -221,4 +249,19 @@ void TestBrowserUi::ShowAndVerifyUi() {
 bool TestBrowserUi::IsInteractiveUi() const {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kTestLauncherInteractive);
+}
+
+std::string TestBrowserUi::NameFromTestCase() {
+  const std::string name = base::TestNameWithoutDisabledPrefix(
+      testing::UnitTest::GetInstance()->current_test_info()->name());
+  size_t underscore = name.find('_');
+  size_t slash = name.find('/');
+
+  if (underscore == std::string::npos) {
+    return std::string();
+  }
+  if (slash == std::string::npos) {
+    return name.substr(underscore + 1);
+  }
+  return name.substr(underscore + 1, slash - underscore - 1);
 }

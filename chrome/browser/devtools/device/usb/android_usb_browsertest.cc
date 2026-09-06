@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/containers/queue.h"
 #include "base/containers/span.h"
 #include "base/containers/span_reader.h"
@@ -26,7 +25,6 @@
 #include "chrome/browser/devtools/device/devtools_android_bridge.h"
 #include "chrome/browser/devtools/device/usb/android_usb_device.h"
 #include "chrome/browser/devtools/device/usb/usb_device_provider.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
@@ -441,7 +439,7 @@ class FakeAndroidUsbManager : public FakeUsbDeviceManager {
       mojo::PendingReceiver<device::mojom::UsbDevice> device_receiver,
       mojo::PendingRemote<device::mojom::UsbDeviceClient> device_client)
       override {
-    DCHECK(base::Contains(devices(), guid));
+    DCHECK(devices().contains(guid));
     FakeAndroidUsbDevice::Create(devices()[guid], std::move(device_receiver),
                                  std::move(device_client));
   }
@@ -512,7 +510,7 @@ class AndroidUsbDiscoveryTest : public InProcessBrowserTest {
 
   void SetUpOnMainThread() override {
     adb_bridge_ =
-        DevToolsAndroidBridge::Factory::GetForProfile(browser()->profile());
+        DevToolsAndroidBridge::Factory::GetForProfile(browser()->GetProfile());
     DCHECK(adb_bridge_);
     adb_bridge_->set_task_scheduler_for_test(base::BindRepeating(
         &AndroidUsbDiscoveryTest::ScheduleDeviceCountRequest,
@@ -520,7 +518,7 @@ class AndroidUsbDiscoveryTest : public InProcessBrowserTest {
 
     AndroidDeviceManager::DeviceProviders providers;
     providers.push_back(
-        base::MakeRefCounted<UsbDeviceProvider>(browser()->profile()));
+        base::MakeRefCounted<UsbDeviceProvider>(browser()->GetProfile()));
     adb_bridge_->set_device_providers_for_test(providers);
     runner_ = base::MakeRefCounted<content::MessageLoopRunner>();
 

@@ -19,6 +19,7 @@
 #include "chrome/browser/ash/lobster/lobster_image_fetcher.h"
 #include "chrome/browser/ash/lobster/lobster_insertion.h"
 #include "chrome/browser/ash/lobster/lobster_system_state_provider.h"
+#include "chromeos/ash/components/specialized_features/feature_access_checker.h"
 #include "components/account_id/account_id.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/prefs/pref_change_registrar.h"
@@ -28,13 +29,21 @@ namespace manta {
 class SnapperProvider;
 }  // namespace manta
 
+namespace signin {
+class IdentityManager;
+}  // namespace signin
+
 class Profile;
 
 class LobsterService : public KeyedService, public LobsterEventSink {
  public:
-  explicit LobsterService(
+  // `profile` and `identity_manager` must be non-null and must outlive this.
+  LobsterService(
       std::unique_ptr<manta::SnapperProvider> image_provider,
-      Profile* profile);
+      Profile* profile,
+      signin::IdentityManager* identity_manager,
+      specialized_features::FeatureAccessChecker::VariationsServiceCallback
+          variations_service_callback);
   ~LobsterService() override;
 
   void SetActiveSession(ash::LobsterSession* session);

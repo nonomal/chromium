@@ -9,8 +9,6 @@ source_set("ui") {
     "shortcuts_commands.h",
     "shortcuts_config.h",
     "shortcuts_config.mm",
-    "shortcuts_consumer.h",
-    "shortcuts_consumer_source.h",
     "shortcuts_tile_view.h",
     "shortcuts_tile_view.mm",
   ]
@@ -23,6 +21,9 @@ source_set("ui") {
     "//ios/chrome/browser/content_suggestions/public:constants",
     "//ios/chrome/browser/content_suggestions/ui/cells",
     "//ios/chrome/browser/content_suggestions/ui/cells:constants",
+    "//ios/chrome/browser/ntp/ui_bundled:feature_flags",
+    "//ios/chrome/browser/ntp/ui_bundled:theme",
+    "//ios/chrome/common/ui/colors",
   ]
   frameworks = [ "UIKit.framework" ]
 }

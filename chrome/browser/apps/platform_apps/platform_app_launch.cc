@@ -5,26 +5,32 @@
 #include "chrome/browser/apps/platform_apps/platform_app_launch.h"
 
 #include "build/build_config.h"
-#include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/app_service/launch_utils.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_metrics.h"
+#include "components/services/app_service/public/cpp/app_launch_params.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "ui/base/page_transition_types.h"
+#include "ui/base/window_open_disposition.h"
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/web_applications/extension_status_utils.h"
+#include "chrome/browser/extensions/chrome_app_deprecation.h"
+#include "chrome/browser/extensions/extension_util.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/create_browser_window.h"
+#include "chrome/browser/ui/navigator/browser_navigator.h"
+#include "chrome/browser/ui/navigator/browser_navigator_params.h"
+#include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/common/webui_url_constants.h"
+#include "ui/base/base_window.h"
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 
 namespace apps {
@@ -140,11 +146,12 @@ bool OpenDeprecatedApplicationPrompt(Profile* profile,
   if (!extensions::IsExtensionUnsupportedDeprecatedApp(profile, app_id))
     return false;
 
-  Browser::CreateParams create_params(profile, /*user_gesture=*/false);
-  Browser* browser = Browser::Create(create_params);
+  BrowserWindowCreateParams create_params(profile, /*from_user_gesture=*/false);
+  BrowserWindowInterface* browser =
+      CreateBrowserWindow(std::move(create_params));
 
   GURL url;
-  if (extensions::IsExtensionForceInstalled(profile, app_id, nullptr)) {
+  if (extensions::util::IsExtensionForceInstalled(app_id, profile)) {
     url = GURL(chrome::kChromeUIAppsWithForceInstalledDeprecationDialogURL +
                app_id);
   } else {
@@ -156,7 +163,7 @@ bool OpenDeprecatedApplicationPrompt(Profile* profile,
   params.tabstrip_add_types = AddTabTypes::ADD_ACTIVE;
   Navigate(&params);
 
-  browser->window()->Show();
+  browser->GetWindow()->Show();
 
   return true;
 }
@@ -176,7 +183,7 @@ bool OpenExtensionApplicationWithReenablePrompt(
   }
 #endif
 
-  RecordCmdLineAppHistogram(extensions::Manifest::TYPE_PLATFORM_APP);
+  RecordCmdLineAppHistogram(extensions::Manifest::Type::kPlatformApp);
   apps::AppLaunchParams params(
       app_id, apps::LaunchContainer::kLaunchContainerNone,
       WindowOpenDisposition::NEW_WINDOW, apps::LaunchSource::kFromCommandLine);
@@ -201,7 +208,7 @@ content::WebContents* OpenExtensionAppShortcutWindow(Profile* profile,
   } else {
     extensions::RecordAppLaunchType(
         extension_misc::APP_LAUNCH_CMD_LINE_APP_LEGACY,
-        extensions::Manifest::TYPE_HOSTED_APP);
+        extensions::Manifest::Type::kHostedApp);
   }
 
   return ::OpenAppShortcutWindow(profile, url);

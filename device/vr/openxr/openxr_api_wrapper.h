@@ -18,6 +18,7 @@
 #include "device/vr/openxr/openxr_depth_sensor.h"
 #include "device/vr/openxr/openxr_graphics_binding.h"
 #include "device/vr/openxr/openxr_light_estimator.h"
+#include "device/vr/openxr/openxr_mesh_manager.h"
 #include "device/vr/openxr/openxr_platform.h"
 #include "device/vr/openxr/openxr_scene_understanding_manager.h"
 #include "device/vr/openxr/openxr_stage_bounds_provider.h"
@@ -47,8 +48,6 @@ namespace device {
 
 class OpenXrExtensionHelper;
 class OpenXRInputHelper;
-class VRTestHook;
-class ServiceTestHook;
 
 using SessionStartedCallback =
     base::OnceCallback<void(mojom::XRRuntimeSessionOptionsPtr options,
@@ -83,10 +82,6 @@ class OpenXrApiWrapper {
   static std::vector<XrEnvironmentBlendMode> GetSupportedBlendModes(
       XrInstance instance,
       XrSystemId system);
-
-  static VRTestHook* GetTestHook();
-
-  static bool NeedsSeparateActivity();
 
   bool UpdateAndGetSessionEnded();
 
@@ -131,6 +126,7 @@ class OpenXrApiWrapper {
 
   // Various manager getters if they exist.
   OpenXrPlaneManager* GetPlaneManager();
+  OpenXrMeshManager* GetMeshManager();
   OpenXrAnchorManager* GetAnchorManager();
   OpenXrHitTestManager* GetHitTestManager();
   OpenXrLightEstimator* GetLightEstimator();
@@ -150,7 +146,7 @@ class OpenXrApiWrapper {
 
   uint32_t GetRecommendedSwapchainSampleCount() const;
 
-  static void DEVICE_VR_EXPORT SetTestHook(VRTestHook* hook);
+  uint16_t GetMaxRenderLayers() const;
 
  private:
   void Reset();
@@ -221,10 +217,6 @@ class OpenXrApiWrapper {
   VisibilityChangedCallback visibility_changed_callback_;
   mojom::XRRuntimeSessionOptionsPtr session_options_;
 
-  // Testing objects
-  static VRTestHook* test_hook_;
-  static ServiceTestHook* service_test_hook_;
-
   std::unique_ptr<OpenXRInputHelper> input_helper_;
 
   // OpenXR objects
@@ -254,6 +246,10 @@ class OpenXrApiWrapper {
   bool received_initial_valid_primary_views_ = false;
   uint64_t frames_before_initial_valid_primary_views_ = 0;
 
+  // The number will be updated from XrSystemGraphicsProperties
+  // when session is initialized.
+  uint32_t max_layer_count_ = 0;
+
   // The rest of these objects store information about the current frame and are
   // updated each frame.
   XrFrameState frame_state_;
@@ -268,6 +264,7 @@ class OpenXrApiWrapper {
   std::unique_ptr<OpenXrLightEstimator> light_estimator_;
   std::unique_ptr<OpenXrStageBoundsProvider> bounds_provider_;
   std::unique_ptr<OpenXRSceneUnderstandingManager> scene_understanding_manager_;
+  std::unique_ptr<OpenXrMeshManager> mesh_manager_;
   std::unique_ptr<OpenXrUnboundedSpaceProvider> unbounded_space_provider_;
   std::unique_ptr<OpenXrVisibilityMaskHandler> visibility_mask_handler_;
 

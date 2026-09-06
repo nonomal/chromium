@@ -12,6 +12,8 @@
 #include "chrome/browser/sync/test/integration/user_events_helper.h"
 #include "chrome/browser/sync/user_event_service_factory.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/browser_sync/browser_sync_switches.h"
+#include "components/signin/public/base/signin_switches.h"
 #include "components/sync/protocol/user_event_specifics.pb.h"
 #include "components/sync_user_events/user_event_service.h"
 #include "content/public/test/browser_test.h"
@@ -21,6 +23,7 @@ namespace {
 
 using bookmarks_helper::BookmarksMatchChecker;
 using bookmarks_helper::CountBookmarksWithUrlsMatching;
+using bookmarks_helper::StoreType;
 
 const int kEncryptingClientId = 0;
 const int kDecryptingClientId = 1;
@@ -33,8 +36,10 @@ class TwoClientUserEventsSyncTest
  public:
   TwoClientUserEventsSyncTest() : SyncTest(TWO_CLIENT) {
     if (GetSetupSyncMode() == SetupSyncMode::kSyncTransportOnly) {
-      scoped_feature_list_.InitAndEnableFeature(
-          syncer::kReplaceSyncPromosWithSignInPromos);
+      scoped_feature_list_.InitWithFeatures(
+          {syncer::kReplaceSyncPromosWithSignInPromos,
+           switches::kSyncEnableBookmarksInTransportMode},
+          {});
     }
   }
 
@@ -47,14 +52,13 @@ class TwoClientUserEventsSyncTest
   }
 
   void AddTestBookmarkToClient(int index) {
-    bookmarks::BookmarkModel* bookmark_model =
-        bookmarks_helper::GetBookmarkModel(index);
-    const bookmarks::BookmarkNode* bar =
-        (GetSetupSyncMode() == SetupSyncMode::kSyncTheFeature)
-            ? bookmark_model->bookmark_bar_node()
-            : bookmark_model->account_bookmark_bar_node();
-    ASSERT_TRUE(bookmarks_helper::AddURL(
-        index, bar, 0, u"What are you syncing about?", GURL(kTestBookmarkURL)));
+    StoreType store_type =
+        GetSetupSyncMode() == SyncTest::SetupSyncMode::kSyncTransportOnly
+            ? StoreType::kAccountStore
+            : StoreType::kLocalOrSyncableStore;
+    ASSERT_TRUE(bookmarks_helper::AddURL(index, 0,
+                                         u"What are you syncing about?",
+                                         GURL(kTestBookmarkURL), store_type));
   }
 
   SyncTest::SetupSyncMode GetSetupSyncMode() const override {
@@ -76,7 +80,7 @@ IN_PROC_BROWSER_TEST_P(TwoClientUserEventsSyncTest,
   if (GetSetupSyncMode() == SetupSyncMode::kSyncTheFeature) {
     ASSERT_TRUE(GetClient(kEncryptingClientId)->SetupSync());
   } else {
-    ASSERT_TRUE(GetClient(kEncryptingClientId)->SignInPrimaryAccount());
+    ASSERT_TRUE(GetClient(kEncryptingClientId)->SignInNoWaitForCompletion());
     ASSERT_TRUE(GetClient(kEncryptingClientId)->AwaitSyncTransportActive());
   }
 
@@ -106,7 +110,7 @@ IN_PROC_BROWSER_TEST_P(TwoClientUserEventsSyncTest,
   if (GetSetupSyncMode() == SetupSyncMode::kSyncTheFeature) {
     ASSERT_TRUE(GetClient(kDecryptingClientId)->SetupSyncNoWaitForCompletion());
   } else {
-    ASSERT_TRUE(GetClient(kDecryptingClientId)->SignInPrimaryAccount());
+    ASSERT_TRUE(GetClient(kDecryptingClientId)->SignInNoWaitForCompletion());
     ASSERT_TRUE(GetClient(kDecryptingClientId)->AwaitSyncTransportActive());
   }
   // The second client asks the user to provide a password for decryption.

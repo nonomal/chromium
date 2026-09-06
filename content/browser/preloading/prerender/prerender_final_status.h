@@ -5,9 +5,8 @@
 #ifndef CONTENT_BROWSER_PRELOADING_PRERENDER_PRERENDER_FINAL_STATUS_H_
 #define CONTENT_BROWSER_PRELOADING_PRERENDER_PRERENDER_FINAL_STATUS_H_
 
-#include "content/public/browser/preloading.h"
-
 #include "content/common/content_export.h"
+#include "content/public/browser/preloading.h"
 
 namespace content {
 
@@ -163,7 +162,7 @@ enum class PrerenderFinalStatus {
   // Cancelled by window.close() from renderer side.
   kWindowClosed = 82,
 
-  kSlowNetwork = 83,
+  // kSlowNetwork = 83,  // No longer used.
   kOtherPrerenderedPageActivated = 84,
 
   // When the V8 optimizer is disabled by the site settings, prerendering a page
@@ -180,10 +179,16 @@ enum class PrerenderFinalStatus {
   // Prerendering cancelled but the PrerenderHost is reused for future
   // navigation.
   kPrerenderHostReused = 88,
+  // Submitting form when prerender is not allowed.
+  kFormSubmitWhenPrerendering = 89,
+  kCrossDocumentRestart = 90,
 
-  kMaxValue = kPrerenderHostReused,
+  kMaxValue = kCrossDocumentRestart,
 };
-// LINT.ThenChange(//third_party/blink/public/devtools_protocol/browser_protocol.pdl)
+// LINT.ThenChange(
+//     //third_party/blink/public/devtools_protocol/domains/Preload.pdl,
+//     //tools/metrics/histograms/enums.xml
+// )
 
 // Helper method to convert PrerenderFinalStatus to PreloadingFailureReason.
 PreloadingFailureReason CONTENT_EXPORT

@@ -11,6 +11,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/containers/to_vector.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/location.h"
@@ -22,7 +23,8 @@
 #include "base/threading/scoped_thread_priority.h"
 #include "base/types/expected.h"
 #include "crypto/apple/keychain_v2.h"
-#include "crypto/apple/unexportable_key_mac.h"
+#include "crypto/apple/unexportable_key_apple.h"
+#include "crypto/sign.h"
 #include "crypto/unexportable_key.h"
 
 namespace crypto {
@@ -62,7 +64,7 @@ std::string ToString(const std::vector<uint8_t>& vec) {
 }
 
 // User verifying key implementation that delegates the heavy lifting to
-// UnexportableKeyMac.
+// UnexportableKeyApple.
 class UserVerifyingSigningKeyMac : public UserVerifyingSigningKey {
  public:
   explicit UserVerifyingSigningKeyMac(
@@ -98,7 +100,7 @@ class UserVerifyingSigningKeyMac : public UserVerifyingSigningKey {
     return key_name_;
   }
 
-  bool IsHardwareBacked() const override  { return true; }
+  bool IsHardwareBacked() const override { return true; }
 
  private:
   // The key's wrapped key as a binary string.
@@ -108,12 +110,11 @@ class UserVerifyingSigningKeyMac : public UserVerifyingSigningKey {
 
 base::expected<std::unique_ptr<UserVerifyingSigningKey>,
                UserVerifyingKeyCreationError>
-DoGenerateKey(base::span<const SignatureVerifier::SignatureAlgorithm>
-                  acceptable_algorithms,
+DoGenerateKey(base::span<const sign::SignatureKind> acceptable_algorithms,
               UnexportableKeyProvider::Config config,
               LAContext* lacontext) {
-  std::unique_ptr<apple::UnexportableKeyProviderMac> key_provider =
-      apple::GetUnexportableKeyProviderMac(std::move(config));
+  std::unique_ptr<apple::UnexportableKeyProviderApple> key_provider =
+      apple::GetUnexportableKeyProviderApple(std::move(config));
   if (!key_provider) {
     return base::unexpected(UserVerifyingKeyCreationError::kPlatformApiError);
   }
@@ -131,8 +132,8 @@ base::expected<std::unique_ptr<UserVerifyingSigningKey>,
 DoGetKey(std::vector<uint8_t> wrapped_key,
          UnexportableKeyProvider::Config config,
          LAContext* lacontext) {
-  std::unique_ptr<apple::UnexportableKeyProviderMac> key_provider =
-      apple::GetUnexportableKeyProviderMac(std::move(config));
+  std::unique_ptr<apple::UnexportableKeyProviderApple> key_provider =
+      apple::GetUnexportableKeyProviderApple(std::move(config));
   if (!key_provider) {
     return base::unexpected(UserVerifyingKeyCreationError::kPlatformApiError);
   }
@@ -154,7 +155,8 @@ bool DoDeleteKey(std::vector<uint8_t> wrapped_key,
   StatefulUnexportableKeyProvider* stateful_key_provider =
       key_provider->AsStatefulUnexportableKeyProvider();
   return !stateful_key_provider ||
-         stateful_key_provider->DeleteSigningKeySlowly(wrapped_key);
+         stateful_key_provider->DeleteWrappedKeysSlowly({wrapped_key})
+             .value_or(0);
 }
 
 class UserVerifyingKeyProviderMac : public UserVerifyingKeyProvider {
@@ -165,16 +167,15 @@ class UserVerifyingKeyProviderMac : public UserVerifyingKeyProvider {
   ~UserVerifyingKeyProviderMac() override = default;
 
   void GenerateUserVerifyingSigningKey(
-      base::span<const SignatureVerifier::SignatureAlgorithm>
-          acceptable_algorithms,
+      base::span<const sign::SignatureKind> acceptable_algorithms,
       UserVerifyingKeyCreationCallback callback) override {
     // Creating a key may result in disk access, so do it in a separate thread
     // to avoid blocking the UI.
     scoped_refptr<base::SequencedTaskRunner> worker_task_runner =
         base::ThreadPool::CreateSequencedTaskRunner(
             {base::MayBlock(), base::TaskPriority::USER_BLOCKING});
-    std::vector<SignatureVerifier::SignatureAlgorithm> algorithms(
-        acceptable_algorithms.begin(), acceptable_algorithms.end());
+    std::vector<sign::SignatureKind> algorithms =
+        base::ToVector(acceptable_algorithms);
     worker_task_runner->PostTaskAndReplyWithResult(
         FROM_HERE,
         base::BindOnce(&DoGenerateKey, std::move(algorithms),

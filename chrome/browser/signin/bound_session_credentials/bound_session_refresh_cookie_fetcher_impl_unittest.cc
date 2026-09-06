@@ -34,12 +34,14 @@
 #include "components/signin/public/base/session_binding_test_utils.h"
 #include "components/signin/public/base/session_binding_utils.h"
 #include "components/signin/public/base/test_signin_client.h"
+#include "components/unexportable_keys/background_task_origin.h"
 #include "components/unexportable_keys/service_error.h"
 #include "components/unexportable_keys/unexportable_key_id.h"
 #include "components/unexportable_keys/unexportable_key_service_impl.h"
 #include "components/unexportable_keys/unexportable_key_task_manager.h"
 #include "components/variations/scoped_variations_ids_provider.h"
 #include "crypto/scoped_fake_unexportable_key_provider.h"
+#include "crypto/sign.h"
 #include "crypto/unexportable_key.h"
 #include "net/base/net_errors.h"
 #include "net/cookies/canonical_cookie.h"
@@ -66,8 +68,8 @@ using testing::IsEmpty;
 using testing::UnorderedElementsAre;
 using unexportable_keys::BackgroundTaskPriority;
 using unexportable_keys::ServiceErrorOr;
-using unexportable_keys::UnexportableKeyId;
 using unexportable_keys::UnexportableKeyService;
+using unexportable_keys::UnexportableSigningKeyId;
 using NetErrorOrHttpStatus = std::variant<net::Error, net::HttpStatusCode>;
 
 constexpr char kSessionId[] = "session_id";
@@ -77,7 +79,7 @@ constexpr char kCachedSecSessionChallengeResponse[] =
 
 MATCHER_P3(JwtHasExpectedFields, session_id, challenge, destination_url, "") {
   std::string_view jwt = arg;
-  std::optional<base::Value::Dict> payload_dict =
+  std::optional<base::DictValue> payload_dict =
       signin::ExtractPayloadFromJwt(jwt);
   if (!payload_dict) {
     *result_listener << "Couldn't parse payload from JWT: " << jwt;
@@ -86,7 +88,7 @@ MATCHER_P3(JwtHasExpectedFields, session_id, challenge, destination_url, "") {
 
   *result_listener << " with payload " << payload_dict->DebugString();
   return testing::ExplainMatchResult(
-      base::test::DictionaryHasValues(base::Value::Dict()
+      base::test::DictionaryHasValues(base::DictValue()
                                           .Set("sub", session_id)
                                           .Set("jti", challenge)
                                           .Set("aud", destination_url.spec())),
@@ -113,14 +115,15 @@ class MockSessionBindingHelper : public SessionBindingHelper {
       (override));
 };
 
-UnexportableKeyId GenerateNewKey(
+UnexportableSigningKeyId GenerateNewSigningKey(
     UnexportableKeyService& unexportable_key_service) {
-  base::test::TestFuture<ServiceErrorOr<UnexportableKeyId>> generate_future;
+  base::test::TestFuture<ServiceErrorOr<UnexportableSigningKeyId>>
+      generate_future;
   unexportable_key_service.GenerateSigningKeySlowlyAsync(
-      base::span<const crypto::SignatureVerifier::SignatureAlgorithm>(
-          {crypto::SignatureVerifier::ECDSA_SHA256}),
+      base::span<const crypto::sign::SignatureKind>(
+          {crypto::sign::ECDSA_SHA256}),
       BackgroundTaskPriority::kUserBlocking, generate_future.GetCallback());
-  ServiceErrorOr<UnexportableKeyId> key_id = generate_future.Get();
+  ServiceErrorOr<UnexportableSigningKeyId> key_id = generate_future.Get();
   CHECK(key_id.has_value());
   return *key_id;
 }
@@ -136,7 +139,7 @@ std::string CreateChallengeHeaderValue(
 class BoundSessionRefreshCookieFetcherImplTest : public ::testing::Test {
  public:
   BoundSessionRefreshCookieFetcherImplTest() {
-    binding_key_id_ = GenerateNewKey(unexportable_key_service_);
+    binding_key_id_ = GenerateNewSigningKey(unexportable_key_service_);
     session_binding_helper_ = std::make_unique<SessionBindingHelper>(
         unexportable_key_service_,
         *unexportable_key_service_.GetWrappedKey(binding_key_id_), kSessionId);
@@ -345,8 +348,10 @@ class BoundSessionRefreshCookieFetcherImplTest : public ::testing::Test {
   unexportable_keys::UnexportableKeyTaskManager unexportable_key_task_manager_;
   unexportable_keys::UnexportableKeyServiceImpl unexportable_key_service_{
       unexportable_key_task_manager_,
+      unexportable_keys::BackgroundTaskOrigin::
+          kDeviceBoundSessionCredentialsPrototype,
       crypto::UnexportableKeyProvider::Config()};
-  UnexportableKeyId binding_key_id_;
+  UnexportableSigningKeyId binding_key_id_;
   std::unique_ptr<SessionBindingHelper> session_binding_helper_;
   network::TestURLLoaderFactory test_url_loader_factory_;
   std::unique_ptr<BoundSessionRefreshCookieFetcherImpl> fetcher_;

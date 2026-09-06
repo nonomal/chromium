@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/span.h"
 #include "components/history/core/browser/history_types.h"
 #include "url/origin.h"
 
@@ -111,7 +112,7 @@ class VisitDatabase {
   // detection is performed, so if `times` has duplicate times,
   // `visits` may have duplicate visits. Includes visits that result in 404
   // error response codes.
-  bool GetVisitsForTimes(const std::vector<base::Time>& times,
+  bool GetVisitsForTimes(base::span<const base::Time> times,
                          VisitVector* visits);
 
   // Fills all visits in the time range [begin, end) to the given vector. Either
@@ -300,6 +301,10 @@ class VisitDatabase {
   // if there is at least one visit with the URL that is known to sync.
   bool GetIsUrlKnownToSync(URLID url_id, bool* is_known_to_sync);
 
+  // Sets the local device Originator Cache GUID.
+  void SetLocalDeviceOriginatorCacheGuid(
+      std::string local_device_originator_cache_guid);
+
  protected:
   // Returns the database for the functions in this interface.
   virtual sql::Database& GetDB() = 0;
@@ -384,6 +389,10 @@ class VisitDatabase {
   bool PrepareVisibleVisitsQuery(const QueryOptions& options,
                                  std::optional<URLID> url_id_to_bind,
                                  sql::Statement& out_statement);
+
+ private:
+  // The local sync client ID.
+  std::string local_device_originator_cache_guid_;
 };
 
 // Columns, in order, of the visit table.

@@ -12,7 +12,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "chrome/browser/enterprise/connectors/device_trust/signals/decorators/common/signals_decorator.h"
+#include "components/enterprise/device_trust/core/signals/decorators/common/signals_decorator.h"
 
 class Profile;
 
@@ -45,7 +45,7 @@ class BrowserSignalsDecorator : public SignalsDecorator {
   ~BrowserSignalsDecorator() override;
 
   // SignalsDecorator:
-  void Decorate(base::Value::Dict& signals,
+  void Decorate(base::DictValue& signals,
                 base::OnceClosure done_closure) override;
 
  private:
@@ -53,7 +53,7 @@ class BrowserSignalsDecorator : public SignalsDecorator {
   // signals are added to `signals` for the caller to use. `done_closure` can be
   // invoked to indicate that this part of the signals collection has concluded.
   // `device_info` represents the signals collected by the DeviceInfoFetcher.
-  void OnDeviceInfoFetched(base::Value::Dict& signals,
+  void OnDeviceInfoFetched(base::DictValue& signals,
                            base::OnceClosure done_closure,
                            const enterprise_signals::DeviceInfo& device_info);
 
@@ -62,7 +62,7 @@ class BrowserSignalsDecorator : public SignalsDecorator {
   // invoked to indicate that this part of the signals collection has concluded.
   // `response` represents the signals collected by the aggregator.
   void OnAggregatedSignalsReceived(
-      base::Value::Dict& signals,
+      base::DictValue& signals,
       base::OnceClosure done_closure,
       device_signals::SignalsAggregationResponse response);
 

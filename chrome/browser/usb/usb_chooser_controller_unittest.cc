@@ -111,6 +111,19 @@ TEST_F(UsbChooserControllerTest, AddDevice) {
   EXPECT_EQ(u"c", usb_chooser_controller->GetOption(2));
 }
 
+TEST_F(UsbChooserControllerTest, TrimsTrailingNullsFromDeviceName) {
+  auto usb_chooser_controller = CreateUsbChooserController();
+  base::RunLoop run_loop;
+  EXPECT_CALL(view(), OnOptionAdded(0)).WillOnce([&run_loop](size_t) {
+    run_loop.Quit();
+  });
+  CreateAndAddFakeUsbDevice(std::string("Product\0\0", 9), "001");
+  run_loop.Run();
+
+  ASSERT_EQ(1u, usb_chooser_controller->NumOptions());
+  EXPECT_EQ(u"Product", usb_chooser_controller->GetOption(0));
+}
+
 TEST_F(UsbChooserControllerTest, RemoveDevice) {
   auto usb_chooser_controller = CreateUsbChooserController();
   auto device_a = CreateAndAddFakeUsbDevice("a", "001");
@@ -166,7 +179,6 @@ TEST_F(UsbChooserControllerTest, UnknownDeviceName) {
 
 TEST_F(UsbChooserControllerTest, FilterMatchingDeviceVendorId) {
   auto filter = device::mojom::UsbDeviceFilter::New();
-  filter->has_vendor_id = true;
   filter->vendor_id = 100;
   auto options = blink::mojom::WebUsbRequestDeviceOptions::New();
   options->filters.push_back(std::move(filter));
@@ -182,9 +194,7 @@ TEST_F(UsbChooserControllerTest, FilterMatchingDeviceVendorId) {
 
 TEST_F(UsbChooserControllerTest, FilterMatchingDeviceProductId) {
   auto filter = device::mojom::UsbDeviceFilter::New();
-  filter->has_vendor_id = true;
   filter->vendor_id = 100;
-  filter->has_product_id = true;
   filter->product_id = 100;
   auto options = blink::mojom::WebUsbRequestDeviceOptions::New();
   options->filters.push_back(std::move(filter));
@@ -200,7 +210,6 @@ TEST_F(UsbChooserControllerTest, FilterMatchingDeviceProductId) {
 
 TEST_F(UsbChooserControllerTest, FilterExcludeMatchingDeviceVendorId) {
   auto exclusion_filter = device::mojom::UsbDeviceFilter::New();
-  exclusion_filter->has_vendor_id = true;
   exclusion_filter->vendor_id = 100;
   auto options = blink::mojom::WebUsbRequestDeviceOptions::New();
   options->exclusion_filters.push_back(std::move(exclusion_filter));
@@ -216,9 +225,7 @@ TEST_F(UsbChooserControllerTest, FilterExcludeMatchingDeviceVendorId) {
 
 TEST_F(UsbChooserControllerTest, FilterExcludeMatchingDeviceProductId) {
   auto exclusion_filter = device::mojom::UsbDeviceFilter::New();
-  exclusion_filter->has_vendor_id = true;
   exclusion_filter->vendor_id = 100;
-  exclusion_filter->has_product_id = true;
   exclusion_filter->product_id = 100;
   auto options = blink::mojom::WebUsbRequestDeviceOptions::New();
   options->exclusion_filters.push_back(std::move(exclusion_filter));

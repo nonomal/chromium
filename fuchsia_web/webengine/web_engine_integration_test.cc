@@ -12,7 +12,6 @@
 #include <string>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/fuchsia/mem_buffer_util.h"
 #include "base/fuchsia/process_context.h"
@@ -55,10 +54,13 @@ class WebEngineIntegrationTest : public WebEngineIntegrationTestBase {
  protected:
   WebEngineIntegrationTest() = default;
 
-  ~WebEngineIntegrationTest() override {
+  ~WebEngineIntegrationTest() override = default;
+
+  void TearDown() override {
     // We're about to shut down the realm; unbind to unhook the error handler.
     frame_.Unbind();
     context_.Unbind();
+    context_provider_.reset();
   }
 
   void StartWebEngine(base::CommandLine command_line) override {
@@ -100,8 +102,7 @@ class WebEngineIntegrationUserAgentTest : public WebEngineIntegrationTest {
                            version_info::GetMajorVersionNumberAsInt());
 
     // Ensure the field was actually populated.
-    EXPECT_TRUE(
-        base::Contains(expected_ua, version_info::GetMajorVersionNumber()));
+    EXPECT_TRUE(expected_ua.contains(version_info::GetMajorVersionNumber()));
 
     return expected_ua;
   }
@@ -148,12 +149,12 @@ TEST_F(WebEngineIntegrationUserAgentTest, ValidProductOnly) {
   // the product tag.
   std::string result =
       ExecuteJavaScriptWithStringResult("document.body.innerText;");
-  EXPECT_TRUE(base::Contains(result, kValidUserAgentProduct));
+  EXPECT_TRUE(result.contains(kValidUserAgentProduct));
   EXPECT_EQ(result, expected);
 
   // Query & verify that the navigator.userAgent contains the product tag.
   result = ExecuteJavaScriptWithStringResult("navigator.userAgent;");
-  EXPECT_TRUE(base::Contains(result, kValidUserAgentProduct));
+  EXPECT_TRUE(result.contains(kValidUserAgentProduct));
   EXPECT_EQ(result, expected);
 }
 
@@ -173,12 +174,12 @@ TEST_F(WebEngineIntegrationUserAgentTest, ValidProductAndVersion) {
   // both product & version.
   std::string result =
       ExecuteJavaScriptWithStringResult("document.body.innerText;");
-  EXPECT_TRUE(base::Contains(result, kValidUserAgentProductAndVersion));
+  EXPECT_TRUE(result.contains(kValidUserAgentProductAndVersion));
   EXPECT_EQ(result, expected);
 
   // Query & verify that the navigator.userAgent contains product & version.
   result = ExecuteJavaScriptWithStringResult("navigator.userAgent;");
-  EXPECT_TRUE(base::Contains(result, kValidUserAgentProductAndVersion));
+  EXPECT_TRUE(result.contains(kValidUserAgentProductAndVersion));
   EXPECT_EQ(result, expected);
 
   // Verify navigator.platform is empty, see crbug.com/1348646.
@@ -274,7 +275,7 @@ TEST_F(WebEngineIntegrationTest, RemoteDebuggingPort) {
   ASSERT_NO_FATAL_FAILURE(LoadUrlAndExpectResponse(url.spec()));
   navigation_listener()->RunUntilUrlEquals(url);
 
-  base::Value::List devtools_list =
+  base::ListValue devtools_list =
       GetDevToolsListFromPort(remote_debugging_port);
   EXPECT_EQ(devtools_list.size(), 1u);
 
@@ -425,12 +426,12 @@ class FakeAudioRenderer
     binding_.AddBinding(this, std::move(request));
   }
 
-  const std::optional<fuchsia::media::AudioRenderUsage>& usage() const {
+  const std::optional<fuchsia::media::AudioRenderUsage2>& usage() const {
     return usage_;
   }
 
   // AudioRenderer_TestBase overrides.
-  void SetUsage(fuchsia::media::AudioRenderUsage usage) override {
+  void SetUsage2(fuchsia::media::AudioRenderUsage2 usage) override {
     usage_ = usage;
     if (on_set_usage_callback_)
       std::move(on_set_usage_callback_).Run();
@@ -440,7 +441,7 @@ class FakeAudioRenderer
  private:
   fidl::BindingSet<fuchsia::media::AudioRenderer> binding_;
   base::OnceClosure on_set_usage_callback_;
-  std::optional<fuchsia::media::AudioRenderUsage> usage_;
+  std::optional<fuchsia::media::AudioRenderUsage2> usage_;
 };
 
 class FakeAudio : public fuchsia::media::testing::Audio_TestBase {
@@ -540,10 +541,10 @@ TEST_F(WebEngineIntegrationMediaTest, PlayAudioToAudioRendererWithUsage) {
   fake_audio_.emplace();
   fake_audio_->renderer().set_on_set_usage_callback(run_loop.QuitClosure());
 
-  static const fuchsia::media::AudioRenderUsage kTestRenderUsage =
-      fuchsia::media::AudioRenderUsage::SYSTEM_AGENT;
+  static const fuchsia::media::AudioRenderUsage2 kTestRenderUsage =
+      fuchsia::media::AudioRenderUsage2::SYSTEM_AGENT;
   fuchsia::web::FrameMediaSettings media_settings;
-  media_settings.set_renderer_usage(kTestRenderUsage);
+  media_settings.set_renderer_usage2(kTestRenderUsage);
   frame_->SetMediaSettings(std::move(media_settings));
 
   ASSERT_NO_FATAL_FAILURE(

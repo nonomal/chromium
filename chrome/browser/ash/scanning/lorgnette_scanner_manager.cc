@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/map_util.h"
 #include "base/functional/bind.h"
@@ -27,13 +26,13 @@
 #include "chrome/browser/ash/scanning/lorgnette_notification_controller.h"
 #include "chrome/browser/ash/scanning/lorgnette_scanner_manager_util.h"
 #include "chrome/browser/ash/scanning/zeroconf_scanner_detector.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chromeos/ash/components/dbus/dbus_thread_manager.h"
 #include "chromeos/ash/components/dbus/dlcservice/dlcservice_client.h"
 #include "chromeos/ash/components/dbus/lorgnette/lorgnette_service.pb.h"
 #include "chromeos/ash/components/dbus/lorgnette_manager/lorgnette_manager_client.h"
 #include "chromeos/ash/components/scanning/scanner.h"
 #include "components/device_event_log/device_event_log.h"
+#include "components/user_manager/user.h"
 #include "net/base/ip_address.h"
 #include "third_party/re2/src/re2/re2.h"
 
@@ -50,12 +49,17 @@ constexpr char kVerifyScannerClientId[] = "ZeroconfScannerChecker";
 // to be excluded in IsRotateAlternate().
 constexpr char kEpsonNoFlipModels[] =
     "\\b("
-    "AM-C400"
+    "AM-C10000"
+    "|AM-C400"
     "|AM-C4000"
     "|AM-C5000"
     "|AM-C550"
     "|AM-C550z"
     "|AM-C6000"
+    "|AM-M5500"
+    "|DS-1760WN"
+    "|DS-61000WN"
+    "|DS-71000WN"
     "|DS-790WN"
     "|DS-800WN"
     "|DS-900WN"
@@ -71,6 +75,7 @@ constexpr char kEpsonNoFlipModels[] =
     "|LM-C4000"
     "|LM-C5000"
     "|LM-C6000"
+    "|LM-M5500"
     "|LP-M8180A"
     "|LP-M8180F"
     "|LX-10020M"
@@ -78,6 +83,7 @@ constexpr char kEpsonNoFlipModels[] =
     "|LX-10050MF"
     "|LX-6050MF"
     "|LX-7550MF"
+    "|LX-C10060"
     "|PX-M382F"
     "|PX-M7070FX"
     "|PX-M7080FX"
@@ -116,10 +122,10 @@ constexpr char kEpsonNoFlipModels[] =
     "|WF-C878Ra"
     "|WF-C879R"
     "|WF-C879Ra"
-    "|WF-M5899"
     "|WF-M21000"
     "|WF-M21000a"
     "|WF-M21000c"
+    "|WF-M5899"
     ")\\b";
 
 // A prioritized list of scan protocols. Protocols that appear earlier in the
@@ -200,14 +206,14 @@ class LorgnetteScannerManagerImpl final : public LorgnetteScannerManager {
  public:
   LorgnetteScannerManagerImpl(
       std::unique_ptr<ZeroconfScannerDetector> zeroconf_scanner_detector,
-      Profile* profile)
+      const user_manager::User& user)
       : zeroconf_scanner_detector_(std::move(zeroconf_scanner_detector)) {
     zeroconf_scanner_detector_->RegisterScannersDetectedCallback(
         base::BindRepeating(&LorgnetteScannerManagerImpl::OnScannersDetected,
                             weak_ptr_factory_.GetWeakPtr()));
     OnScannersDetected(zeroconf_scanner_detector_->GetScanners());
     lorgnette_notification_controller_ =
-        std::make_unique<LorgnetteNotificationController>(profile);
+        std::make_unique<LorgnetteNotificationController>(user);
   }
 
   ~LorgnetteScannerManagerImpl() override = default;
@@ -648,7 +654,7 @@ class LorgnetteScannerManagerImpl final : public LorgnetteScannerManager {
     // Create tombstones for any previously-returned tokens that are no longer
     // part of the response.
     for (const auto& [token, id] : old_tokens) {
-      if (!base::Contains(new_tokens, token)) {
+      if (!new_tokens.contains(token)) {
         new_tokens.emplace(token, std::nullopt);
       }
     }
@@ -1080,10 +1086,10 @@ class LorgnetteScannerManagerImpl final : public LorgnetteScannerManager {
 // static
 std::unique_ptr<LorgnetteScannerManager> LorgnetteScannerManager::Create(
     std::unique_ptr<ZeroconfScannerDetector> zeroconf_scanner_detector,
-    Profile* profile) {
+    const user_manager::User& user) {
   PRINTER_LOG(EVENT) << "LorgnetteScannerManager::Create";
   return std::make_unique<LorgnetteScannerManagerImpl>(
-      std::move(zeroconf_scanner_detector), profile);
+      std::move(zeroconf_scanner_detector), user);
 }
 
 }  // namespace ash

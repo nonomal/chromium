@@ -9,6 +9,7 @@
 
 #include "base/android/jni_android.h"
 #include "chrome/browser/extensions/extension_view.h"
+#include "chrome/browser/ui/extensions/extension_popup_types.h"
 #include "content/public/browser/web_contents_observer.h"
 
 namespace content {
@@ -29,15 +30,17 @@ class ExtensionViewHost;
 // An instance of this C++ class is created when its Java counterpart
 // (ExtensionActionPopupContents.java) requests it via a JNI call (specifically,
 // JNI_ExtensionActionPopupContents_Create). The C++ object's lifetime is tied
-// to its Java peer. The Java object holds a native pointer (jlong) to this C++
-// instance. When the Java object is no longer needed (e.g. the popup is
+// to its Java peer. The Java object holds a native pointer (int64_t) to this
+// C++ instance. When the Java object is no longer needed (e.g. the popup is
 // closed), its `destroy()` method is called. This, in turn, calls the native
 // `Destroy()` method on this C++ object, which then calls `delete this`.
 class ExtensionActionPopupContents : public content::WebContentsObserver,
                                      public ExtensionView {
  public:
-  explicit ExtensionActionPopupContents(
-      std::unique_ptr<ExtensionViewHost> popup_host);
+  ExtensionActionPopupContents(
+      std::unique_ptr<ExtensionViewHost> popup_host,
+      bool inspect_with_devtools,
+      ShowPopupCallback callback = ShowPopupCallback());
   ExtensionActionPopupContents(const ExtensionActionPopupContents&) = delete;
   ExtensionActionPopupContents& operator=(const ExtensionActionPopupContents&) =
       delete;
@@ -70,6 +73,8 @@ class ExtensionActionPopupContents : public content::WebContentsObserver,
   void HandleCloseExtensionHost(extensions::ExtensionHost* host);
 
   std::unique_ptr<ExtensionViewHost> host_;
+  const bool inspect_with_devtools_;
+  ShowPopupCallback shown_callback_;
   base::android::ScopedJavaGlobalRef<jobject> java_object_;
 };
 

@@ -21,6 +21,7 @@
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -331,7 +332,7 @@ IN_PROC_BROWSER_TEST_F(ContentScriptMatchingBrowserTest,
   EXPECT_FALSE(DoContentScriptsMatch_Tab2_BarBlankFrame2());
 }
 
-// Flaky on MacOS since r622662. See https://crbug.com/921883
+// Flaky on MacOS since r622662. See https://crbug.com/40609469
 // Also flaky on desktop Android.
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ANDROID)
 #define MAYBE_ContentScriptMatching_NotAllFrames \

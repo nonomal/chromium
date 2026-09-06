@@ -34,7 +34,7 @@
 namespace {
 
 // Best effort convert |value| to a string.
-std::string ToJSON(const base::Value::Dict& value) {
+std::string ToJSON(const base::DictValue& value) {
   std::string result;
   JSONStringValueSerializer serializer(&result);
   if (serializer.Serialize(value)) {
@@ -282,13 +282,15 @@ void DiscardsGraphDumpImpl::OnEmbedderFrameNodeChanged(
 }
 
 void DiscardsGraphDumpImpl::OnFaviconUpdated(
-    const performance_manager::PageNode* page_node) {
+    const performance_manager::PageNode* page_node,
+    blink::mojom::FaviconUpdateReason reason) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   StartPageFaviconRequest(page_node);
 }
 
 void DiscardsGraphDumpImpl::OnMainFrameUrlChanged(
-    const performance_manager::PageNode* page_node) {
+    const performance_manager::PageNode* page_node,
+    const GURL& previous_url) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   SendPageNotification(page_node, false);
 }

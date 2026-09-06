@@ -149,7 +149,7 @@ dictionary DisplayUnitInfo {
   // The user-friendly name (e.g. "HP LCD monitor").
   required DOMString name;
 
-  // NOTE: This is only available to ChromeOS Kiosk apps and Web UI.
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   Edid edid;
 
   // ChromeOS only. Identifier of the display that is being mirrored if
@@ -335,58 +335,55 @@ interface OnDisplayChangedEvent : ExtensionEvent {
 interface Display {
   // Requests the information for all attached display devices.
   // |flags|: Options affecting how the information is returned.
-  // |Returns|: The callback to invoke with the results.
+  // |Returns|: Promise that resolves with the results.
   // |PromiseValue|: displayInfo
-  [requiredCallback] static Promise<sequence<DisplayUnitInfo>> getInfo(
+  static Promise<sequence<DisplayUnitInfo>> getInfo(
       optional GetInfoFlags flags);
 
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   // Requests the layout info for all displays.
-  // NOTE: This is only available to ChromeOS Kiosk apps and Web UI.
-  // |Returns|: The callback to invoke with the results.
+  // |Returns|: Promise that resolves with the results.
   // |PromiseValue|: layouts
-  [requiredCallback] static Promise<sequence<DisplayLayout>> getDisplayLayout();
+  static Promise<sequence<DisplayLayout>> getDisplayLayout();
 
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   // Updates the properties for the display specified by |id|, according to
   // the information provided in |info|. On failure, $(ref:runtime.lastError)
   // will be set.
-  // NOTE: This is only available to ChromeOS Kiosk apps and Web UI.
   // |id|: The display's unique identifier.
   // |info|: The information about display properties that should be changed.
   //     A property will be changed only if a new value for it is specified in
   //     |info|.
-  // |Returns|: Empty function called when the function finishes. To find out
-  //     whether the function succeeded, $(ref:runtime.lastError) should be
-  //     queried.
-  static Promise<undefined> setDisplayProperties(
+  // |Returns|: Promise that resolves when the function finishes.
+    static Promise<undefined> setDisplayProperties(
       DOMString id,
       DisplayProperties info);
 
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   // Set the layout for all displays. Any display not included will use the
   // default layout. If a layout would overlap or be otherwise invalid it
   // will be adjusted to a valid layout. After layout is resolved, an
   // onDisplayChanged event will be triggered.
-  // NOTE: This is only available to ChromeOS Kiosk apps and Web UI.
   // |layouts|: The layout information, required for all displays except
   //     the primary display.
-  // |Returns|: Empty function called when the function finishes. To find out
-  //     whether the function succeeded, $(ref:runtime.lastError) should be
-  //     queried.
-  static Promise<undefined> setDisplayLayout(
-      sequence<DisplayLayout> layouts);
+  // |Returns|: Promise that resolves when the function finishes.
+  static Promise<undefined> setDisplayLayout(sequence<DisplayLayout> layouts);
 
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   // Enables/disables the unified desktop feature. If enabled while mirroring
   // is active, the desktop mode will not change until mirroring is turned
   // off. Otherwise, the desktop mode will switch to unified immediately.
-  // NOTE: This is only available to ChromeOS Kiosk apps and Web UI.
   // |enabled|: True if unified desktop should be enabled.
   static undefined enableUnifiedDesktop(boolean enabled);
 
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   // Starts overscan calibration for a display. This will show an overlay
   // on the screen indicating the current overscan insets. If overscan
   // calibration for display |id| is in progress this will reset calibration.
   // |id|: The display's unique identifier.
   static undefined overscanCalibrationStart(DOMString id);
 
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   // Adjusts the current overscan insets for a display. Typically this should
   // either move the display along an axis (e.g. left+right have the same
   // value) or scale it along an axis (e.g. top+bottom have opposite values).
@@ -395,34 +392,39 @@ interface Display {
   // |delta|: The amount to change the overscan insets.
   static undefined overscanCalibrationAdjust(DOMString id, Insets delta);
 
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   // Resets the overscan insets for a display to the last saved value (i.e
   // before Start was called).
   // |id|: The display's unique identifier.
   static undefined overscanCalibrationReset(DOMString id);
 
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   // Complete overscan adjustments for a display  by saving the current values
   // and hiding the overlay.
   // |id|: The display's unique identifier.
   static undefined overscanCalibrationComplete(DOMString id);
 
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   // Displays the native touch calibration UX for the display with |id| as
   // display id. This will show an overlay on the screen with required
   // instructions on how to proceed. The callback will be invoked in case of
   // successful calibration only. If the calibration fails, this will throw an
   // error.
   // |id|: The display's unique identifier.
-  // |Returns|: Optional callback to inform the caller that the touch
-  //      calibration has ended. The argument of the callback informs if the
-  //      calibration was a success or not.
+  // |Returns|: Promise that resolves to inform the caller that the touch
+  // calibration has ended. The boolean value informs if the calibration was a
+  // success or not.
   // |PromiseValue|: success
   static Promise<boolean> showNativeTouchCalibration(DOMString id);
 
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   // Starts custom touch calibration for a display. This should be called when
   // using a custom UX for collecting calibration data. If another touch
   // calibration is already in progress this will throw an error.
   // |id|: The display's unique identifier.
   static undefined startCustomTouchCalibration(DOMString id);
 
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   // Sets the touch calibration pairs for a display. These |pairs| would be
   // used to calibrate the touch screen for display with |id| called in
   // startCustomTouchCalibration(). Always call |startCustomTouchCalibration|
@@ -434,21 +436,20 @@ interface Display {
   static undefined completeCustomTouchCalibration(TouchCalibrationPairQuad pairs,
                                              Bounds bounds);
 
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   // Resets the touch calibration for the display and brings it back to its
   // default state by clearing any touch calibration data associated with the
   // display.
   // |id|: The display's unique identifier.
   static undefined clearTouchCalibration(DOMString id);
 
+  // NOTE: This is only available to ChromeOS Kiosk apps.
   // Sets the display mode to the specified mirror mode. Each call resets the
   // state from previous calls. Calling setDisplayProperties() will fail for
   // the mirroring destination displays.
-  // NOTE: This is only available to ChromeOS Kiosk apps and Web UI.
   // |info|: The information of the mirror mode that should be applied to the
   //     display mode.
-  // |Returns|: Empty function called when the function finishes. To find out
-  //     whether the function succeeded, $(ref:runtime.lastError) should be
-  //     queried.
+  // |Returns|: Promise that resolves when the function finishes.
   static Promise<undefined> setMirrorMode(MirrorModeInfo info);
 
   // Fired when anything changes to the display configuration.

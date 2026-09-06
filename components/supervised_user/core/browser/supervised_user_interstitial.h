@@ -10,12 +10,14 @@
 
 #include "base/functional/callback_forward.h"
 #include "base/memory/raw_ref.h"
+#include "components/supervised_user/core/browser/supervised_user_url_filtering_service.h"
 #include "components/supervised_user/core/browser/supervised_user_utils.h"
 #include "url/gurl.h"
 
 namespace supervised_user {
 class WebContentHandler;
 class SupervisedUserService;
+class FamilyLinkSettingsService;
 
 // This class is used by SupervisedUserNavigationObserver to handle requests
 // from supervised user error page. The error page is shown when a page is
@@ -69,9 +71,9 @@ class SupervisedUserInterstitial {
   static std::unique_ptr<SupervisedUserInterstitial> Create(
       std::unique_ptr<WebContentHandler> web_content_handler,
       SupervisedUserService& supervised_user_service,
-      const GURL& url,
-      const std::u16string& supervised_user_name,
-      FilteringBehaviorReason reason);
+      FamilyLinkSettingsService& family_link_settings_service,
+      WebFilteringResult filtering_result,
+      const std::u16string& supervised_user_name);
 
 #if BUILDFLAG(IS_ANDROID)
   // Returns the HTML contents of the error page without the approvals section.
@@ -97,33 +99,29 @@ class SupervisedUserInterstitial {
 #endif  // BUILDFLAG(IS_ANDROID)
 
   // Getter methods.
-  const GURL& url() const { return url_; }
   WebContentHandler* web_content_handler() {
     return web_content_handler_.get();
   }
-  FilteringBehaviorReason filtering_behavior_reason() const {
-    return filtering_behavior_reason_;
-  }
+  WebFilteringResult filtering_result() { return filtering_result_; }
 
  private:
   SupervisedUserInterstitial(
       std::unique_ptr<WebContentHandler> web_content_handler,
       SupervisedUserService& supervised_user_service,
-      const GURL& url,
-      const std::u16string& supervised_user_name,
-      FilteringBehaviorReason reason);
+      FamilyLinkSettingsService& family_link_settings_service,
+      WebFilteringResult filtering_result,
+      const std::u16string& supervised_user_name);
 
   void OutputRequestPermissionSourceMetric();
 
   const raw_ref<SupervisedUserService> supervised_user_service_;
+  const raw_ref<FamilyLinkSettingsService> family_link_settings_service_;
 
   std::unique_ptr<WebContentHandler> web_content_handler_;
 
-  // The last committed url for this frame.
-  GURL url_;
+  // Filtering result for the last committed url for this frame.
+  WebFilteringResult filtering_result_;
   std::u16string supervised_user_name_;
-  const FilteringBehaviorReason filtering_behavior_reason_;
-  std::unique_ptr<UrlFormatter> url_formatter_;
 };
 }  // namespace supervised_user
 

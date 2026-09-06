@@ -4,9 +4,9 @@
 
 #include "chrome/browser/ui/views/frame/multi_contents_background_view.h"
 
-#include "chrome/browser/ui/views/frame/top_container_background.h"
+#include "chrome/browser/ui/views/frame/themed_background.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
-#include "ui/compositor/layer.h"
+#include "ui/compositor/layer_solid_color.h"
 #include "ui/gfx/geometry/rounded_corners_f.h"
 
 MultiContentsBackgroundView::MultiContentsBackgroundView(
@@ -34,7 +34,7 @@ void MultiContentsBackgroundView::OnThemeChanged() {
     SetPaintToLayer(new_type);
   }
 
-  if (layer()->type() == ui::LAYER_SOLID_COLOR) {
+  if (layer()->AsSolidColor()) {
     UpdateSolidLayerColor();
   } else {
     SchedulePaint();
@@ -42,22 +42,20 @@ void MultiContentsBackgroundView::OnThemeChanged() {
 }
 
 void MultiContentsBackgroundView::OnPaint(gfx::Canvas* canvas) {
-  CHECK_EQ(layer()->type(), ui::LAYER_TEXTURED);
-  TopContainerBackground::PaintBackground(canvas, this, browser_view_);
+  CHECK(layer()->AsTextured());
+  ThemedBackground::PaintBackground(canvas, this, browser_view_);
 }
 
 ui::LayerType MultiContentsBackgroundView::CalculateLayerType() const {
   const bool has_custom_image =
-      !TopContainerBackground::GetBackgroundColor(this, browser_view_)
-           .has_value();
+      !ThemedBackground::GetBackgroundColor(this, browser_view_).has_value();
   return has_custom_image ? ui::LAYER_TEXTURED : ui::LAYER_SOLID_COLOR;
 }
 
 void MultiContentsBackgroundView::UpdateSolidLayerColor() {
-  CHECK_EQ(layer()->type(), ui::LAYER_SOLID_COLOR);
-  if (auto color =
-          TopContainerBackground::GetBackgroundColor(this, browser_view_)) {
-    layer()->SetColor(*color);
+  CHECK(layer()->AsSolidColor());
+  if (auto color = ThemedBackground::GetBackgroundColor(this, browser_view_)) {
+    layer()->AsSolidColor()->SetColor(SkColor4f::FromColor(*color));
   }
 }
 

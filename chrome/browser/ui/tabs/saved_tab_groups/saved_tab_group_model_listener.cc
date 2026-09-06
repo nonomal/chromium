@@ -7,11 +7,11 @@
 #include <algorithm>
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/memory/raw_ptr.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window/public/browser_collection.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+#include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/local_tab_group_listener.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
@@ -38,20 +38,20 @@ SavedTabGroupModelListener::SavedTabGroupModelListener(
   CHECK(service);
   CHECK(profile);
 
-  ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
-      [this](BrowserWindowInterface* browser) {
-        OnBrowserAdded(browser->GetBrowserForMigrationOnly());
-        return true;
-      });
-
-  BrowserList::GetInstance()->AddObserver(this);
+  auto* browser_collection = ProfileBrowserCollection::GetForProfile(profile_);
+  browser_collection_observation_.Observe(browser_collection);
+  browser_collection->ForEach([this](BrowserWindowInterface* browser) {
+    OnBrowserCreated(browser);
+    return true;
+  });
 }
 
 SavedTabGroupModelListener::~SavedTabGroupModelListener() {
-  BrowserList::GetInstance()->RemoveObserver(this);
   ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
       [this](BrowserWindowInterface* browser) {
-        OnBrowserRemoved(browser->GetBrowserForMigrationOnly());
+        if (browser->GetProfile() == profile_) {
+          OnBrowserClosed(browser);
+        }
         return true;
       });
 }
@@ -155,13 +155,14 @@ void SavedTabGroupModelListener::TabGroupedStateChanged(
 
   // Add it to its new group.
   if (new_local_group_id.has_value() &&
-      base::Contains(local_tab_group_listeners_, new_local_group_id.value())) {
+      local_tab_group_listeners_.contains(new_local_group_id.value())) {
     LocalTabGroupListener& listener =
         local_tab_group_listeners_.at(new_local_group_id.value());
-    const Browser* const browser = SavedTabGroupUtils::GetBrowserWithTabGroupId(
-        new_local_group_id.value());
+    const BrowserWindowInterface* const browser =
+        SavedTabGroupUtils::GetBrowserWithTabGroupId(
+            new_local_group_id.value());
     CHECK(browser);
-    listener.AddTabFromLocal(tab, browser->tab_strip_model(), index);
+    listener.AddTabFromLocal(tab, browser->GetTabStripModel(), index);
   }
 }
 
@@ -221,7 +222,7 @@ void SavedTabGroupModelListener::WillCloseAllTabs(
 
   for (const tab_groups::TabGroupId& group_id :
        tab_strip_model->group_model()->ListTabGroups()) {
-    if (base::Contains(local_tab_group_listeners_, group_id)) {
+    if (local_tab_group_listeners_.contains(group_id)) {
       DisconnectLocalTabGroup(group_id, ClosingSource::kCloseAllTabs);
     }
   }
@@ -263,7 +264,7 @@ void SavedTabGroupModelListener::ConnectToLocalTabGroup(
 
 void SavedTabGroupModelListener::PauseTrackingLocalTabGroup(
     const tab_groups::TabGroupId& group_id) {
-  if (!base::Contains(local_tab_group_listeners_, group_id)) {
+  if (!local_tab_group_listeners_.contains(group_id)) {
     return;
   }
   local_tab_group_listeners_.at(group_id).PauseTracking();
@@ -271,7 +272,7 @@ void SavedTabGroupModelListener::PauseTrackingLocalTabGroup(
 
 void SavedTabGroupModelListener::ResumeTrackingLocalTabGroup(
     const tab_groups::TabGroupId& group_id) {
-  if (!base::Contains(local_tab_group_listeners_, group_id)) {
+  if (!local_tab_group_listeners_.contains(group_id)) {
     return;
   }
   local_tab_group_listeners_.at(group_id).ResumeTracking();
@@ -300,7 +301,7 @@ void SavedTabGroupModelListener::DisconnectLocalTabGroup(
 
 void SavedTabGroupModelListener::RemoveLocalGroupFromSync(
     tab_groups::TabGroupId local_group_id) {
-  if (base::Contains(local_tab_group_listeners_, local_group_id)) {
+  if (local_tab_group_listeners_.contains(local_group_id)) {
     // Prevent further observations for `local_group_id` as we attempt to close
     // the tab group.
     DisconnectLocalTabGroup(local_group_id, ClosingSource::kDeletedFromSync);
@@ -312,7 +313,7 @@ void SavedTabGroupModelListener::RemoveLocalGroupFromSync(
 
 void SavedTabGroupModelListener::UpdateLocalGroupFromSync(
     tab_groups::TabGroupId local_group_id) {
-  if (!base::Contains(local_tab_group_listeners_, local_group_id)) {
+  if (!local_tab_group_listeners_.contains(local_group_id)) {
     return;
   }
 
@@ -322,29 +323,18 @@ void SavedTabGroupModelListener::UpdateLocalGroupFromSync(
   }
 }
 
-void SavedTabGroupModelListener::OnBrowserAdded(Browser* browser) {
-  if (profile_ != browser->profile()) {
-    return;
-  }
-
-  browser->tab_strip_model()->AddObserver(this);
-}
-
-void SavedTabGroupModelListener::OnBrowserRemoved(Browser* browser) {
-  if (profile_ != browser->profile()) {
-    return;
-  }
-
-  browser->tab_strip_model()->RemoveObserver(this);
+void SavedTabGroupModelListener::OnBrowserCreated(
+    BrowserWindowInterface* browser) {
+  browser->GetTabStripModel()->AddObserver(this);
 }
 
 std::pair<SavedTabGroup, std::map<tabs::TabInterface*, base::Uuid>>
 SavedTabGroupModelListener::CreateSavedTabGroupAndTabMapping(
     const tab_groups::TabGroupId& group_id) {
-  Browser* browser =
+  BrowserWindowInterface* browser =
       tab_groups::SavedTabGroupUtils::GetBrowserWithTabGroupId(group_id);
   CHECK(browser);
-  TabStripModel* tab_strip_model = browser->tab_strip_model();
+  TabStripModel* tab_strip_model = browser->GetTabStripModel();
   CHECK(tab_strip_model);
   CHECK(tab_strip_model->SupportsTabGroups());
 

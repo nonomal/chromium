@@ -34,11 +34,11 @@ namespace cc {
 struct AppendQuadsContext;
 class AppendQuadsData;
 class DamageTracker;
+class EffectTree;
 class FilterOperations;
 class Occlusion;
 class LayerImpl;
 class LayerTreeImpl;
-class PictureLayerImpl;
 
 struct RenderSurfacePropertyChangedFlags {
  public:
@@ -274,9 +274,6 @@ class CC_EXPORT RenderSurfaceImpl {
   CreateViewTransitionCaptureRenderPass(
       const base::flat_set<blink::ViewTransitionToken>&
           capture_view_transition_tokens = {});
-  viz::ResourceId GetMaskResourceFromLayer(PictureLayerImpl* mask_layer,
-                                           gfx::Size* mask_texture_size,
-                                           gfx::RectF* mask_uv_rect) const;
   void AppendQuads(const AppendQuadsContext& context,
                    viz::CompositorRenderPass* render_pass,
                    AppendQuadsData* append_quads_data);
@@ -287,11 +284,17 @@ class CC_EXPORT RenderSurfaceImpl {
   void set_effect_tree_index(int index) { effect_tree_index_ = index; }
   int EffectTreeIndex() const;
 
+  // Returns the effect tree associated with this render surface.
+  const EffectTree* effect_tree() const;
+
   const EffectNode* OwningEffectNode() const;
   EffectNode* OwningEffectNodeMutableForTest() const;
 
   // Returns true if the owning effect node has a view transition resource.
   bool IsViewTransitionElement() const;
+
+  // Returns true if this render surface is for an unbounded element.
+  bool IsUnbounded() const;
 
   // Returns the view transition element resource id for this render surface.
   // This may be invalid, if this render surface is not a view transition
@@ -403,7 +406,7 @@ class CC_EXPORT RenderSurfaceImpl {
   // A ViewTransitionContentLayer only knows its final visible drawable rect
   // once its originating surface's content rect has been computed. So we defer
   // adding this contribution until that is complete.
-  std::vector<LayerImpl*> deferred_contributing_layers_;
+  std::vector<raw_ptr<LayerImpl>> deferred_contributing_layers_;
 
   gfx::Rect view_transition_capture_content_rect_;
 

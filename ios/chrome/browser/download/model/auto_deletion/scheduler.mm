@@ -25,7 +25,7 @@ std::optional<auto_deletion::ScheduledFile> ScheduledFileFromValue(
     return std::nullopt;
   }
 
-  const base::Value::Dict& dict = value.GetDict();
+  const base::DictValue& dict = value.GetDict();
   const base::Value* time_value = dict.Find("time");
   if (!time_value) {
     return std::nullopt;
@@ -36,18 +36,12 @@ std::optional<auto_deletion::ScheduledFile> ScheduledFileFromValue(
     return std::nullopt;
   }
 
-  const std::string* maybe_hash = dict.FindString("hash");
-  if (!maybe_hash) {
-    return std::nullopt;
-  }
-
   const std::string* maybe_path = dict.FindString("path");
   if (!maybe_path) {
     return std::nullopt;
   }
 
-  return auto_deletion::ScheduledFile(base::FilePath(*maybe_path), *maybe_hash,
-                                      *maybe_time);
+  return auto_deletion::ScheduledFile(base::FilePath(*maybe_path), *maybe_time);
 }
 
 }  // namespace
@@ -62,7 +56,7 @@ Scheduler::~Scheduler() = default;
 
 std::vector<ScheduledFile> Scheduler::IdentifyExpiredFiles(base::Time instant) {
   std::vector<ScheduledFile> expired_files;
-  const base::Value::List& files =
+  const base::ListValue& files =
       local_state_->GetList(prefs::kDownloadAutoDeletionScheduledFiles);
 
   for (const auto& value : files) {
@@ -101,7 +95,7 @@ void Scheduler::RemoveExpiredFiles(base::Time instant) {
   }
 
   if (values_to_erase_count > 0) {
-    base::Value::List& value = update.Get();
+    base::ListValue& value = update.Get();
     value.erase(value.begin(), value.begin() + values_to_erase_count);
   }
 }
@@ -109,9 +103,8 @@ void Scheduler::RemoveExpiredFiles(base::Time instant) {
 void Scheduler::ScheduleFile(ScheduledFile file) {
   ScopedListPrefUpdate update(local_state_,
                               prefs::kDownloadAutoDeletionScheduledFiles);
-  update->Append(base::Value::Dict()
+  update->Append(base::DictValue()
                      .Set("path", file.filepath().AsUTF8Unsafe())
-                     .Set("hash", file.hash())
                      .Set("time", base::TimeToValue(file.download_time())));
 }
 

@@ -25,6 +25,7 @@ include_rules = [
   "+chrome/browser/ash/base",
   "+chrome/browser/ash/boca/boca_manager_factory.h",
   "+chrome/browser/ash/boot_times_recorder",
+  "+chrome/browser/ash/browser_delegate",
   "+chrome/browser/ash/calendar",
   "+chrome/browser/ash/camera_mic",
   "+chrome/browser/ash/child_accounts",
@@ -40,9 +41,9 @@ include_rules = [
   "+chrome/browser/ash/login",
   "+chrome/browser/ash/net",
   "+chrome/browser/ash/phonehub",
-  "+chrome/browser/ash/plugin_vm",
   "+chrome/browser/ash/policy/core",
   "+chrome/browser/ash/policy/handlers",
+  "+chrome/browser/ash/policy/remote_commands",
   "+chrome/browser/ash/policy/reporting",
   "+chrome/browser/ash/profiles",
   "+chrome/browser/ash/release_notes",
@@ -50,7 +51,6 @@ include_rules = [
   "+chrome/browser/ash/system_web_apps/apps/help_app",
   "+chrome/browser/ash/tether",
   "+chrome/browser/ash/tpm",
-  "+chrome/browser/ash/u2f",
   "+chrome/browser/browser_process.h",
   "+chrome/browser/browser_process_platform_part_ash.h",
   "+chrome/browser/component_updater",
@@ -59,6 +59,7 @@ include_rules = [
   "+chrome/browser/lifetime",
   "+chrome/browser/manta/manta_service_factory.h",
   "+chrome/browser/net",
+  "+chrome/browser/password_manager",
   "+chrome/browser/policy",
   "+chrome/browser/prefs",
   "+chrome/browser/profiles",
@@ -66,21 +67,18 @@ include_rules = [
   "+chrome/browser/screen_ai",
   "+chrome/browser/signin",
   "+chrome/browser/supervised_user/child_accounts",
-  "+chrome/browser/sync",
   "+chrome/browser/trusted_vault",
   "+chrome/browser/ui/ash",
   "+chrome/browser/ui/startup",
   "+chrome/browser/ui/webui/ash",
   "+chrome/common/chrome_constants.h",
-  "+chrome/common/chrome_features.h",
-  "+chrome/common/chrome_switches.h",
   "+chrome/common/logging_chrome.h",
-  "+chrome/common/pref_names.h",
   "+chrome/test/base",
 ]
 
 specific_include_rules = {
-  "user_session_manager\.cc": [
+  "user_session_manager\\.cc": [
     "+chrome/browser/metrics/first_web_contents_profiler.h",
+    "+chrome/browser/global_features.h",
   ]
 }

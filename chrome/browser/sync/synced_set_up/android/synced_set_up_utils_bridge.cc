@@ -33,9 +33,9 @@ namespace sync_preferences::synced_set_up {
  */
 static void JNI_SyncedSetUpUtilsBridge_GetCrossDevicePrefsFromRemoteDevice(
     JNIEnv* env,
-    jlong profile,
-    jlong cross_device_pref_tracker,
-    jlong map_bridge) {
+    int64_t profile,
+    int64_t cross_device_pref_tracker,
+    int64_t map_bridge) {
   syncer::DeviceInfoSyncService* device_info_sync_service =
       DeviceInfoSyncServiceFactory::GetForProfile(
           reinterpret_cast<Profile*>(profile));
@@ -70,6 +70,25 @@ static void JNI_SyncedSetUpUtilsBridge_GetCrossDevicePrefsFromRemoteDevice(
         break;
     }
   }
+}
+
+static std::string JNI_SyncedSetUpUtilsBridge_GetBestMatchDeviceGuid(
+    JNIEnv* env,
+    int64_t profile,
+    int64_t cross_device_pref_tracker) {
+  syncer::DeviceInfoSyncService* device_info_sync_service =
+      DeviceInfoSyncServiceFactory::GetForProfile(
+          reinterpret_cast<Profile*>(profile));
+  const syncer::DeviceInfoTracker* device_info_tracker =
+      device_info_sync_service->GetDeviceInfoTracker();
+  const syncer::DeviceInfo* local_device =
+      device_info_sync_service->GetLocalDeviceInfoProvider()
+          ->GetLocalDeviceInfo();
+
+  return sync_preferences::synced_set_up::GetBestMatchDeviceGuid(
+      reinterpret_cast<sync_preferences::CrossDevicePrefTracker*>(
+          cross_device_pref_tracker),
+      device_info_tracker, local_device);
 }
 
 }  // namespace sync_preferences::synced_set_up

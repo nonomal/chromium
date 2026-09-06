@@ -17,12 +17,13 @@ import static org.mockito.Mockito.verify;
 import android.content.SharedPreferences;
 
 import org.junit.Before;
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentMatchers;
-import org.mockito.MockitoAnnotations;
 import org.mockito.Spy;
-import org.robolectric.annotation.Config;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
@@ -35,15 +36,14 @@ import java.util.Set;
 
 /** Unit tests for {@link BackgroundTaskSchedulerUma}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(manifest = Config.NONE)
 public class BackgroundTaskSchedulerUmaTest {
+    @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
     @Spy private BackgroundTaskSchedulerUma mUmaSpy;
 
     private BackgroundTaskSchedulerExternalUma mExternalUma;
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
         BackgroundTaskSchedulerUma.setInstanceForTesting(mUmaSpy);
         mExternalUma = mUmaSpy;
         doNothing().when(mUmaSpy).assertNativeIsLoaded();
@@ -157,7 +157,23 @@ public class BackgroundTaskSchedulerUmaTest {
                 BackgroundTaskSchedulerUma.BACKGROUND_CHROME_SIGNALS_REPORTING,
                 BackgroundTaskSchedulerUma.toUmaEnumValueFromTaskId(
                         TaskIds.CHROME_SIGNALS_REPORTING_JOB_ID));
-        assertEquals(BackgroundTaskSchedulerUma.BACKGROUND_TASK_COUNT, 35);
+        assertEquals(
+                BackgroundTaskSchedulerUma.BACKGROUND_UMA_UPLOAD,
+                BackgroundTaskSchedulerUma.toUmaEnumValueFromTaskId(TaskIds.UMA_UPLOAD_JOB_ID));
+        assertEquals(
+                BackgroundTaskSchedulerUma.BACKGROUND_UKM_UPLOAD,
+                BackgroundTaskSchedulerUma.toUmaEnumValueFromTaskId(TaskIds.UKM_UPLOAD_JOB_ID));
+        assertEquals(
+                BackgroundTaskSchedulerUma.BACKGROUND_DWA_UPLOAD,
+                BackgroundTaskSchedulerUma.toUmaEnumValueFromTaskId(TaskIds.DWA_UPLOAD_JOB_ID));
+        assertEquals(
+                BackgroundTaskSchedulerUma.BACKGROUND_PUMA_UPLOAD,
+                BackgroundTaskSchedulerUma.toUmaEnumValueFromTaskId(TaskIds.PUMA_UPLOAD_JOB_ID));
+        assertEquals(
+                BackgroundTaskSchedulerUma.BACKGROUND_STRUCTURED_METRICS_UPLOAD,
+                BackgroundTaskSchedulerUma.toUmaEnumValueFromTaskId(
+                        TaskIds.STRUCTURED_METRICS_UPLOAD_JOB_ID));
+        assertEquals(BackgroundTaskSchedulerUma.BACKGROUND_TASK_COUNT, 40);
     }
 
     @Test
@@ -273,52 +289,6 @@ public class BackgroundTaskSchedulerUmaTest {
                         eq("Android.BackgroundTaskScheduler.TaskScheduled.Failure"),
                         ArgumentMatchers.eq(
                                 BackgroundTaskSchedulerUma.BACKGROUND_TASK_OFFLINE_PAGES));
-    }
-
-    @Test
-    @Feature({"BackgroundTaskScheduler"})
-    public void testReportExactTaskCreated() {
-        doNothing().when(mUmaSpy).cacheEvent(anyString(), anyInt());
-        BackgroundTaskSchedulerUma.getInstance().reportExactTaskCreated(TaskIds.TEST);
-        verify(mUmaSpy, times(1))
-                .cacheEvent(
-                        eq("Android.BackgroundTaskScheduler.ExactTaskCreated"),
-                        ArgumentMatchers.eq(BackgroundTaskSchedulerUma.BACKGROUND_TASK_TEST));
-    }
-
-    @Test
-    @Feature({"BackgroundTaskScheduler"})
-    public void testReportTaskScheduledWithExpiration() {
-        doNothing().when(mUmaSpy).cacheEvent(anyString(), anyInt());
-        BackgroundTaskSchedulerUma.getInstance()
-                .reportTaskCreatedAndExpirationState(TaskIds.TEST, /* expires= */ true);
-        verify(mUmaSpy, times(1))
-                .cacheEvent(
-                        eq("Android.BackgroundTaskScheduler.TaskCreated.WithExpiration"),
-                        ArgumentMatchers.eq(BackgroundTaskSchedulerUma.BACKGROUND_TASK_TEST));
-    }
-
-    @Test
-    @Feature({"BackgroundTaskScheduler"})
-    public void testReportTaskScheduledWithoutExpiration() {
-        doNothing().when(mUmaSpy).cacheEvent(anyString(), anyInt());
-        BackgroundTaskSchedulerUma.getInstance()
-                .reportTaskCreatedAndExpirationState(TaskIds.TEST, /* expires= */ false);
-        verify(mUmaSpy, times(1))
-                .cacheEvent(
-                        eq("Android.BackgroundTaskScheduler.TaskCreated.WithoutExpiration"),
-                        ArgumentMatchers.eq(BackgroundTaskSchedulerUma.BACKGROUND_TASK_TEST));
-    }
-
-    @Test
-    @Feature({"BackgroundTaskScheduler"})
-    public void testReportTaskExpired() {
-        doNothing().when(mUmaSpy).cacheEvent(anyString(), anyInt());
-        BackgroundTaskSchedulerUma.getInstance().reportTaskExpired(TaskIds.TEST);
-        verify(mUmaSpy, times(1))
-                .cacheEvent(
-                        eq("Android.BackgroundTaskScheduler.TaskExpired"),
-                        ArgumentMatchers.eq(BackgroundTaskSchedulerUma.BACKGROUND_TASK_TEST));
     }
 
     @Test

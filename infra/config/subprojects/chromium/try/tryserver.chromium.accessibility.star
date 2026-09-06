@@ -20,8 +20,10 @@ try_.defaults.set(
     execution_timeout = try_constants.DEFAULT_EXECUTION_TIMEOUT,
     experiments = {
         "chromium_tests.resultdb_module": 100,
+        "luci.buildbucket.run_in_turboci": 100,
     },
     service_account = try_constants.DEFAULT_SERVICE_ACCOUNT,
+    siso_keep_going = siso.KEEP_GOING,
     siso_project = siso.project.DEFAULT_UNTRUSTED,
     siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
 )
@@ -38,7 +40,7 @@ try_.builder(
             "ci/fuchsia-x64-accessibility-rel",
         ],
     ),
-    tryjob = try_.job(
+    cq_settings = try_.cq_settings(
         location_filters = [
             "third_party/blink/renderer/modules/accessibility/.+",
             "content/renderer/accessibility/.+",
@@ -58,7 +60,7 @@ try_.builder(
     ),
     check_for_flakiness = False,
     check_for_flakiness_with_resultdb = False,
-    tryjob = try_.job(
+    cq_settings = try_.cq_settings(
         location_filters = [
             "third_party/blink/renderer/modules/accessibility/.+",
             "content/renderer/accessibility/.+",

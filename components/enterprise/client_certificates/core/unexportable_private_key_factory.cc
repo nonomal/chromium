@@ -17,15 +17,26 @@
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "components/enterprise/client_certificates/core/constants.h"
+#include "components/enterprise/client_certificates/core/features.h"
 #include "components/enterprise/client_certificates/core/private_key.h"
 #include "components/enterprise/client_certificates/core/private_key_types.h"
 #include "components/enterprise/client_certificates/core/unexportable_private_key.h"
+#include "crypto/sign.h"
 #include "crypto/unexportable_key.h"
 #include "net/ssl/ssl_private_key.h"
 
 namespace client_certificates {
 
 namespace {
+
+bool IsHardwareModuleSupported(crypto::UnexportableSigningKey* key) {
+#if BUILDFLAG(IS_WIN)
+  if (features::IsWindowsTpmTls13CheckEnabled() && !key->SupportsTls13()) {
+    return false;
+  }
+#endif  // BUILDFLAG(IS_WIN)
+  return true;
+}
 
 scoped_refptr<UnexportablePrivateKey> CreateKey(
     crypto::UnexportableKeyProvider::Config config) {
@@ -34,12 +45,16 @@ scoped_refptr<UnexportablePrivateKey> CreateKey(
     return nullptr;
   }
 
-  static constexpr std::array<crypto::SignatureVerifier::SignatureAlgorithm, 2>
-      kAcceptableAlgorithms = {crypto::SignatureVerifier::ECDSA_SHA256,
-                               crypto::SignatureVerifier::RSA_PKCS1_SHA256};
+  static constexpr std::array<crypto::sign::SignatureKind, 2>
+      kAcceptableAlgorithms = {crypto::sign::ECDSA_SHA256,
+                               crypto::sign::RSA_PKCS1_SHA256};
   auto key = provider->GenerateSigningKeySlowly(kAcceptableAlgorithms);
 
   if (!key) {
+    return nullptr;
+  }
+
+  if (!IsHardwareModuleSupported(key.get())) {
     return nullptr;
   }
 
@@ -56,6 +71,10 @@ scoped_refptr<UnexportablePrivateKey> LoadKeyFromWrapped(
 
   auto key = provider->FromWrappedSigningKeySlowly(wrapped_key);
   if (!key) {
+    return nullptr;
+  }
+
+  if (!IsHardwareModuleSupported(key.get())) {
     return nullptr;
   }
 
@@ -110,7 +129,7 @@ void UnexportablePrivateKeyFactory::LoadPrivateKey(
 }
 
 void UnexportablePrivateKeyFactory::LoadPrivateKeyFromDict(
-    const base::Value::Dict& serialized_private_key,
+    const base::DictValue& serialized_private_key,
     PrivateKeyCallback callback) {
   std::optional<int> source = serialized_private_key.FindInt(kKeySource);
   CHECK(ToPrivateKeySource(*source) == PrivateKeySource::kUnexportableKey);

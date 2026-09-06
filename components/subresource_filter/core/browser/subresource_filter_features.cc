@@ -12,7 +12,6 @@
 #include <tuple>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/no_destructor.h"
 #include "base/rand_util.h"
@@ -97,9 +96,6 @@ ActivationList ParseActivationList(std::string activation_lists_string) {
   } else if (activation_lists.CaseInsensitiveContains(
                  kActivationListSocialEngineeringAdsInterstitial)) {
     return ActivationList::SOCIAL_ENG_ADS_INTERSTITIAL;
-  } else if (activation_lists.CaseInsensitiveContains(
-                 kActivationListSubresourceFilter)) {
-    return ActivationList::SUBRESOURCE_FILTER;
   } else if (activation_lists.CaseInsensitiveContains(
                  kActivationListBetterAds)) {
     return ActivationList::BETTER_ADS;
@@ -270,7 +266,6 @@ const char kActivationListsParameterName[] = "activation_lists";
 const char kActivationListSocialEngineeringAdsInterstitial[] =
     "social_engineering_ads_interstitial";
 const char kActivationListPhishingInterstitial[] = "phishing_interstitial";
-const char kActivationListSubresourceFilter[] = "subresource_filter";
 const char kActivationListBetterAds[] = "better_ads";
 
 const char kActivationPriorityParameterName[] = "activation_priority";
@@ -423,7 +418,7 @@ scoped_refptr<ConfigurationList> GetEnabledConfigurations() {
 }
 
 bool HasEnabledConfiguration(const Configuration& config) {
-  return base::Contains(
+  return std::ranges::contains(
       GetEnabledConfigurations()->configs_by_decreasing_priority(), config);
 }
 

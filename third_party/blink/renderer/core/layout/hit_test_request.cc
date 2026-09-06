@@ -4,19 +4,20 @@
 
 #include "third_party/blink/renderer/core/layout/hit_test_request.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
+#include "third_party/blink/renderer/core/paint/paint_layer.h"
 
 namespace blink {
 
-void HitTestRequest::Trace(Visitor* visitor) const {
-  visitor->Trace(stop_node_);
+const PaintLayer* HitTestRequest::GetStopLayer() const {
+  if (stop_node_ && !stop_layer_) {
+    stop_layer_ = stop_node_->PaintingLayer();
+  }
+  return stop_layer_.Get();
 }
 
-ListBasedHitTestBehavior HitTestRequest::RunHitNodeCb(Node& node) const {
-  DCHECK(hit_node_cb_);
-  DOMNodeId node_id = (request_type_ & kHitNodeCbWithId)
-                          ? DOMNodeIds::IdForNode(&node)
-                          : kInvalidDOMNodeId;
-  return hit_node_cb_->Run(node, node_id);
+void HitTestRequest::Trace(Visitor* visitor) const {
+  visitor->Trace(stop_node_);
+  visitor->Trace(stop_layer_);
 }
 
 }  // namespace blink

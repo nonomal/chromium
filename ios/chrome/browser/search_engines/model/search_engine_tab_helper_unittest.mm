@@ -4,7 +4,8 @@
 
 #import "ios/chrome/browser/search_engines/model/search_engine_tab_helper.h"
 
-#import "base/containers/contains.h"
+#import <algorithm>
+
 #import "base/functional/bind.h"
 #import "base/strings/utf_string_conversions.h"
 #import "base/test/bind.h"
@@ -127,7 +128,7 @@ TEST_F(SearchEngineTabHelperTest, AddTemplateURLByOpenSearch) {
   // added and others remain untouched.
   TemplateURL* new_url = nullptr;
   for (TemplateURL* url : template_url_service()->GetTemplateURLs()) {
-    if (!base::Contains(old_urls, url)) {
+    if (!std::ranges::contains(old_urls, url)) {
       ASSERT_FALSE(new_url);
       new_url = url;
     }
@@ -177,7 +178,7 @@ TEST_F(SearchEngineTabHelperTest, AddTemplateURLBySearchableURL) {
   // added and others remain untouched.
   TemplateURL* new_url = nullptr;
   for (TemplateURL* url : template_url_service()->GetTemplateURLs()) {
-    if (!base::Contains(old_urls, url)) {
+    if (!std::ranges::contains(old_urls, url)) {
       ASSERT_FALSE(new_url);
       new_url = url;
     }
@@ -289,4 +290,12 @@ TEST_F(SearchEngineTabHelperIncognitoTest,
            old_urls.size() + 1;
   }));
   EXPECT_EQ(old_urls, template_url_service()->GetTemplateURLs());
+}
+
+// Tests that SearchEngineTabHelper does not crash when AddTemplateURLByOSDD is
+// called without a valid navigation item.
+TEST_F(SearchEngineTabHelperTest, AddTemplateURLByOSDDWithNullNavigationItem) {
+  GURL osdd_url = server_.GetURL(kOpenSearchXmlFilePath);
+  SearchEngineTabHelper::FromWebState(web_state())
+      ->AddTemplateURLByOSDD(GURL(), osdd_url);
 }

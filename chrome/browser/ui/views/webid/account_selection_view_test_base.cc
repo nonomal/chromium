@@ -69,6 +69,7 @@ AccountSelectionViewTestBase::CreateTestIdentityRequestAccount(
           std::string(kIdBase) + account_suffix, display_identifier,
           display_name, email, name,
           std::string(kGivenNameBase) + account_suffix, GURL(), "", "",
+          /*potentially_approved_origin_hashes=*/std::vector<std::string>(),
           /*login_hints=*/std::vector<std::string>(),
           /*domain_hints=*/std::vector<std::string>(),
           /*labels=*/std::vector<std::string>(), login_state,
@@ -252,8 +253,7 @@ void AccountSelectionViewTestBase::CheckHoverableAccountRow(
   EXPECT_TRUE(icon_view);
   EXPECT_EQ(icon_view->GetClassName(), "AccountImageView");
 
-  // Check for the IDP eTLD+1 in footer. This is not passed to the method but
-  // in our tests they all start with 'idp'.
+  // Check for the IDP eTLD+1 in footer.
   if (expect_idp) {
     EXPECT_TRUE(
         GetHoverButtonFooter(account_row)->GetText().starts_with(u"idp"));
@@ -263,7 +263,11 @@ void AccountSelectionViewTestBase::CheckHoverableAccountRow(
   EXPECT_EQ(
       icon_view->size(),
       is_modal_dialog
-          ? gfx::Size(webid::kModalAvatarSize, webid::kModalAvatarSize)
+          ? (expect_idp
+                 ? gfx::Size(
+                       webid::kModalAvatarSize + webid::kIdpBadgeOffset,
+                       webid::kModalAvatarSize + 2 * webid::kIdpBadgeOffset)
+                 : gfx::Size(webid::kModalAvatarSize, webid::kModalAvatarSize))
       // Height is increased by 2 * offset so that the account icon is centered.
       : expect_idp
           ? gfx::Size(webid::kDesiredAvatarSize + webid::kIdpBadgeOffset,

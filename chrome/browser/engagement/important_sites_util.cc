@@ -9,11 +9,8 @@
 #include <memory>
 #include <set>
 #include <string_view>
-#include <unordered_set>
 #include <utility>
 
-#include "base/containers/contains.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -34,6 +31,7 @@
 #include "components/site_engagement/core/mojom/site_engagement_details.mojom.h"
 #include "components/webapps/browser/banners/app_banner_settings_helper.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
 #include "third_party/blink/public/mojom/site_engagement/site_engagement.mojom.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -62,34 +60,14 @@ static const int kTimesIgnoredForSuppression = 3;
 // bookmarks on site engagement > 0, sort, and trim to kMaxBookmarks.
 static const int kMaxBookmarks = 5;
 
-// We need this to be a macro, as the histogram macros cache their pointers
-// after the first call, so when we change the uma name we check fail if we're
-// just a method.
-#define RECORD_UMA_FOR_IMPORTANT_REASON(uma_name, uma_count_name,              \
-                                        reason_bitfield)                       \
-  do {                                                                         \
-    int count = 0;                                                             \
-    int32_t bitfield = (reason_bitfield);                                      \
-    for (int i = 0; i < ImportantReason::REASON_BOUNDARY; i++) {               \
-      if ((bitfield >> i) & 1) {                                               \
-        count++;                                                               \
-        UMA_HISTOGRAM_ENUMERATION((uma_name), static_cast<ImportantReason>(i), \
-                                  ImportantReason::REASON_BOUNDARY);           \
-      }                                                                        \
-    }                                                                          \
-    UMA_HISTOGRAM_EXACT_LINEAR(                                                \
-        (uma_count_name), count,                                               \
-        static_cast<int>(ImportantReason::REASON_BOUNDARY));                   \
-  } while (0)
-
-void RecordIgnore(base::Value::Dict& dict) {
+void RecordIgnore(base::DictValue& dict) {
   int times_ignored = dict.FindInt(kNumTimesIgnoredName).value_or(0);
   dict.Set(kNumTimesIgnoredName, ++times_ignored);
   dict.Set(kTimeLastIgnored, base::Time::Now().InSecondsFSinceUnixEpoch());
 }
 
 // If we should suppress the item with the given dictionary ignored record.
-bool ShouldSuppressItem(base::Value::Dict& dict) {
+bool ShouldSuppressItem(base::DictValue& dict) {
   std::optional<double> last_ignored_time = dict.FindDouble(kTimeLastIgnored);
   if (last_ignored_time) {
     base::TimeDelta diff =
@@ -136,7 +114,7 @@ int GetScoreForReason(ImportantReason reason) {
   switch (reason) {
     case ImportantReason::ENGAGEMENT:
       return 1 << 0;
-    case ImportantReason::DURABLE:
+    case ImportantReason::PERSISTENT:
       return 1 << 1;
     case ImportantReason::BOOKMARKS:
       return 1 << 2;
@@ -173,16 +151,15 @@ bool CompareDescendingImportantInfo(
   return a.second.engagement_score > b.second.engagement_score;
 }
 
-std::unordered_set<std::string> GetSuppressedImportantDomains(
+absl::flat_hash_set<std::string> GetSuppressedImportantDomains(
     Profile* profile) {
   HostContentSettingsMap* map =
       HostContentSettingsMapFactory::GetForProfile(profile);
-  std::unordered_set<std::string> ignoring_domains;
+  absl::flat_hash_set<std::string> ignoring_domains;
   for (ContentSettingPatternSource& site :
        map->GetSettingsForOneType(ContentSettingsType::IMPORTANT_SITE_INFO)) {
     GURL origin(site.primary_pattern.ToString());
-    if (!origin.is_valid() ||
-        base::Contains(ignoring_domains, origin.GetHost())) {
+    if (!origin.is_valid() || ignoring_domains.contains(origin.GetHost())) {
       continue;
     }
 
@@ -283,8 +260,8 @@ void PopulateInfoMapWithBookmarks(
               score, blink::mojom::EngagementLevel::LOW);
         });
     // TODO(dmurph): Simplify this (and probably much more) once
-    // SiteEngagementService::GetAllDetails lands (crbug/703848), as that will
-    // allow us to remove most of these lookups and merging of signals.
+    // SiteEngagementService::GetAllDetails lands (crbug.com/41308686), as that
+    // will allow us to remove most of these lookups and merging of signals.
     std::sort(
         result_bookmarks.begin(), result_bookmarks.end(),
         [&engagement_map](const UrlAndTitle& a, const UrlAndTitle& b) {
@@ -358,7 +335,6 @@ std::set<std::string> ImportantSitesUtil::GetInstalledRegisterableDomains(
 std::vector<ImportantDomainInfo>
 ImportantSitesUtil::GetImportantRegisterableDomains(Profile* profile,
                                                     size_t max_results) {
-  SCOPED_UMA_HISTOGRAM_TIMER("Storage.ImportantSites.GenerationTime");
   std::map<std::string, ImportantDomainInfo> important_info;
   std::map<GURL, double> engagement_map;
 
@@ -370,31 +346,29 @@ ImportantSitesUtil::GetImportantRegisterableDomains(Profile* profile,
       ImportantReason::NOTIFICATIONS, &important_info);
 
   PopulateInfoMapWithContentTypeAllowed(
-      profile, ContentSettingsType::DURABLE_STORAGE, ImportantReason::DURABLE,
-      &important_info);
+      profile, ContentSettingsType::PERSISTENT_STORAGE,
+      ImportantReason::PERSISTENT, &important_info);
 
   PopulateInfoMapWithBookmarks(profile, engagement_map, &important_info);
 
-  std::unordered_set<std::string> suppressed_domains =
+  absl::flat_hash_set<std::string> suppressed_domains =
       GetSuppressedImportantDomains(profile);
 
-  std::vector<std::pair<std::string, ImportantDomainInfo>> items;
-  for (auto& item : important_info)
-    items.emplace_back(std::move(item));
+  std::vector<std::pair<std::string, ImportantDomainInfo>> items = {
+      std::make_move_iterator(important_info.begin()),
+      std::make_move_iterator(important_info.end())};
   std::sort(items.begin(), items.end(), &CompareDescendingImportantInfo);
 
   std::vector<ImportantDomainInfo> final_list;
-  for (std::pair<std::string, ImportantDomainInfo>& domain_info : items) {
+  final_list.reserve(std::max(max_results, items.size()));
+  for (auto& [domain, domain_info] : items) {
     if (final_list.size() >= max_results)
       return final_list;
-    if (suppressed_domains.find(domain_info.first) != suppressed_domains.end())
+    if (suppressed_domains.contains(domain)) {
       continue;
+    }
 
-    final_list.push_back(std::move(domain_info.second));
-    RECORD_UMA_FOR_IMPORTANT_REASON(
-        "Storage.ImportantSites.GeneratedReason",
-        "Storage.ImportantSites.GeneratedReasonCount",
-        domain_info.second.reason_bitfield);
+    final_list.push_back(std::move(domain_info));
   }
 
   return final_list;
@@ -403,21 +377,7 @@ ImportantSitesUtil::GetImportantRegisterableDomains(Profile* profile,
 void ImportantSitesUtil::RecordExcludedAndIgnoredImportantSites(
     Profile* profile,
     const std::vector<std::string>& excluded_sites,
-    const std::vector<int32_t>& excluded_sites_reason_bitfield,
-    const std::vector<std::string>& ignored_sites,
-    const std::vector<int32_t>& ignored_sites_reason_bitfield) {
-  // First, record the metrics for excluded and ignored sites.
-  for (int32_t reason_bitfield : excluded_sites_reason_bitfield) {
-    RECORD_UMA_FOR_IMPORTANT_REASON(
-        "Storage.ImportantSites.CBDChosenReason",
-        "Storage.ImportantSites.CBDChosenReasonCount", reason_bitfield);
-  }
-  for (int32_t reason_bitfield : ignored_sites_reason_bitfield) {
-    RECORD_UMA_FOR_IMPORTANT_REASON(
-        "Storage.ImportantSites.CBDIgnoredReason",
-        "Storage.ImportantSites.CBDIgnoredReasonCount", reason_bitfield);
-  }
-
+    const std::vector<std::string>& ignored_sites) {
   HostContentSettingsMap* map =
       HostContentSettingsMapFactory::GetForProfile(profile);
 
@@ -448,7 +408,7 @@ void ImportantSitesUtil::RecordExcludedAndIgnoredImportantSites(
   // We clear our ignore counter for sites that the user chose.
   for (const std::string& excluded_site : excluded_sites) {
     GURL origin("http://" + excluded_site);
-    base::Value::Dict dict;
+    base::DictValue dict;
     dict.Set(kNumTimesIgnoredName, 0);
     dict.Remove(kTimeLastIgnored);
     map->SetWebsiteSettingDefaultScope(origin, origin,

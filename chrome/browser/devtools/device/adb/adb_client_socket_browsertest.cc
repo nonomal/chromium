@@ -8,7 +8,6 @@
 #include "chrome/browser/devtools/device/adb/adb_device_provider.h"
 #include "chrome/browser/devtools/device/adb/mock_adb_server.h"
 #include "chrome/browser/devtools/device/devtools_android_bridge.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/browser_test.h"
@@ -30,7 +29,7 @@ class AdbClientSocketTest : public InProcessBrowserTest,
 
  public:
   void StartTest(base::RunLoop* loop) {
-    Profile* profile = browser()->profile();
+    Profile* profile = browser()->GetProfile();
     android_bridge_ = DevToolsAndroidBridge::Factory::GetForProfile(profile);
     AndroidDeviceManager::DeviceProviders device_providers;
     device_providers.push_back(new AdbDeviceProvider());
@@ -150,7 +149,7 @@ class AdbClientSocketTest : public InProcessBrowserTest,
 };
 
 // Combine all tests into one. Splitting up into multiple tests can be flaky
-// due to failure to bind a hardcoded port. crbug.com/566057
+// due to failure to bind a hardcoded port. crbug.com/41226327
 // The tests seems to be stable on Windows bots only:
 #if BUILDFLAG(IS_WIN)
 #define MAYBE_TestCombined TestCombined

@@ -4,9 +4,11 @@
 
 #include "components/webauthn/core/browser/passkey_model_utils.h"
 
+#include "base/rand_util.h"
 #include "components/sync/protocol/webauthn_credential_specifics.pb.h"
 #include "components/webauthn/core/browser/passkey_model.h"
 #include "crypto/keypair.h"
+#include "crypto/sign.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace webauthn::passkey_model_utils {
@@ -20,6 +22,18 @@ constexpr std::string_view kRpId = "example.com";
 static const PasskeyModel::UserEntity kTestUser(std::vector<uint8_t>{1, 2, 3},
                                                 "user@example.com",
                                                 "Example User");
+
+sync_pb::WebauthnCredentialSpecifics CreateValidPasskey() {
+  sync_pb::WebauthnCredentialSpecifics passkey;
+  passkey.set_rp_id("example.com");
+  passkey.set_sync_id(base::RandBytesAsString(kSyncIdLength));
+  passkey.set_credential_id(base::RandBytesAsString(kCredentialIdMinLength));
+  passkey.set_user_id(base::RandBytesAsString(kUserIdMaxLength));
+  passkey.set_private_key({1, 2, 3, 4});
+  passkey.set_user_name("username");
+  passkey.set_user_display_name("display_name");
+  return passkey;
+}
 
 // Test decryption of the `encrypted` case for
 // `WebAuthnCredentialSpecifics.encrypted_data`.
@@ -169,7 +183,7 @@ TEST(PasskeyModelUtilsTest, GeneratePasskeyAndEncryptSecrets) {
   auto ec_key = crypto::keypair::PrivateKey::FromPrivateKeyInfo(
       base::as_byte_span(encrypted_data.private_key()));
   ASSERT_TRUE(ec_key.has_value());
-  ASSERT_TRUE(ec_key->IsEc());
+  ASSERT_TRUE(ec_key->IsEcP256());
   std::vector<uint8_t> ec_key_pub = ec_key->ToSubjectPublicKeyInfo();
   EXPECT_EQ(ec_key_pub, public_key_spki_der);
 
@@ -211,7 +225,7 @@ TEST(PasskeyModelUtilsTest, GeneratePasskeyWithPRFAndEncryptSecrets) {
   auto ec_key = crypto::keypair::PrivateKey::FromPrivateKeyInfo(
       base::as_byte_span(encrypted_data.private_key()));
   ASSERT_TRUE(ec_key.has_value());
-  ASSERT_TRUE(ec_key->IsEc());
+  ASSERT_TRUE(ec_key->IsEcP256());
   std::vector<uint8_t> ec_key_pub = ec_key->ToSubjectPublicKeyInfo();
   EXPECT_EQ(ec_key_pub, public_key_spki_der);
 
@@ -286,6 +300,107 @@ TEST(PasskeyModelUtilsTest, PRFInputsEmptyVSMissing) {
                                    ExtensionInputData(input_data_11),
                                    &extension_output_data);
   EXPECT_EQ(extension_output_data.prf_result.size(), 64u);
+}
+
+TEST(PasskeyModelUtilsTest, ReturnsTrueForValidPasskey) {
+  sync_pb::WebauthnCredentialSpecifics passkey = CreateValidPasskey();
+
+  EXPECT_TRUE(IsPasskeyValid(passkey));
+  EXPECT_TRUE(IsGpmPasskeyValid(passkey));
+}
+
+TEST(PasskeyModelUtilsTest, ValidatesIncorrectSyncIdLength) {
+  sync_pb::WebauthnCredentialSpecifics passkey = CreateValidPasskey();
+  passkey.set_sync_id(base::RandBytesAsString(kSyncIdLength - 1));
+
+  EXPECT_FALSE(IsPasskeyValid(passkey));
+  EXPECT_FALSE(IsGpmPasskeyValid(passkey));
+}
+
+TEST(PasskeyModelUtilsTest, ValidatesRpIdPresence) {
+  sync_pb::WebauthnCredentialSpecifics passkey = CreateValidPasskey();
+  passkey.clear_rp_id();
+
+  EXPECT_FALSE(IsPasskeyValid(passkey));
+  EXPECT_FALSE(IsGpmPasskeyValid(passkey));
+}
+
+TEST(PasskeyModelUtilsTest, ValidatesCredentialIdLength) {
+  sync_pb::WebauthnCredentialSpecifics passkey = CreateValidPasskey();
+
+  passkey.set_credential_id(
+      base::RandBytesAsString(kCredentialIdMinLength - 1));
+  EXPECT_FALSE(IsPasskeyValid(passkey));
+  EXPECT_FALSE(IsGpmPasskeyValid(passkey));
+
+  passkey.set_credential_id(
+      base::RandBytesAsString(kCredentialIdMaxLength + 1));
+  EXPECT_FALSE(IsPasskeyValid(passkey));
+  EXPECT_FALSE(IsGpmPasskeyValid(passkey));
+
+  passkey.set_credential_id(
+      base::RandBytesAsString(kGpmCreatedCredentialIdLength + 1));
+  EXPECT_TRUE(IsPasskeyValid(passkey));
+  EXPECT_FALSE(IsGpmPasskeyValid(passkey));
+
+  passkey.set_credential_id(
+      base::RandBytesAsString(kGpmCreatedCredentialIdLength));
+  EXPECT_TRUE(IsPasskeyValid(passkey));
+  EXPECT_TRUE(IsGpmPasskeyValid(passkey));
+}
+
+TEST(PasskeyModelUtilsTest, ValidatesUserIdLength) {
+  sync_pb::WebauthnCredentialSpecifics passkey = CreateValidPasskey();
+
+  passkey.set_user_id(base::RandBytesAsString(kUserIdMaxLength + 1));
+  EXPECT_FALSE(IsPasskeyValid(passkey));
+  EXPECT_FALSE(IsGpmPasskeyValid(passkey));
+}
+
+TEST(PasskeyModelUtilsTest, ValidatesMissingEncryptedFields) {
+  sync_pb::WebauthnCredentialSpecifics passkey = CreateValidPasskey();
+
+  passkey.clear_private_key();
+  passkey.clear_encrypted();
+  EXPECT_FALSE(IsPasskeyValid(passkey));
+  EXPECT_FALSE(IsGpmPasskeyValid(passkey));
+}
+
+TEST(PasskeyModelUtilsTest, GenerateEcSignature_ValidP256) {
+  auto ec_p256_key = crypto::keypair::PrivateKey::GenerateEcP256();
+  std::vector<uint8_t> pkcs8 = ec_p256_key.ToPrivateKeyInfo();
+  const std::vector<uint8_t> data = {1, 2, 3, 4, 5};
+
+  std::optional<std::vector<uint8_t>> signature =
+      GenerateEcSignature(pkcs8, data);
+  ASSERT_TRUE(signature.has_value());
+
+  auto public_key = crypto::keypair::PublicKey::FromPrivateKey(ec_p256_key);
+  EXPECT_TRUE(crypto::sign::Verify(crypto::sign::SignatureKind::ECDSA_SHA256,
+                                   public_key, data, *signature));
+}
+
+TEST(PasskeyModelUtilsTest, GenerateEcSignature_NonP256Key) {
+  const std::vector<uint8_t> data = {1, 2, 3, 4, 5};
+
+  // RSA key should be rejected.
+  auto rsa_key = crypto::keypair::PrivateKey::GenerateRsa2048();
+  EXPECT_FALSE(
+      GenerateEcSignature(rsa_key.ToPrivateKeyInfo(), data).has_value());
+
+  // Ed25519 key should be rejected.
+  auto ed25519_key = crypto::keypair::PrivateKey::GenerateEd25519();
+  EXPECT_FALSE(
+      GenerateEcSignature(ed25519_key.ToPrivateKeyInfo(), data).has_value());
+
+  // EC P-384 key should be rejected (only P-256 is supported for ES256).
+  auto ec_p384_key = crypto::keypair::PrivateKey::GenerateEcP384();
+  EXPECT_FALSE(
+      GenerateEcSignature(ec_p384_key.ToPrivateKeyInfo(), data).has_value());
+
+  // Invalid bytes should be rejected.
+  const std::vector<uint8_t> invalid_bytes = {0x01, 0x02, 0x03};
+  EXPECT_FALSE(GenerateEcSignature(invalid_bytes, data).has_value());
 }
 
 }  // namespace

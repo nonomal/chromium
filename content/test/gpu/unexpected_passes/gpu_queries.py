@@ -32,7 +32,9 @@ CI_BUILDS_SUBQUERY = """\
           build_inv_id,
           value AS builder,
           partition_time,
-          RANK() OVER (PARTITION BY value ORDER BY partition_time DESC) AS rank_idx,
+          RANK() OVER (
+            PARTITION BY value ORDER BY partition_time DESC
+          ) AS rank_idx,
         FROM all_builds
       )
     SELECT
@@ -68,7 +70,9 @@ TRY_BUILDS_SUBQUERY = """\
           build_inv_id,
           value AS builder,
           partition_time,
-          RANK() OVER (PARTITION BY value ORDER BY partition_time DESC) AS rank_idx,
+          RANK() OVER (
+            PARTITION BY value ORDER BY partition_time DESC
+          ) AS rank_idx,
         FROM all_builds
       )
     SELECT
@@ -123,9 +127,7 @@ RESULTS_SUBQUERY = """\
       DATE(tr.partition_time) > DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
       AND exported.id = build_inv_id
       AND status != "SKIP"
-      AND REGEXP_CONTAINS(
-          test_id,
-          "gpu_tests\\\\.{suite}\\\\.")
+      AND STRUCT("gpu_test_class", "{suite_class}") IN UNNEST(tags)
   )"""
 
 # Selects the relevant columns from results that had either a Failure or a
@@ -141,7 +143,8 @@ ORDER BY builder_name DESC"""
 
 def _PartitionedSubmittedBuildsFor(project_view: str) -> str:
   return queries_module.PARTITIONED_SUBMITTED_BUILDS_TEMPLATE.format(
-      project_view=project_view)
+    project_view=project_view
+  )
 
 
 # Gets the Buildbucket IDs for all the public trybots that:
@@ -163,31 +166,36 @@ INTERNAL_TRY_SUBMITTED_BUILDS_SUBQUERY = f"""\
 
 
 class GpuBigQueryQuerier(queries_module.BigQueryQuerier):
-
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
 
     name_mapping = gpu_integration_test.GenerateTestNameMapping()
-    self._suite_class = name_mapping[self._suite]
-    # The suite name we use for identification (return value of Name()) is not
-    # the same as the one used by ResultDB (Python module), so convert here.
-    self._suite = self._suite_class.__module__.split('.')[-1]
+    _suite_class = name_mapping[self._suite]
+    # __qualname__ returns the same value as __name__, so we need to manually
+    # construct the qualified name.
+    self._qualified_class_name = (
+      f'{_suite_class.__module__}.{_suite_class.__name__}'
+    )
 
   def _CiBuildsFor(self, project: str) -> str:
     """Helper function to generate a CI builds subquery."""
-    return CI_BUILDS_SUBQUERY.format(project=project,
-                                     num_builds=self._num_samples)
+    return CI_BUILDS_SUBQUERY.format(
+      project=project, num_builds=self._num_samples
+    )
 
   def _TryBuildsFor(self, project: str) -> str:
     """Helper function to generate a try builds subquery."""
-    return TRY_BUILDS_SUBQUERY.format(project=project,
-                                      num_builds=self._num_samples)
+    return TRY_BUILDS_SUBQUERY.format(
+      project=project, num_builds=self._num_samples
+    )
 
   def _ResultsFor(self, project: str, ci_or_try: str) -> str:
     """Helper function to generate a results subquery."""
-    return RESULTS_SUBQUERY.format(project=project,
-                                   ci_or_try=ci_or_try,
-                                   suite=self._suite)
+    return RESULTS_SUBQUERY.format(
+      project=project,
+      ci_or_try=ci_or_try,
+      suite_class=self._qualified_class_name,
+    )
 
   def _GetPublicCiQuery(self) -> str:
     return f"""\
@@ -224,7 +232,8 @@ WITH
 """
 
   def _GetRelevantExpectationFilesForQueryResult(
-      self, _: queries_module.QueryResult) -> Optional[Iterable[str]]:
+    self, _: queries_module.QueryResult
+  ) -> Optional[Iterable[str]]:
     # Only one expectation file is ever used for the GPU tests, so just use
     # whichever one we've read in.
     return None

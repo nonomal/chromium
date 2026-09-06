@@ -30,8 +30,9 @@ PrefetchProxyConfigurator::MaybeCreatePrefetchProxyConfigurator(
     return nullptr;
   }
 
-  if (!proxy_url.is_valid())
+  if (!proxy_url.is_valid()) {
     return nullptr;
+  }
 
   return std::make_unique<PrefetchProxyConfigurator>(proxy_url, api_key);
 }
@@ -41,7 +42,7 @@ PrefetchProxyConfigurator::PrefetchProxyConfigurator(const GURL& proxy_url,
     : prefetch_proxy_chain_(net::GetSchemeFromUriScheme(proxy_url.GetScheme()),
                             net::HostPortPair::FromURL(proxy_url)),
       clock_(base::DefaultClock::GetInstance()) {
-  DCHECK(proxy_url.is_valid());
+  CHECK(proxy_url.is_valid(), base::NotFatalUntil::M159);
 
   std::string server_experiment_group = PrefetchProxyServerExperimentGroup();
   std::string header_value =
@@ -124,7 +125,7 @@ void PrefetchProxyConfigurator::OnTunnelHeadersReceived(
     const net::ProxyChain& proxy_chain,
     uint64_t chain_index,
     const scoped_refptr<net::HttpResponseHeaders>& response_headers) {
-  DCHECK(response_headers);
+  CHECK(response_headers, base::NotFatalUntil::M159);
 
   if (proxy_chain != prefetch_proxy_chain_) {
     return;
@@ -168,11 +169,11 @@ void PrefetchProxyConfigurator::OnTunnelProxyConnectionError(
     // Pick a random value between 1-5 mins if the proxy didn't give us a
     // Retry-After value. The randomness will help ensure there is no sudden
     // wave of requests following a proxy error.
-    retry_proxy_at = clock_->Now() + base::Seconds(base::RandInt(
+    retry_proxy_at = clock_->Now() + base::Seconds(base::RandIntInclusive(
                                          base::Time::kSecondsPerMinute,
                                          5 * base::Time::kSecondsPerMinute));
   }
-  DCHECK(!retry_proxy_at.is_null());
+  CHECK(!retry_proxy_at.is_null(), base::NotFatalUntil::M159);
 
   // If there is already a value in |prefetch_proxy_not_available_until_|,
   // probably due to some race, take the max.
@@ -182,7 +183,7 @@ void PrefetchProxyConfigurator::OnTunnelProxyConnectionError(
   } else {
     prefetch_proxy_not_available_until_ = retry_proxy_at;
   }
-  DCHECK(prefetch_proxy_not_available_until_);
+  CHECK(prefetch_proxy_not_available_until_, base::NotFatalUntil::M159);
 
   // TODO(crbug.com/40152136): Consider persisting to prefs.
 }

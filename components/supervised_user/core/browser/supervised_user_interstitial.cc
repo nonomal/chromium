@@ -20,6 +20,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "components/supervised_user/core/browser/family_link_settings_service.h"
 #include "components/supervised_user/core/browser/supervised_user_error_page.h"
 #include "components/supervised_user/core/browser/supervised_user_service.h"
 #include "components/supervised_user/core/browser/supervised_user_utils.h"
@@ -35,13 +36,14 @@ namespace supervised_user {
 std::unique_ptr<SupervisedUserInterstitial> SupervisedUserInterstitial::Create(
     std::unique_ptr<WebContentHandler> web_content_handler,
     SupervisedUserService& supervised_user_service,
-    const GURL& url,
-    const std::u16string& supervised_user_name,
-    FilteringBehaviorReason reason) {
+    FamilyLinkSettingsService& family_link_settings_service,
+    WebFilteringResult filtering_result,
+    const std::u16string& supervised_user_name) {
   std::unique_ptr<SupervisedUserInterstitial> interstitial =
       base::WrapUnique(new SupervisedUserInterstitial(
-          std::move(web_content_handler), supervised_user_service, url,
-          supervised_user_name, reason));
+          std::move(web_content_handler), supervised_user_service,
+          family_link_settings_service, filtering_result,
+          supervised_user_name));
 
   interstitial->web_content_handler()->CleanUpInfoBarOnMainFrame();
   // Caller is responsible for deleting the interstitial.
@@ -51,18 +53,14 @@ std::unique_ptr<SupervisedUserInterstitial> SupervisedUserInterstitial::Create(
 SupervisedUserInterstitial::SupervisedUserInterstitial(
     std::unique_ptr<WebContentHandler> web_content_handler,
     SupervisedUserService& supervised_user_service,
-    const GURL& url,
-    const std::u16string& supervised_user_name,
-    FilteringBehaviorReason reason)
+    FamilyLinkSettingsService& family_link_settings_service,
+    WebFilteringResult filtering_result,
+    const std::u16string& supervised_user_name)
     : supervised_user_service_(supervised_user_service),
+      family_link_settings_service_(family_link_settings_service),
       web_content_handler_(std::move(web_content_handler)),
-      url_(url),
-      supervised_user_name_(supervised_user_name),
-      filtering_behavior_reason_(reason) {
-  CHECK(supervised_user_service.GetURLFilter());
-  url_formatter_ = std::make_unique<UrlFormatter>(
-      *supervised_user_service.GetURLFilter(), reason);
-}
+      filtering_result_(filtering_result),
+      supervised_user_name_(supervised_user_name) {}
 
 SupervisedUserInterstitial::~SupervisedUserInterstitial() {
   web_content_handler_->MaybeCloseLocalApproval();
@@ -108,7 +106,9 @@ void SupervisedUserInterstitial::RequestUrlAccessRemote(
   OutputRequestPermissionSourceMetric();
 
   supervised_user_service_->remote_web_approvals_manager().RequestApproval(
-      url_, *url_formatter_.get(), std::move(callback));
+      family_link_settings_service_->GetEffectiveUrlToUnblock(
+          filtering_result_),
+      std::move(callback));
 }
 
 void SupervisedUserInterstitial::RequestUrlAccessLocal(
@@ -122,8 +122,9 @@ void SupervisedUserInterstitial::RequestUrlAccessLocal(
       << "Supervised user name for local web approval request should not be "
          "empty";
   web_content_handler_->RequestLocalApproval(
-      url_, supervised_user_name_, *url_formatter_.get(),
-      filtering_behavior_reason_, std::move(callback));
+      family_link_settings_service_->GetEffectiveUrlToUnblock(
+          filtering_result_),
+      filtering_result_, supervised_user_name_, std::move(callback));
 }
 
 #if BUILDFLAG(IS_ANDROID)

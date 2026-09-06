@@ -101,10 +101,11 @@ Value LocationPath::Evaluate(EvaluationContext& evaluation_context) const {
   // logical treatment of where you would expect the "root" to be.
   Node* context = evaluation_context.node;
   if (absolute_ && context->getNodeType() != Node::kDocumentNode) {
-    if (context->isConnected())
+    if (context->isConnected() && !context->IsInShadowTree()) {
       context = context->ownerDocument();
-    else
+    } else {
       context = &NodeTraversal::HighestAncestorOrSelf(*context);
+    }
   }
 
   NodeSet* nodes = NodeSet::Create();

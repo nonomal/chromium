@@ -4,6 +4,7 @@
 
 import 'chrome://resources/cr_elements/cr_collapse/cr_collapse.js';
 import 'chrome://resources/cr_elements/cr_hidden_style.css.js';
+import 'chrome://resources/cr_elements/cr_scrollable.css.js';
 import 'chrome://resources/cr_elements/cr_shared_style.css.js';
 import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
 import './advanced_options_settings.js';
@@ -26,13 +27,10 @@ import './print_preview_vars.css.js';
 import './scaling_settings.js';
 import '/strings.m.js';
 
-
-import {CrContainerShadowMixin} from 'chrome://resources/cr_elements/cr_container_shadow_mixin.js';
 import {WebUiListenerMixin} from 'chrome://resources/cr_elements/web_ui_listener_mixin.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {DarkModeMixin} from '../dark_mode_mixin.js';
-
 import type {Destination} from '../data/destination_cros.js';
 import type {Settings} from '../data/model.js';
 import type {Error} from '../data/state.js';
@@ -54,8 +52,8 @@ export interface PrintPreviewSidebarElement {
   };
 }
 
-const PrintPreviewSidebarElementBase = CrContainerShadowMixin(
-    WebUiListenerMixin(SettingsMixin(DarkModeMixin(PolymerElement))));
+const PrintPreviewSidebarElementBase =
+    WebUiListenerMixin(SettingsMixin(DarkModeMixin(PolymerElement)));
 
 export class PrintPreviewSidebarElement extends PrintPreviewSidebarElementBase {
   static get is() {
@@ -140,21 +138,21 @@ export class PrintPreviewSidebarElement extends PrintPreviewSidebarElementBase {
     };
   }
 
-  controlsManaged: boolean;
-  destination: Destination|null;
-  destinationState: DestinationState;
-  error: Error;
-  isPdf: boolean;
-  pageCount: number;
-  state: State;
-  private controlsDisabled_: boolean;
-  maxSheets: number;
-  private firstLoad_: boolean;
-  private isInAppKioskMode_: boolean;
-  private settingsExpandedByUser_: boolean;
-  private sheetCount_: number;
-  private shouldShowMoreSettings_: boolean;
-  private isPinValid_: boolean;
+  declare controlsManaged: boolean;
+  declare destination: Destination|null;
+  declare destinationState: DestinationState;
+  declare error: Error;
+  declare isPdf: boolean;
+  declare pageCount: number;
+  declare state: State;
+  declare private controlsDisabled_: boolean;
+  declare maxSheets: number;
+  declare private firstLoad_: boolean;
+  declare private isInAppKioskMode_: boolean;
+  declare private settingsExpandedByUser_: boolean;
+  declare private sheetCount_: number;
+  declare private shouldShowMoreSettings_: boolean;
+  declare private isPinValid_: boolean;
 
   /**
    * @param defaultPrinter The system default printer ID.

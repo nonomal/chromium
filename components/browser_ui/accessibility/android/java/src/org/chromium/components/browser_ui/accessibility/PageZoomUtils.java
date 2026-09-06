@@ -11,6 +11,7 @@ import static org.chromium.content_public.browser.HostZoomMap.getSystemFontScale
 import org.chromium.base.ContextUtils;
 import org.chromium.base.MathUtils;
 import org.chromium.base.ResettersForTesting;
+import org.chromium.base.TriState;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.content_public.browser.BrowserContextHandle;
@@ -20,6 +21,7 @@ import org.chromium.content_public.browser.HostZoomMap;
 import org.chromium.ui.base.DeviceFormFactor;
 
 import java.util.Arrays;
+import java.util.Locale;
 
 /**
  * General purpose utils class for page zoom feature. This is for methods that are shared by both
@@ -65,7 +67,7 @@ public class PageZoomUtils {
     // default zoom value, (e.g. 0.03 = range of +/- 3%).
     private static final double DEFAULT_ZOOM_LEVEL_SNAP_RANGE = 0.03;
 
-    private static @Nullable Boolean sShouldShowMenuItemForTesting;
+    private static @TriState int sShouldShowMenuItemForTesting;
 
     /**
      * Bars have values 0 to 100 by default. For simplicity, we will keep these values and convert
@@ -236,7 +238,23 @@ public class PageZoomUtils {
      * @return boolean
      */
     public static boolean shouldShowZoomMenuItem() {
-        if (sShouldShowMenuItemForTesting != null) return sShouldShowMenuItemForTesting;
+        return shouldShowZoomMenuItem(null);
+    }
+
+    /**
+     * Returns true if the Zoom AppMenu item should be shown, false otherwise.
+     *
+     * <p>If there is a current user choice set in Accessibility Settings, respect and return the
+     * user setting. Otherwise, return true if there is an OS level font size set or if the user has
+     * ever set a custom zoom level for any site.
+     *
+     * @param context BrowserContextHandle to check for custom zoom levels.
+     * @return boolean
+     */
+    public static boolean shouldShowZoomMenuItem(@Nullable BrowserContextHandle context) {
+        if (sShouldShowMenuItemForTesting != TriState.NOT_SET) {
+            return sShouldShowMenuItemForTesting == TriState.TRUE;
+        }
         // Always respect the user's choice if the user has set this in Accessibility Settings.
         if (hasUserSetShouldAlwaysShowZoomMenuItemOption()) {
             if (shouldAlwaysShowZoomMenuItem()) {
@@ -260,9 +278,18 @@ public class PageZoomUtils {
             return true;
         }
 
-        if (AccessibilityFeatureMap.sAndroidZoomIndicator.isEnabled()
-                && DeviceFormFactor.isNonMultiDisplayContextOnTablet(
-                        ContextUtils.getApplicationContext())) {
+        // If the user has ever set a custom zoom level, show the menu item.
+        // This is restricted to LFF (Tablets) as UX has not approved this for mobile/phones.
+        if (DeviceFormFactor.isNonMultiDisplayContextOnTablet(ContextUtils.getApplicationContext())
+                && context != null
+                && !HostZoomMap.getAllHostZoomLevels(context).isEmpty()) {
+            PageZoomUma.logAppMenuEnabledStateHistogram(
+                    PageZoomUma.AccessibilityPageZoomAppMenuEnabledState.USER_HAS_CUSTOM_ZOOM);
+            return true;
+        }
+
+        if (DeviceFormFactor.isNonMultiDisplayContextOnTablet(
+                ContextUtils.getApplicationContext())) {
             // Default to true for Lff
             PageZoomUma.logAppMenuEnabledStateHistogram(
                     PageZoomUma.AccessibilityPageZoomAppMenuEnabledState.FORM_FACTOR_ENABLED);
@@ -331,26 +358,17 @@ public class PageZoomUtils {
 
     /**
      * Get the index of the next closest zoom factor in the cached available values in the given
-     * direction from the current zoom factor.
-     * Current zoom factor must be within range of possible zoom factors.
-     * @param decrease boolean      True if the next index should be decreasing from the current,
-     *         false otherwise
-     * @param currentZoomFactor double      The current zoom factor for which to search
-     * @throws IllegalArgumentException if current zoom factor is <= the smallest cached zoom factor
-     *         or >= the largest cached zoom factor
-     * @return int      The index of the next closest zoom factor
+     * direction from the current zoom factor. Current zoom factor must be within range of possible
+     * zoom factors.
+     *
+     * @param decrease boolean True if the next index should be decreasing from the current, false
+     *     otherwise
+     * @param currentZoomFactor double The current zoom factor for which to search
+     * @return int The index of the next closest zoom factor
      */
     public static int getNextIndex(boolean decrease, double currentZoomFactor) {
-        // Assert valid current zoom factor
-        if (decrease && currentZoomFactor <= AVAILABLE_ZOOM_FACTORS[0]) {
-            throw new IllegalArgumentException(
-                    "currentZoomFactor should be greater than " + AVAILABLE_ZOOM_FACTORS[0]);
-        } else if (!decrease
-                && currentZoomFactor >= AVAILABLE_ZOOM_FACTORS[AVAILABLE_ZOOM_FACTORS.length - 1]) {
-            throw new IllegalArgumentException(
-                    "currentZoomFactor should be less than "
-                            + AVAILABLE_ZOOM_FACTORS[AVAILABLE_ZOOM_FACTORS.length - 1]);
-        }
+        // Round to match the precision of AVAILABLE_ZOOM_FACTORS to avoid precision issues.
+        currentZoomFactor = MathUtils.roundTwoDecimalPlaces(currentZoomFactor);
 
         // BinarySearch will return the index of the first value equal to the given value.
         // Otherwise it will return (-(insertion point) - 1).
@@ -375,6 +393,10 @@ public class PageZoomUtils {
             if (decrease) --index;
         }
 
+        // Clamp values to the available zoom factors
+        if (index < 0) index = 0;
+        if (index >= AVAILABLE_ZOOM_FACTORS.length) index = AVAILABLE_ZOOM_FACTORS.length - 1;
+
         return index;
     }
 
@@ -396,12 +418,43 @@ public class PageZoomUtils {
      *
      * @param isEnabled Should show the menu item or not.
      */
-    public static void setShouldShowMenuItemForTesting(@Nullable Boolean isEnabled) {
+    public static void setShouldShowMenuItemForTesting(@TriState int isEnabled) {
         sShouldShowMenuItemForTesting = isEnabled;
-        ResettersForTesting.register(() -> sShouldShowMenuItemForTesting = null);
+        ResettersForTesting.register(() -> sShouldShowMenuItemForTesting = TriState.NOT_SET);
     }
 
     public static long getReadableZoomLevel(double zoomFactor) {
         return Math.round(100 * convertZoomFactorToZoomLevel(zoomFactor));
+    }
+
+    /**
+     * Returns true if the zoom level can be decreased from the current zoom factor.
+     *
+     * @param zoomFactor The current zoom factor.
+     * @return boolean
+     */
+    public static boolean canDecreaseZoom(double zoomFactor) {
+        return MathUtils.roundTwoDecimalPlaces(zoomFactor) > AVAILABLE_ZOOM_FACTORS[0];
+    }
+
+    /**
+     * Returns true if the zoom level can be increased from the current zoom factor.
+     *
+     * @param zoomFactor The current zoom factor.
+     * @return boolean
+     */
+    public static boolean canIncreaseZoom(double zoomFactor) {
+        return MathUtils.roundTwoDecimalPlaces(zoomFactor)
+                < AVAILABLE_ZOOM_FACTORS[AVAILABLE_ZOOM_FACTORS.length - 1];
+    }
+
+    /**
+     * Formats the zoom factor as a percentage string (e.g. "100%").
+     *
+     * @param zoomFactor The zoom factor to format.
+     * @return String The formatted percentage string.
+     */
+    public static String formatZoomPercentage(double zoomFactor) {
+        return String.format(Locale.US, "%d%%", getReadableZoomLevel(zoomFactor));
     }
 }

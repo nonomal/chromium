@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_WEB_APPLICATIONS_WEB_APP_UI_UTILS_H_
 #define CHROME_BROWSER_UI_WEB_APPLICATIONS_WEB_APP_UI_UTILS_H_
 
+#include "base/memory/weak_ptr.h"
 #include "components/webapps/common/web_app_id.h"
 
 namespace content {
@@ -12,6 +13,11 @@ class WebContents;
 }
 
 class Profile;
+class BrowserWindowInterface;
+
+namespace ui {
+class ImageModel;
+}
 
 namespace web_app {
 
@@ -32,7 +38,7 @@ bool HandleAppManagementLinkClickedInPageInfo(
 // Handles a click on the 'manage [permissions]' link in the sub apps install
 // dialog by opening the app management page for the parent app.
 void OpenAppSettingsForParentApp(const webapps::AppId& parent_app_id,
-                                 Profile* profile);
+                                 base::WeakPtr<Profile> profile);
 
 // Handles a click on the 'Go to app settings' button in the Related installed
 // applications section of the page specific site data dialog.
@@ -46,6 +52,17 @@ void OpenAppSettingsForInstalledRelatedApp(const webapps::AppId& app_id,
 // not launched as an app.
 // std::optional<webapps::AppId> GetAppIdForAppManagementLinkInPageInfo(
 //    content::WebContents* web_contents);
+
+// Returns the appropriate menu label for the IDC_INSTALL_PWA command if
+// available.
+std::u16string GetInstallPWALabel(BrowserWindowInterface* browser);
+
+// Returns the appropriate icon for the IDC_INSTALL_PWA command if available.
+ui::ImageModel GetInstallPWAIcon(BrowserWindowInterface* browser);
+
+// Returns the appropriate menu label for the IDC_OPEN_IN_PWA_WINDOW command if
+// available.
+std::u16string GetOpenPWALabel(BrowserWindowInterface* browser);
 
 }  // namespace web_app
 

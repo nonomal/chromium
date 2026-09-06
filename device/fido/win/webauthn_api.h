@@ -54,7 +54,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) WinWebAuthnApi {
 
   // Returns whether the API is available on this system. If this returns
   // false, none of the other methods on this instance may be called.
-  virtual bool IsAvailable() const = 0;
+  virtual bool IsAvailable() = 0;
 
   // Returns whether the API is available and supports the following methods:
   //   |GetPlatformCredentialList|
@@ -134,7 +134,7 @@ AuthenticatorGetAssertionBlocking(WinWebAuthnApi* webauthn_api,
 // any.
 std::pair<bool, std::vector<DiscoverableCredentialMetadata>>
 AuthenticatorEnumerateCredentialsBlocking(WinWebAuthnApi* webauthn_api,
-                                          std::u16string_view rp_id,
+                                          std::optional<std::u16string> rp_id,
                                           bool is_incognito);
 
 }  // namespace device

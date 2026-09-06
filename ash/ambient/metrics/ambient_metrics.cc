@@ -4,6 +4,7 @@
 
 #include "ash/ambient/metrics/ambient_metrics.h"
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -15,7 +16,6 @@
 #include "ash/public/cpp/ash_web_view.h"
 #include "ash/webui/personalization_app/mojom/personalization_app.mojom-shared.h"
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
@@ -69,24 +69,10 @@ std::string GetHistogramName(const char* prefix, bool tablet_mode) {
   return histogram;
 }
 
-void RecordEngagementTime(const std::string& histogram_name,
-                          base::TimeDelta engagement_time) {
-  base::UmaHistogramCustomTimes(
-      histogram_name,
-      /*sample=*/engagement_time,
-      // There is no value in bucketing engagement times that are on the order
-      // of milliseconds. A 1 second minimum is imposed here but not in the
-      // metric above for legacy reasons (the metric above was already pushed
-      // to the field and established before this change was made).
-      /*min=*/base::Seconds(1),
-      /*max=*/base::Hours(24),
-      /*buckets=*/kAmbientModeElapsedTimeHistogramBuckets);
-}
-
 // Retrieves the the JSON dictionary in the `web_view`'s URL fragment.
 void GetAmbientVideoPlaybackMetrics(
     AshWebView* web_view,
-    base::OnceCallback<void(base::Value::Dict)> completion_cb) {
+    base::OnceCallback<void(base::DictValue)> completion_cb) {
   CHECK(web_view);
   CHECK(completion_cb);
   // The URL fragment identifier is used as a way of communicating the playback
@@ -99,7 +85,7 @@ void GetAmbientVideoPlaybackMetrics(
     // and it's still unclear whether playback has started successfully or
     // failed.
     DVLOG(2) << "Ambient video still loading";
-    std::move(completion_cb).Run(base::Value::Dict());
+    std::move(completion_cb).Run(base::DictValue());
     return;
   }
   std::optional<base::Value> result = base::JSONReader::Read(
@@ -108,19 +94,19 @@ void GetAmbientVideoPlaybackMetrics(
   // enough to crash the whole process over.
   if (!result.has_value()) {
     LOG(ERROR) << "JSON parsing failed";
-    std::move(completion_cb).Run(base::Value::Dict());
+    std::move(completion_cb).Run(base::DictValue());
     return;
   }
   if (!result->is_dict()) {
     LOG(ERROR) << "Expected JSON dictionary for metrics";
-    std::move(completion_cb).Run(base::Value::Dict());
+    std::move(completion_cb).Run(base::DictValue());
     return;
   }
   std::move(completion_cb).Run(std::move(*result).TakeDict());
 }
 
 AmbientVideoSessionStatus ParseAmbientVideoSessionStatus(
-    const base::Value::Dict& playback_metrics) {
+    const base::DictValue& playback_metrics) {
   std::optional<bool> playback_started =
       playback_metrics.FindBool(kVideoFieldPlaybackStarted);
   if (playback_started.has_value()) {
@@ -137,7 +123,7 @@ AmbientVideoSessionStatus ParseAmbientVideoSessionStatus(
 // After the `playback_metrics` have been parsed from the URL fragment:
 void CompleteGetAmbientVideoSessionStatus(
     base::OnceCallback<void(AmbientVideoSessionStatus)> completion_cb,
-    base::Value::Dict playback_metrics) {
+    base::DictValue playback_metrics) {
   CHECK(completion_cb);
   std::move(completion_cb)
       .Run(ParseAmbientVideoSessionStatus(playback_metrics));
@@ -158,7 +144,7 @@ void RecordAmbientModeVideoSessionStatusInternal(
 // After the `playback_metrics` have been parsed from the URL fragment:
 void RecordAmbientModeVideoSmoothnessInternal(
     const AmbientUiSettings& ui_settings,
-    base::Value::Dict playback_metrics) {
+    base::DictValue playback_metrics) {
   CHECK_EQ(ui_settings.theme(),
            personalization_app::mojom::AmbientTheme::kVideo);
   if (ParseAmbientVideoSessionStatus(playback_metrics) !=
@@ -203,7 +189,7 @@ AmbientModePhotoSource AmbientSettingsToPhotoSource(
     return AmbientModePhotoSource::kGooglePhotosEmpty;
   }
 
-  bool has_recent_highlights = base::Contains(
+  bool has_recent_highlights = std::ranges::contains(
       settings.selected_album_ids, ash::kAmbientModeRecentHighlightsAlbumId);
 
   if (has_recent_highlights && settings.selected_album_ids.size() == 1) {
@@ -217,48 +203,19 @@ AmbientModePhotoSource AmbientSettingsToPhotoSource(
   return AmbientModePhotoSource::kGooglePhotosPersonalAlbum;
 }
 
-void RecordAmbientModeActivation(AmbientUiMode ui_mode, bool tablet_mode) {
-  base::UmaHistogramEnumeration(
-      GetHistogramName("Ash.AmbientMode.Activation", tablet_mode), ui_mode);
-}
-
 void RecordAmbientModeTimeElapsed(base::TimeDelta time_delta,
-                                  bool tablet_mode,
-                                  const AmbientUiSettings& ui_settings) {
+                                  bool tablet_mode) {
   base::UmaHistogramCustomTimes(
       /*name=*/GetHistogramName("Ash.AmbientMode.EngagementTime", tablet_mode),
       /*sample=*/time_delta,
       /*min=*/base::Hours(0),
       /*max=*/base::Hours(24),
       /*buckets=*/kAmbientModeElapsedTimeHistogramBuckets);
-
-  RecordEngagementTime(
-      base::StrCat({"Ash.AmbientMode.EngagementTime.", ui_settings.ToString()}),
-      time_delta);
 }
 
 void RecordAmbientModeTopicSource(
     const ash::personalization_app::mojom::TopicSource topic_source) {
   base::UmaHistogramEnumeration("Ash.AmbientMode.TopicSource", topic_source);
-}
-
-void RecordAmbientModeTotalNumberOfAlbums(int num_albums) {
-  base::UmaHistogramCounts100("Ash.AmbientMode.TotalNumberOfAlbums",
-                              num_albums);
-}
-
-void RecordAmbientModeSelectedNumberOfAlbums(int num_albums) {
-  base::UmaHistogramCounts100("Ash.AmbientMode.SelectedNumberOfAlbums",
-                              num_albums);
-}
-
-void RecordAmbientModeAnimationSmoothness(
-    int smoothness,
-    const AmbientUiSettings& ui_settings) {
-  base::UmaHistogramPercentage(
-      base::StrCat({"Ash.AmbientMode.LottieAnimationSmoothness.",
-                    ui_settings.ToString()}),
-      smoothness);
 }
 
 void RecordAmbientModeStartupTime(base::TimeDelta startup_time,
@@ -298,67 +255,6 @@ void RecordAmbientModeVideoSmoothness(AshWebView* web_view,
   GetAmbientVideoPlaybackMetrics(
       web_view,
       base::BindOnce(&RecordAmbientModeVideoSmoothnessInternal, ui_settings));
-}
-
-AmbientOrientationMetricsRecorder::AmbientOrientationMetricsRecorder(
-    views::View* root_rendering_view,
-    const AmbientUiSettings& ui_settings)
-    : settings_(ui_settings.ToString()) {
-  root_rendering_view_observer_.Observe(root_rendering_view);
-  // Capture initial orientation with manual call.
-  OnViewBoundsChanged(root_rendering_view);
-}
-
-AmbientOrientationMetricsRecorder::~AmbientOrientationMetricsRecorder() {
-  SaveCurrentOrientationDuration();
-  if (!total_portrait_duration_.is_zero()) {
-    RecordEngagementTime(
-        base::StringPrintf("Ash.AmbientMode.EngagementTime.%s.Portrait",
-                           settings_.data()),
-        total_portrait_duration_);
-  }
-  if (!total_landscape_duration_.is_zero()) {
-    RecordEngagementTime(
-        base::StringPrintf("Ash.AmbientMode.EngagementTime.%s.Landscape",
-                           settings_.data()),
-        total_landscape_duration_);
-  }
-}
-
-void AmbientOrientationMetricsRecorder::OnViewBoundsChanged(
-    views::View* observed_view) {
-  DCHECK(observed_view);
-  gfx::Rect content_bounds = observed_view->GetContentsBounds();
-  if (content_bounds.IsEmpty()) {
-    DVLOG(4) << "Initial view layout has not occurred yet. Ignoring empty view "
-                "bounds";
-    return;
-  }
-
-  bool new_orientation_is_portrait =
-      content_bounds.width() < content_bounds.height();
-  if (current_orientation_is_portrait_.has_value() &&
-      *current_orientation_is_portrait_ == new_orientation_is_portrait) {
-    return;
-  }
-
-  SaveCurrentOrientationDuration();
-  current_orientation_is_portrait_.emplace(new_orientation_is_portrait);
-  // Effectively stops the existing timer and starts new one.
-  current_orientation_timer_.emplace();
-}
-
-void AmbientOrientationMetricsRecorder::SaveCurrentOrientationDuration() {
-  if (!current_orientation_is_portrait_.has_value() ||
-      !current_orientation_timer_.has_value()) {
-    return;
-  }
-
-  if (*current_orientation_is_portrait_) {
-    total_portrait_duration_ += current_orientation_timer_->Elapsed();
-  } else {
-    total_landscape_duration_ += current_orientation_timer_->Elapsed();
-  }
 }
 
 }  // namespace ambient

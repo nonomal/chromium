@@ -13,7 +13,6 @@
 
 #include "ash/constants/ash_features.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/observer_list.h"
 #include "base/strings/string_util.h"
@@ -108,7 +107,7 @@ void MessageCenterImpl::RemoveObserver(MessageCenterObserver* observer) {
 
 void MessageCenterImpl::AddNotificationBlocker(NotificationBlocker* blocker) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  if (base::Contains(blockers_, blocker)) {
+  if (std::ranges::contains(blockers_, blocker)) {
     return;
   }
 
@@ -662,9 +661,6 @@ void MessageCenterImpl::RemoveNotificationsIfOverLimit() {
              notification_count - GetTargetCountAfterRemoval())) {
       RemoveNotification(id, /*by_user=*/false);
     }
-
-    base::UmaHistogramBoolean("Ash.Notification.RemovedByLimitEnforcement",
-                              true);
   }
 }
 

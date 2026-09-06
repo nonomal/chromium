@@ -8,7 +8,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "components/viz/common/resources/release_callback.h"
 #include "components/viz/common/resources/resource_id.h"
 #include "components/viz/common/resources/transferable_resource.h"
@@ -43,14 +42,14 @@ TransferableResourceTracker::ImportResources(
       if (view_transition_element_resource_id.IsValid()) {
         resource_frame
             .element_id_to_resource[view_transition_element_resource_id] =
-            resource_frame.shared[i]->resource;
+            *resource_frame.shared[i];
       }
     }
   }
 
   for (auto resource_id : frame_result.empty_resource_ids) {
     DCHECK(!resource_frame.element_id_to_resource.contains(resource_id));
-    resource_frame.element_id_to_resource[resource_id] = TransferableResource();
+    resource_frame.element_id_to_resource[resource_id] = PositionedResource();
   }
 
   return resource_frame;
@@ -75,13 +74,14 @@ TransferableResourceTracker::ImportResource(
   }
 
   resource.id = id_tracker_->AllocId(/*initial_ref_count=*/1);
-  DCHECK(!base::Contains(managed_resources_, resource.id));
+  DCHECK(!managed_resources_.contains(resource.id));
   managed_resources_.emplace(
       resource.id,
       TransferableResourceHolder(resource, std::move(release_callback)));
 
   PositionedResource result;
   result.resource = resource;
+  result.pixel_alignment_offset = output_copy.pixel_alignment_offset;
   return result;
 }
 
@@ -93,20 +93,22 @@ void TransferableResourceTracker::ReturnFrame(const ResourceFrame& frame) {
   }
 }
 
-void TransferableResourceTracker::RefResource(ResourceId id) {
-  if (!base::Contains(managed_resources_, id)) {
-    return;
+bool TransferableResourceTracker::RefResource(ResourceId id) {
+  if (!managed_resources_.contains(id)) {
+    return false;
   }
 
   id_tracker_->RefId(id, /*count=*/1);
+  return true;
 }
 
-void TransferableResourceTracker::UnrefResource(
+bool TransferableResourceTracker::UnrefResource(
     ResourceId id,
     int count,
     const gpu::SyncToken& sync_token) {
-  if (!base::Contains(managed_resources_, id)) {
-    return;
+  auto it = managed_resources_.find(id);
+  if (it == managed_resources_.end()) {
+    return false;
   }
 
   // Always update the release sync token, even if we're still keeping the
@@ -114,14 +116,13 @@ void TransferableResourceTracker::UnrefResource(
   // then release it from surface animation manager, we will still have the
   // right sync token.
   if (sync_token.HasData()) {
-    auto it = managed_resources_.find(id);
-    CHECK(it != managed_resources_.end());
     it->second.release_sync_token = sync_token;
   }
 
   if (id_tracker_->UnrefId(id, count)) {
-    managed_resources_.erase(id);
+    managed_resources_.erase(it);
   }
+  return true;
 }
 
 TransferableResourceTracker::TransferableResourceHolder::

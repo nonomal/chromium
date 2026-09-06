@@ -22,7 +22,7 @@ WebSocketQuicSpdyStream::WebSocketQuicSpdyStream(
     quic::QuicStreamId id,
     quic::QuicSpdyClientSessionBase* session,
     quic::StreamType type)
-    : quic::QuicSpdyStream(id, session, type) {}
+    : QuicChromiumClientStreamBase(id, session, type) {}
 
 WebSocketQuicSpdyStream::~WebSocketQuicSpdyStream() {
   if (delegate_) {
@@ -48,8 +48,9 @@ void WebSocketQuicSpdyStream::OnInitialHeadersComplete(
 
 void WebSocketQuicSpdyStream::OnClose() {
   quic::QuicSpdyStream::OnClose();
-  if (delegate_) {
-    delegate_->OnClose(MapQuicErrorToNetError());
+  Delegate* delegate = std::exchange(delegate_, nullptr);
+  if (delegate) {
+    delegate->OnClose(MapQuicErrorToNetError());
   }
 }
 
@@ -78,6 +79,29 @@ void WebSocketQuicSpdyStream::OnCanWriteNewData() {
   quic::QuicSpdyStream::OnCanWriteNewData();
   if (delegate_) {
     delegate_->OnCanWriteNewData();
+  }
+}
+
+void WebSocketQuicSpdyStream::DetachDelegate() {
+  // Cleared first: closing the stream below notifies the delegate, which is
+  // going away.
+  delegate_ = nullptr;
+
+  if (fin_buffered() || write_side_closed()) {
+    // Nothing more can be written, so the closure has already been decided.
+    return;
+  }
+
+  // RFC 9220 section 3 makes HTTP/3 stream closure analogous to TCP connection
+  // closure: "Orderly TCP-level closures are represented as a FIN bit on the
+  // stream", while a stream error of type H3_REQUEST_CANCELLED represents an
+  // RST exception. If the peer's FIN has been consumed then the closing
+  // handshake ran to completion, so answer it with our own FIN. Otherwise the
+  // stream is being abandoned mid-flight, which is the RST exception.
+  if (read_side_closed()) {
+    WriteOrBufferBody("", /*fin=*/true);
+  } else {
+    Reset(quic::QUIC_STREAM_CANCELLED);
   }
 }
 

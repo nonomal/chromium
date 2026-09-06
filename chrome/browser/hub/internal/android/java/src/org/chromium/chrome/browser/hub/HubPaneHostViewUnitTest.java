@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.hub;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -15,24 +16,31 @@ import static org.chromium.chrome.browser.hub.HubPaneHostProperties.PANE_ROOT_VI
 import static org.chromium.chrome.browser.hub.HubPaneHostProperties.SNACKBAR_CONTAINER_CALLBACK;
 
 import android.app.Activity;
+import android.os.SystemClock;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
-import androidx.test.ext.junit.rules.ActivityScenarioRule;
-
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
-import org.robolectric.shadows.ShadowLooper;
+import org.robolectric.Robolectric;
+import org.robolectric.android.controller.ActivityController;
 
 import org.chromium.base.Callback;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
+import org.chromium.base.test.util.Features.DisableFeatures;
+import org.chromium.base.test.util.Features.EnableFeatures;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.ui.base.TestActivity;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
@@ -45,38 +53,46 @@ import java.util.List;
 public class HubPaneHostViewUnitTest {
     @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
 
-    @Rule
-    public ActivityScenarioRule<TestActivity> mActivityScenarioRule =
-            new ActivityScenarioRule<>(TestActivity.class);
-
-    @Mock Runnable mOnActionButton;
-    @Mock Callback<ViewGroup> mSnackbarContainerCallback;
+    @Mock private Callback<ViewGroup> mSnackbarContainerCallback;
     @Mock private HubColorMixer mColorMixer;
 
-    private Activity mActivity;
-    private HubPaneHostView mPaneHost;
+    private final ActivityController<TestActivity> mActivityController =
+            Robolectric.buildActivity(TestActivity.class).setup();
+    private final Activity mActivity = mActivityController.get();
+
+    @Spy
+    private HubPaneHostView mPaneHost =
+            (HubPaneHostView)
+                    LayoutInflater.from(mActivity)
+                            .inflate(R.layout.hub_pane_host_layout, null, false);
+
     private ViewGroup mSnackbarContainer;
     private PropertyModel mPropertyModel;
 
     @Before
     public void setUp() throws Exception {
-        mActivityScenarioRule.getScenario().onActivity(this::onActivity);
-    }
-
-    private void onActivity(TestActivity activity) {
-        mActivity = activity;
         mActivity.setTheme(R.style.Theme_BrowserUI_DayNight);
 
-        LayoutInflater inflater = LayoutInflater.from(mActivity);
-        mPaneHost = (HubPaneHostView) inflater.inflate(R.layout.hub_pane_host_layout, null, false);
         mSnackbarContainer = mPaneHost.findViewById(R.id.pane_host_view_snackbar_container);
         mActivity.setContentView(mPaneHost);
+
+        // Explicitly set layout parameters and force a layout pass.
+        mPaneHost.setLayoutParams(new FrameLayout.LayoutParams(1000, 1000));
+        mPaneHost.measure(
+                View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(1000, View.MeasureSpec.EXACTLY));
+        mPaneHost.layout(0, 0, 1000, 1000);
 
         mPropertyModel =
                 new PropertyModel.Builder(HubPaneHostProperties.ALL_KEYS)
                         .with(COLOR_MIXER, mColorMixer)
                         .build();
         PropertyModelChangeProcessor.create(mPropertyModel, mPaneHost, HubPaneHostViewBinder::bind);
+    }
+
+    @After
+    public void tearDown() {
+        mActivityController.close();
     }
 
     @Test
@@ -88,7 +104,7 @@ public class HubPaneHostViewUnitTest {
 
         ViewGroup paneFrame = mPaneHost.findViewById(R.id.pane_frame);
         paneFrame.setLayoutParams(layoutParams);
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         assertEquals(0, paneFrame.getChildCount());
 
         mPropertyModel.set(PANE_ROOT_VIEW, root1);
@@ -97,7 +113,7 @@ public class HubPaneHostViewUnitTest {
         mPropertyModel.set(PANE_ROOT_VIEW, root2);
         verifyChildren(paneFrame, root1, root2);
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         verifyChildren(paneFrame, root2);
 
         mPropertyModel.set(PANE_ROOT_VIEW, root1);
@@ -106,7 +122,7 @@ public class HubPaneHostViewUnitTest {
         mPropertyModel.set(PANE_ROOT_VIEW, root2);
         verifyChildren(paneFrame, root2, root3);
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         verifyChildren(paneFrame, root2);
 
         mPropertyModel.set(PANE_ROOT_VIEW, null);
@@ -120,7 +136,7 @@ public class HubPaneHostViewUnitTest {
 
         mPropertyModel.set(PANE_ROOT_VIEW, root1);
         mPropertyModel.set(PANE_ROOT_VIEW, root2);
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         assertEquals(1, root2.getAlpha(), /* delta= */ 0);
 
         // Inspired by b/325372945 where the alpha needed to be reset, even when no animations ran.
@@ -136,7 +152,7 @@ public class HubPaneHostViewUnitTest {
 
         mPropertyModel.set(PANE_ROOT_VIEW, root1);
         mPropertyModel.set(PANE_ROOT_VIEW, root2);
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         assertEquals(0, root2.getTranslationX(), /* delta= */ 0);
 
         mPropertyModel.set(PANE_ROOT_VIEW, null);
@@ -153,6 +169,60 @@ public class HubPaneHostViewUnitTest {
     @Test
     public void testHubColorScheme() {
         verify(mColorMixer, times(1)).registerBlend(any());
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.ENABLE_SWIPE_TO_SWITCH_PANE)
+    public void testTap_performClick() {
+        int viewWidth = mPaneHost.getWidth();
+        int viewHeight = mPaneHost.getHeight();
+        long downTime = SystemClock.uptimeMillis();
+
+        mPaneHost.onTouchEvent(
+                MotionEvent.obtain(
+                        downTime,
+                        downTime,
+                        MotionEvent.ACTION_DOWN,
+                        viewWidth / 2f,
+                        viewHeight / 2f,
+                        0));
+        mPaneHost.onTouchEvent(
+                MotionEvent.obtain(
+                        downTime,
+                        downTime + 10,
+                        MotionEvent.ACTION_UP,
+                        viewWidth / 2f,
+                        viewHeight / 2f,
+                        0));
+
+        verify(mPaneHost).performClick();
+    }
+
+    @Test
+    @DisableFeatures(ChromeFeatureList.ENABLE_SWIPE_TO_SWITCH_PANE)
+    public void testTap_unhandled_doesNotPerformClick() {
+        int viewWidth = mPaneHost.getWidth();
+        int viewHeight = mPaneHost.getHeight();
+        long downTime = SystemClock.uptimeMillis();
+
+        mPaneHost.onTouchEvent(
+                MotionEvent.obtain(
+                        downTime,
+                        downTime,
+                        MotionEvent.ACTION_DOWN,
+                        viewWidth / 2f,
+                        viewHeight / 2f,
+                        0));
+        mPaneHost.onTouchEvent(
+                MotionEvent.obtain(
+                        downTime,
+                        downTime + 10,
+                        MotionEvent.ACTION_UP,
+                        viewWidth / 2f,
+                        viewHeight / 2f,
+                        0));
+
+        verify(mPaneHost, never()).performClick();
     }
 
     /** Order of children does not matter. */

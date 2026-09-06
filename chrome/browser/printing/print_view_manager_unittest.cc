@@ -14,8 +14,6 @@
 #include "base/test/bind.h"
 #include "build/build_config.h"
 #include "chrome/browser/printing/print_preview_test.h"
-#include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/test/browser_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -96,7 +94,7 @@ class TestPrinterQueryWin : public PrinterQuery {
   // Updates the current settings with `new_settings` dictionary values. Also
   // fills in the settings with values from `offsets_` and `printer_type_` that
   // would normally be filled in by the `PrintingContext`.
-  void SetSettings(base::Value::Dict new_settings,
+  void SetSettings(base::DictValue new_settings,
                    base::OnceClosure callback) override;
 
   // Sets `printer_language_type_` to `type`. Should be called before
@@ -136,7 +134,7 @@ TestPrinterQueryWin::TestPrinterQueryWin(
 
 TestPrinterQueryWin::~TestPrinterQueryWin() = default;
 
-void TestPrinterQueryWin::SetSettings(base::Value::Dict new_settings,
+void TestPrinterQueryWin::SetSettings(base::DictValue new_settings,
                                       base::OnceClosure callback) {
   DCHECK(offsets_);
   DCHECK(printer_language_type_);
@@ -342,18 +340,26 @@ class TestPrintViewManagerWin : public PrintViewManagerBase {
                            number_pages());
     return true;
   }
+  void GetPrintPreviewParams(GetPrintPreviewParamsCallback callback) override {
+    NOTREACHED();
+  }
   void SetupScriptedPrintPreview(
       SetupScriptedPrintPreviewCallback callback) override {
     NOTREACHED();
   }
-  void ShowScriptedPrintPreview(bool is_modifiable) override { NOTREACHED(); }
+  void ShowScriptedPrintPreview() override { NOTREACHED(); }
   void RequestPrintPreview(
       mojom::RequestPrintPreviewParamsPtr params) override {
     NOTREACHED();
   }
-  void CheckForCancel(int32_t preview_ui_id,
+  void CheckForCancel(const base::UnguessableToken& preview_ui_id,
                       int32_t request_id,
                       CheckForCancelCallback callback) override {
+    NOTREACHED();
+  }
+  void SetAccessibilityTree(
+      int32_t cookie,
+      const ui::AXTreeUpdate& accessibility_tree) override {
     NOTREACHED();
   }
 
@@ -367,17 +373,17 @@ class TestPrintViewManagerWin : public PrintViewManagerBase {
 #endif  // BUILDFLAG(IS_WIN)
 
 TEST_F(PrintViewManagerTest, PrintSubFrameAndDestroy) {
-  chrome::NewTab(browser());
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  ASSERT_TRUE(web_contents);
-
+  content::RenderFrameHostTester::For(web_contents()->GetPrimaryMainFrame())
+      ->InitializeRenderFrameIfNeeded();
   content::RenderFrameHost* sub_frame =
-      content::RenderFrameHostTester::For(web_contents->GetPrimaryMainFrame())
+      content::RenderFrameHostTester::For(web_contents()->GetPrimaryMainFrame())
           ->AppendChild("child");
+  content::RenderFrameHostTester::For(sub_frame)
+      ->InitializeRenderFrameIfNeeded();
 
+  PrintViewManager::CreateForWebContents(web_contents());
   PrintViewManager* print_view_manager =
-      PrintViewManager::FromWebContents(web_contents);
+      PrintViewManager::FromWebContents(web_contents());
   ASSERT_TRUE(print_view_manager);
   EXPECT_FALSE(print_view_manager->print_preview_rfh());
 
@@ -389,16 +395,14 @@ TEST_F(PrintViewManagerTest, PrintSubFrameAndDestroy) {
 }
 
 TEST_F(PrintViewManagerTest, PrintForSystemDialog) {
-  chrome::NewTab(browser());
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  ASSERT_TRUE(web_contents);
-
+  content::RenderFrameHostTester::For(web_contents()->GetPrimaryMainFrame())
+      ->InitializeRenderFrameIfNeeded();
   auto print_view_manager =
-      std::make_unique<TestPrintViewManagerForSystemDialogPrint>(web_contents);
+      std::make_unique<TestPrintViewManagerForSystemDialogPrint>(
+          web_contents());
 
   ASSERT_TRUE(print_view_manager->PrintPreviewNow(
-      web_contents->GetPrimaryMainFrame(), /*has_selection=*/false));
+      web_contents()->GetPrimaryMainFrame(), /*has_selection=*/false));
 
   base::RunLoop run_loop;
   bool dialog_shown = false;
@@ -415,7 +419,7 @@ TEST_F(PrintViewManagerTest, PrintForSystemDialog) {
 
 #if BUILDFLAG(IS_WIN)
 // Verifies that `StartPdfToPostScriptConversion` is called with the correct
-// printable area offsets. See crbug.com/821485.
+// printable area offsets. See crbug.com/41376276.
 TEST_F(PrintViewManagerTest, PostScriptHasCorrectOffsets) {
   scoped_refptr<TestPrintQueriesQueueWin> queue =
       base::MakeRefCounted<TestPrintQueriesQueueWin>();
@@ -427,19 +431,14 @@ TEST_F(PrintViewManagerTest, PostScriptHasCorrectOffsets) {
   queue->SetupPrinterOffsets(offset_in_pixels, offset_in_pixels);
   g_browser_process->print_job_manager()->SetQueueForTest(queue);
 
-  chrome::NewTab(browser());
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  ASSERT_TRUE(web_contents);
-
   auto print_view_manager =
-      std::make_unique<TestPrintViewManagerWin>(web_contents);
+      std::make_unique<TestPrintViewManagerWin>(web_contents());
   PrintViewManager::SetReceiverImplForTesting(print_view_manager.get());
 
-  print_view_manager->PrintPreviewNow(web_contents->GetPrimaryMainFrame(),
+  print_view_manager->PrintPreviewNow(web_contents()->GetPrimaryMainFrame(),
                                       false);
 
-  base::Value::Dict print_ticket =
+  base::DictValue print_ticket =
       test::GetPrintTicket(mojom::PrinterType::kLocal);
   const char kTestData[] = "abc";
   auto print_data = base::MakeRefCounted<base::RefCountedStaticMemory>(
@@ -447,9 +446,9 @@ TEST_F(PrintViewManagerTest, PostScriptHasCorrectOffsets) {
   PrinterHandler::PrintCallback callback =
       base::BindOnce(&TestPrintViewManagerWin::FakePrintCallback,
                      base::Unretained(print_view_manager.get()));
-  print_view_manager->PrintForPrintPreview(std::move(print_ticket), print_data,
-                                           web_contents->GetPrimaryMainFrame(),
-                                           std::move(callback));
+  print_view_manager->PrintForPrintPreview(
+      std::move(print_ticket), print_data,
+      web_contents()->GetPrimaryMainFrame(), std::move(callback));
   print_view_manager->WaitForCallback();
 
   EXPECT_EQ(gfx::Point(60, 60), print_view_manager->physical_offsets());

@@ -60,7 +60,6 @@
 #include "third_party/blink/renderer/core/layout/mathml/layout_mathml_block.h"
 #include "third_party/blink/renderer/core/layout/physical_box_fragment.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_text.h"
-#include "third_party/blink/renderer/core/layout/text_autosizer.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/scrolling/root_scroller_controller.h"
 #include "third_party/blink/renderer/core/paint/block_paint_invalidator.h"
@@ -69,6 +68,7 @@
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
@@ -90,38 +90,14 @@ void LayoutBlock::Trace(Visitor* visitor) const {
   LayoutBox::Trace(visitor);
 }
 
-void LayoutBlock::RemoveFromGlobalMaps() {
+void LayoutBlock::WillBeDestroyed(const ComputedStyle* style) {
   NOT_DESTROYED();
-  if (HasSVGTextDescendants()) {
-    View()->SvgTextDescendantsMap().erase(this);
-    SetHasSVGTextDescendants(false);
-  }
-}
-
-void LayoutBlock::WillBeDestroyed() {
-  NOT_DESTROYED();
-  if (!DocumentBeingDestroyed() && Parent())
-    Parent()->DirtyLinesFromChangedChild(this);
 
   if (LocalFrame* frame = GetFrame()) {
     frame->Selection().LayoutBlockWillBeDestroyed(*this);
     frame->GetPage()->GetDragCaret().LayoutBlockWillBeDestroyed(*this);
   }
-
-  if (TextAutosizer* text_autosizer = GetDocument().GetTextAutosizer())
-    text_autosizer->Destroy(this);
-
-  RemoveFromGlobalMaps();
-
-  LayoutBox::WillBeDestroyed();
-}
-
-void LayoutBlock::StyleWillChange(StyleDifference diff,
-                                  const ComputedStyle& new_style,
-                                  StyleChangeContext& style_change_context) {
-  NOT_DESTROYED();
-  SetIsAtomicInlineLevel(ShouldBeHandledAsInline(new_style));
-  LayoutBox::StyleWillChange(diff, new_style, style_change_context);
+  LayoutBox::WillBeDestroyed(style);
 }
 
 // Compute a local version of the "font size scale factor" used by SVG
@@ -138,19 +114,19 @@ static double ComputeSquaredLocalFontSizeScalingFactor(
 void LayoutBlock::StyleDidChange(
     StyleDifference diff,
     const ComputedStyle* old_style,
+    const ComputedStyle& new_style,
     const StyleChangeContext& style_change_context) {
   NOT_DESTROYED();
   // Computes old scaling factor before PaintLayer::UpdateTransform()
   // updates Layer()->Transform().
   double old_squared_scale = 1;
-  if (Layer() && diff.TransformChanged() && HasSVGTextDescendants()) {
+  if (!RuntimeEnabledFeatures::SvgIgnoreOuterTransformsEnabled() && Layer() &&
+      diff.transform_changed && HasSVGTextDescendants()) {
     old_squared_scale =
         ComputeSquaredLocalFontSizeScalingFactor(Layer()->Transform());
   }
 
-  LayoutBox::StyleDidChange(diff, old_style, style_change_context);
-
-  const ComputedStyle& new_style = StyleRef();
+  LayoutBox::StyleDidChange(diff, old_style, new_style, style_change_context);
 
   if (old_style && Parent()) {
     if (old_style->GetPosition() != new_style.GetPosition() &&
@@ -167,12 +143,10 @@ void LayoutBlock::StyleDidChange(
     }
   }
 
-  if (TextAutosizer* text_autosizer = GetDocument().GetTextAutosizer())
-    text_autosizer->Record(this);
-
   PropagateStyleToAnonymousChildren();
 
-  if (diff.TransformChanged() && HasSVGTextDescendants()) {
+  if (!RuntimeEnabledFeatures::SvgIgnoreOuterTransformsEnabled() &&
+      diff.transform_changed && HasSVGTextDescendants()) {
     const double new_squared_scale = ComputeSquaredLocalFontSizeScalingFactor(
         Layer() ? Layer()->Transform() : nullptr);
     // Compare local scale before and after.
@@ -201,32 +175,26 @@ void LayoutBlock::AddChildBeforeDescendant(LayoutObject* new_child,
                                            LayoutObject* before_descendant) {
   NOT_DESTROYED();
   DCHECK(!IsLayoutBlockFlow());
-  DCHECK(!new_child->IsTablePart());
   DCHECK_NE(before_descendant->Parent(), this);
+
+  if (!new_child->IsInline() && !new_child->IsTablePart()) {
+    LayoutObject* before_child =
+        SplitAnonymousBoxesAroundChild(before_descendant);
+
+    DCHECK_EQ(before_child->Parent(), this);
+    AddChild(new_child, before_child);
+    return;
+  }
 
   LayoutObject* before_descendant_container = before_descendant->Parent();
   while (before_descendant_container->Parent() != this) {
     before_descendant_container = before_descendant_container->Parent();
   }
-  DCHECK(before_descendant_container);
-
-  // We really can't go on if what we have found isn't anonymous. We're not
-  // supposed to use some random non-anonymous object and put the child there.
-  // That's a recipe for security issues.
   CHECK(before_descendant_container->IsAnonymous());
+  CHECK(before_descendant_container->IsLayoutBlockFlow());
 
-  // Insert the child into the anonymous block box instead of here.
-  if (new_child->IsInline() &&
-      before_descendant_container->IsAnonymousBlockFlow()) {
-    before_descendant_container->AddChild(new_child, before_descendant);
-    return;
-  }
-
-  LayoutObject* before_child =
-      SplitAnonymousBoxesAroundChild(before_descendant);
-
-  DCHECK_EQ(before_child->Parent(), this);
-  AddChild(new_child, before_child);
+  // Insert the child into the anonymous block-flow instead of here.
+  before_descendant_container->AddChild(new_child, before_descendant);
 }
 
 void LayoutBlock::AddChild(LayoutObject* new_child,
@@ -241,7 +209,7 @@ void LayoutBlock::AddChild(LayoutObject* new_child,
   // here.
   DCHECK(!ChildrenInline());
 
-  if (new_child->IsInline()) {
+  if (new_child->IsInline() || new_child->IsTablePart()) {
     // If we're inserting an inline child but all of our children are blocks,
     // then we have to make sure it is put into an anomyous block box. We try to
     // use an existing anonymous box if possible, otherwise a new one is created
@@ -262,25 +230,6 @@ void LayoutBlock::AddChild(LayoutObject* new_child,
   }
 
   LayoutBox::AddChild(new_child, before_child);
-}
-
-void LayoutBlock::RemoveLeftoverAnonymousBlock(LayoutBlock* child) {
-  NOT_DESTROYED();
-  DCHECK(child->IsAnonymousBlockFlow());
-  DCHECK(!child->ChildrenInline());
-  DCHECK_EQ(child->Parent(), this);
-
-  // Promote all the leftover anonymous block's children (to become children of
-  // this block instead). We still want to keep the leftover block in the tree
-  // for a moment, for notification purposes done further below (grids).
-  child->MoveAllChildrenTo(this, child->NextSibling());
-
-  // Now remove the leftover anonymous block from the tree, and destroy it.
-  // We'll rip it out manually from the tree before destroying it, because we
-  // don't want to trigger any tree adjustments with regards to anonymous blocks
-  // (or any other kind of undesired chain-reaction).
-  Children()->RemoveChildNode(this, child, false);
-  child->Destroy();
 }
 
 void LayoutBlock::Paint(const PaintInfo& paint_info) const {
@@ -390,28 +339,28 @@ void LayoutBlock::RemovePositionedObjects(LayoutObject* stay_within) {
   }
 }
 
-void LayoutBlock::AddSvgTextDescendant(LayoutBox& svg_text) {
+void LayoutBlock::AddSvgTextDescendant(LayoutSVGText& svg_text) {
   NOT_DESTROYED();
-  DCHECK(IsA<LayoutSVGText>(svg_text));
+  DCHECK(!RuntimeEnabledFeatures::SvgIgnoreOuterTransformsEnabled());
   auto result = View()->SvgTextDescendantsMap().insert(this, nullptr);
   if (result.is_new_entry) {
     result.stored_value->value =
-        MakeGarbageCollected<TrackedLayoutBoxLinkedHashSet>();
+        MakeGarbageCollected<GCedHeapHashSet<Member<LayoutSVGText>>>();
   }
   result.stored_value->value->insert(&svg_text);
   SetHasSVGTextDescendants(true);
 }
 
-void LayoutBlock::RemoveSvgTextDescendant(LayoutBox& svg_text) {
+void LayoutBlock::RemoveSvgTextDescendant(LayoutSVGText& svg_text) {
   NOT_DESTROYED();
-  DCHECK(IsA<LayoutSVGText>(svg_text));
-  TrackedDescendantsMap& map = View()->SvgTextDescendantsMap();
+  DCHECK(!RuntimeEnabledFeatures::SvgIgnoreOuterTransformsEnabled());
+  auto& map = View()->SvgTextDescendantsMap();
   auto it = map.find(this);
   if (it == map.end())
     return;
-  TrackedLayoutBoxLinkedHashSet* descendants = &*it->value;
-  descendants->erase(&svg_text);
-  if (descendants->empty()) {
+  GCedHeapHashSet<Member<LayoutSVGText>>& descendants = *it->value;
+  descendants.erase(&svg_text);
+  if (descendants.empty()) {
     map.erase(this);
     SetHasSVGTextDescendants(false);
   }
@@ -419,11 +368,16 @@ void LayoutBlock::RemoveSvgTextDescendant(LayoutBox& svg_text) {
 
 LayoutUnit LayoutBlock::TextIndentOffset() const {
   NOT_DESTROYED();
+  const ComputedStyle& style = StyleRef();
+  const Length& length = style.TextIndent();
+  if (length.IsZero() || style.IsTextIndentHanging()) {
+    return LayoutUnit();
+  }
   LayoutUnit cw;
-  if (StyleRef().TextIndent().HasPercent()) {
+  if (length.HasPercent()) {
     cw = ContentLogicalWidth();
   }
-  return MinimumValueForLength(StyleRef().TextIndent(), cw);
+  return MinimumValueForLength(length, cw);
 }
 
 bool LayoutBlock::NodeAtPoint(HitTestResult& result,
@@ -451,76 +405,70 @@ bool LayoutBlock::NodeAtPoint(HitTestResult& result,
   return false;
 }
 
-bool LayoutBlock::HitTestChildren(HitTestResult& result,
-                                  const HitTestLocation& hit_test_location,
-                                  const PhysicalOffset& accumulated_offset,
-                                  HitTestPhase phase) {
-  NOT_DESTROYED();
-  DCHECK(!ChildrenInline());
+namespace {
 
-  if (PhysicalFragmentCount() && CanTraversePhysicalFragments()) {
-    DCHECK(!Parent()->CanTraversePhysicalFragments());
-    DCHECK_LE(PhysicalFragmentCount(), 1u);
-    const PhysicalBoxFragment* fragment = GetPhysicalFragment(0);
-    DCHECK(fragment);
-    DCHECK(!fragment->HasItems());
-    return BoxFragmentPainter(*fragment).NodeAtPoint(result, hit_test_location,
-                                                     accumulated_offset, phase);
+// Returns true if the editability of |box| differs from that of its closest
+// ancestor that has a node, i.e. |box| is an editing boundary.
+bool IsEditingBoundary(const LayoutBox& box) {
+  const Node* node = box.NonPseudoNode();
+  if (!node) {
+    return false;
   }
-
-  PhysicalOffset scrolled_offset = accumulated_offset;
-  if (IsScrollContainer())
-    scrolled_offset -= PhysicalOffset(PixelSnappedScrolledContentOffset());
-  HitTestPhase child_hit_test = phase;
-  if (phase == HitTestPhase::kDescendantBlockBackgrounds)
-    child_hit_test = HitTestPhase::kSelfBlockBackground;
-  for (LayoutBox* child = LastChildBox(); child;
-       child = child->PreviousSiblingBox()) {
-    if (child->HasSelfPaintingLayer() || child->IsColumnSpanAll())
-      continue;
-
-    PhysicalOffset child_accumulated_offset =
-        scrolled_offset + child->PhysicalLocation();
-    bool did_hit;
-    if (child->IsFloating()) {
-      if (phase != HitTestPhase::kFloat) {
-        continue;
-      }
-      // Hit-test the floats in regular tree order if this is LayoutNG. Only
-      // legacy layout uses the FloatingObjects list.
-      did_hit = child->HitTestAllPhases(result, hit_test_location,
-                                        child_accumulated_offset);
-    } else {
-      did_hit = child->NodeAtPoint(result, hit_test_location,
-                                   child_accumulated_offset, child_hit_test);
-    }
-    if (did_hit) {
-      UpdateHitTestResult(result,
-                          hit_test_location.Point() - accumulated_offset);
-      return true;
-    }
+  const LayoutObject* parent = box.Parent();
+  if (!parent) {
+    return false;
   }
-
-  return false;
+  const Node* parent_node = parent->GeneratingNode();
+  if (!parent_node) {
+    return false;
+  }
+  return IsEditable(*node) != IsEditable(*parent_node);
 }
+
+}  // namespace
 
 PositionWithAffinity LayoutBlock::PositionForPointIfOutsideAtomicInlineLevel(
     const PhysicalOffset& point) const {
   NOT_DESTROYED();
-  DCHECK(IsAtomicInlineLevel());
+  DCHECK(IsInline());
   LogicalOffset logical_offset =
       WritingModeConverter({StyleRef().GetWritingMode(), ResolvedDirection()},
                            StitchedSize())
           .ToLogical(point, PhysicalSize());
-  if (logical_offset.inline_offset < 0)
-    return FirstPositionInOrBeforeThis();
-  if (logical_offset.inline_offset >= LogicalWidth())
-    return LastPositionInOrAfterThis();
-  if (logical_offset.block_offset < 0)
-    return FirstPositionInOrBeforeThis();
-  if (logical_offset.block_offset >= LogicalHeight())
-    return LastPositionInOrAfterThis();
-  return PositionWithAffinity();
+
+  // Which side did |point| miss on? The inline direction takes precedence over
+  // the block direction.
+  bool before;
+  if (logical_offset.inline_offset < 0) {
+    before = true;
+  } else if (logical_offset.inline_offset >= LogicalWidth()) {
+    before = false;
+  } else if (logical_offset.block_offset < 0) {
+    before = true;
+  } else if (logical_offset.block_offset >= LogicalHeight()) {
+    before = false;
+  } else {
+    // |point| is inside; let the caller resolve the position normally.
+    return PositionWithAffinity();
+  }
+
+  // At an editing boundary the position must stay outside, or clicking next to
+  // <div contenteditable style="display:inline-block"> pulls focus into it; the
+  // LayoutObject position helpers all resolve back inside, so anchor on the
+  // parent instead.
+  if (IsEditingBoundary(*this) &&
+      RuntimeEnabledFeatures::CaretOutsideEditableAtomicInlineEnabled()) {
+    const Node* node = NonPseudoNode();
+    DCHECK(node);
+    const Position position =
+        before ? Position::BeforeNode(*node) : Position::AfterNode(*node);
+    // Re-anchor onto the parent; this box itself is the editing boundary.
+    const Position position_in_parent = position.ToOffsetInAnchor();
+    if (position_in_parent.IsNotNull()) {
+      return PositionWithAffinity(position_in_parent);
+    }
+  }
+  return before ? FirstPositionInOrBeforeThis() : LastPositionInOrAfterThis();
 }
 
 PositionWithAffinity LayoutBlock::PositionForPoint(
@@ -531,7 +479,7 @@ PositionWithAffinity LayoutBlock::PositionForPoint(
   DCHECK(GetDocument().Lifecycle().GetState() >=
          DocumentLifecycle::kPrePaintClean);
 
-  if (IsAtomicInlineLevel()) {
+  if (IsInline()) {
     PositionWithAffinity position =
         PositionForPointIfOutsideAtomicInlineLevel(point);
     if (!position.IsNull())
@@ -554,37 +502,13 @@ bool LayoutBlock::HasLineIfEmpty() const {
   return FirstLineStyleRef().HasLineIfEmpty();
 }
 
-// This function should return the distance from the block-start, not from
-// the line-over.
-std::optional<LayoutUnit> LayoutBlock::BaselineForEmptyLine() const {
-  NOT_DESTROYED();
-  const ComputedStyle* style = FirstLineStyle();
-  const SimpleFontData* font_data = style->GetFont()->PrimaryFont();
-  if (!font_data)
-    return std::nullopt;
-  const auto& font_metrics = font_data->GetFontMetrics();
-  const auto baseline_type = style->GetFontBaseline();
-  const LayoutUnit line_height = FirstLineHeight();
-  int ascent_or_descent = IsFlippedLinesWritingMode(style->GetWritingMode())
-                              ? font_metrics.Descent(baseline_type)
-                              : font_metrics.Ascent(baseline_type);
-  return LayoutUnit((ascent_or_descent +
-                     (line_height - font_metrics.Height()) / 2 +
-                     BorderAndPaddingBlockStart())
-                        .ToInt());
-}
-
-LayoutUnit LayoutBlock::FirstLineHeight() const {
-  NOT_DESTROYED();
-  return LayoutUnit(FirstLineStyle()->ComputedLineHeight());
-}
-
 const LayoutBlock* LayoutBlock::FirstLineStyleParentBlock() const {
   NOT_DESTROYED();
   const LayoutBlock* first_line_block = this;
   // Inline blocks do not get ::first-line style from its containing blocks.
-  if (IsAtomicInlineLevel())
+  if (IsInline()) {
     return nullptr;
+  }
   // Floats and out of flow blocks do not get ::first-line style from its
   // containing blocks.
   if (IsFloatingOrOutOfFlowPositioned())
@@ -600,8 +524,7 @@ const LayoutBlock* LayoutBlock::FirstLineStyleParentBlock() const {
   // ::first-line style from our ancestors.
   const LayoutObject* first_child = parent_layout_block->FirstChild();
   while (first_child->IsFloatingOrOutOfFlowPositioned() ||
-         (RuntimeEnabledFeatures::FirstLineOnListItemEnabled() &&
-          first_child->IsListMarker())) {
+         first_child->IsListMarker()) {
     first_child = first_child->NextSibling();
   }
   if (first_child != first_line_block)
@@ -628,8 +551,8 @@ LayoutBlockFlow* LayoutBlock::NearestInnerBlockWithFirstLine() {
 // so the firstChild() is nullptr if the only child is an empty inline-block.
 inline bool LayoutBlock::IsInlineBoxWrapperActuallyChild() const {
   NOT_DESTROYED();
-  return IsInline() && IsAtomicInlineLevel() && !StitchedSize().IsEmpty() &&
-         GetNode() && EditingIgnoresContent(*GetNode());
+  return IsInline() && !StitchedSize().IsEmpty() && GetNode() &&
+         EditingIgnoresContent(*GetNode());
 }
 
 PhysicalRect LayoutBlock::LocalCaretRect(int caret_offset,
@@ -672,7 +595,7 @@ void LayoutBlock::AddOutlineRects(OutlineRectCollector& collector,
   }
 
   if (ShouldIncludeBlockInkOverflow(include_block_overflows) &&
-      !HasNonVisibleOverflow() && !HasControlClip()) {
+      !HasNonVisibleOverflow()) {
     AddOutlineRectsForNormalChildren(collector, additional_offset,
                                      include_block_overflows);
   }
@@ -743,7 +666,7 @@ LayoutBlock* LayoutBlock::CreateAnonymousWithParentAndDisplay(
            new_display == EDisplay::kFlowRoot);
     layout_block = MakeGarbageCollected<LayoutBlockFlow>(nullptr);
   }
-  layout_block->SetDocumentForAnonymous(&parent->GetDocument());
+  layout_block->SetDocumentForAnonymous(parent->GetDocument());
   layout_block->SetStyle(new_style);
   return layout_block;
 }

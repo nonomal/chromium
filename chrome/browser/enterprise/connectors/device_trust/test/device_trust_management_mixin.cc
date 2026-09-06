@@ -10,8 +10,8 @@
 #include "base/containers/flat_map.h"
 #include "build/build_config.h"
 #include "chrome/browser/enterprise/connectors/device_trust/test/test_constants.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "components/device_signals/core/browser/pref_names.h"
 #include "components/policy/policy_constants.h"
 #include "components/prefs/pref_service.h"
@@ -27,13 +27,13 @@ using ManagementContext = enterprise::test::ManagementContext;
 namespace {
 
 base::Value GetAllowedHostValue(const std::string& url) {
-  base::Value::List list;
+  base::ListValue list;
   list.Append(url);
   return base::Value(std::move(list));
 }
 
 base::Value GetEmptyListValue() {
-  return base::Value(base::Value::List());
+  return base::Value(base::ListValue());
 }
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -110,14 +110,14 @@ void DeviceTrustManagementMixin::DisableAllInlinePolicies() {
 
 void DeviceTrustManagementMixin::SetConsentGiven(bool consent_given) {
   device_trust_state_.consent_given = consent_given;
-  test_base_->browser()->profile()->GetPrefs()->SetBoolean(
+  test_base_->browser()->GetProfile()->GetPrefs()->SetBoolean(
       device_signals::prefs::kDeviceSignalsConsentReceived, consent_given);
 }
 
 void DeviceTrustManagementMixin::SetPermanentConsentGiven(
     bool permanent_consent_given) {
   device_trust_state_.permanent_consent_given = permanent_consent_given;
-  test_base_->browser()->profile()->GetPrefs()->SetBoolean(
+  test_base_->browser()->GetProfile()->GetPrefs()->SetBoolean(
       device_signals::prefs::kDeviceSignalsPermanentConsentReceived,
       permanent_consent_given);
 }

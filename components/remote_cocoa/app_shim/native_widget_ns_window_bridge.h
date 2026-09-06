@@ -11,6 +11,7 @@
 #include <optional>
 #include <vector>
 
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/remote_cocoa/app_shim/immersive_mode_controller_cocoa.h"
@@ -19,7 +20,6 @@
 #include "components/remote_cocoa/app_shim/native_widget_ns_window_fullscreen_controller.h"
 #include "components/remote_cocoa/app_shim/ns_view_ids.h"
 #include "components/remote_cocoa/app_shim/remote_cocoa_app_shim_export.h"
-#include "components/remote_cocoa/common/native_widget_ns_window.mojom-shared.h"
 #include "components/remote_cocoa/common/native_widget_ns_window.mojom.h"
 #include "components/remote_cocoa/common/text_input_host.mojom.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
@@ -61,6 +61,11 @@ using remote_cocoa::mojom::NativeWidgetNSWindowHost;
 using remote_cocoa::NativeWidgetNSWindowHostHelper;
 using remote_cocoa::CocoaMouseCapture;
 using remote_cocoa::CocoaMouseCaptureDelegate;
+
+// Identifier for the native opaque background view used to prevent transparency
+// when glass frame is active.
+REMOTE_COCOA_APP_SHIM_EXPORT extern NSString* const
+    kOpaqueFrameBackgroundViewIdentifier;
 
 // A bridge to an NSWindow managed by an instance of NativeWidgetMac or
 // DesktopNativeWidgetMac. Serves as a helper class to bridge requests from the
@@ -135,6 +140,14 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   // Called by the NSWindowDelegate when the size of the window changes.
   void OnSizeChanged();
 
+  // Called once by the NSWindowDelegate when the position of the window is
+  // about to change.
+  void OnWindowWillMove();
+
+  // Called once by the NSWindowDelegate when a user-initiated move has
+  // completed.
+  void OnWindowDidEndMove();
+
   // Called once by the NSWindowDelegate when the position of the window has
   // changed.
   void OnPositionChanged();
@@ -189,6 +202,7 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   NativeWidgetMacNSWindow* ns_window();
 
   remote_cocoa::DragDropClient* drag_drop_client();
+  ui::mojom::ModalType modal_type() const { return modal_type_; }
   bool is_translucent_window() const { return is_translucent_window_; }
 
   // The parent widget specified in Widget::InitParams::parent. If non-null, the
@@ -205,7 +219,7 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   bool target_fullscreen_state() const {
     return fullscreen_controller_.GetTargetFullscreenState();
   }
-  bool window_visible() const;
+  bool window_visible() const { return window_visible_; }
   bool wants_to_be_visible() const { return wants_to_be_visible_; }
   bool in_fullscreen_transition() const {
     return fullscreen_controller_.IsInFullscreenTransition();
@@ -213,6 +227,11 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
 
   bool CanGoBack() const { return can_go_back_; }
   bool CanGoForward() const { return can_go_forward_; }
+  CocoaWindowMoveLoop* window_move_loop() const {
+    return window_move_loop_.get();
+  }
+  void SetWindowMoveLoopForTesting(
+      std::unique_ptr<CocoaWindowMoveLoop> move_loop);
 
   // Whether to run a custom animation for the provided |transition|.
   bool ShouldRunCustomAnimationFor(
@@ -245,6 +264,7 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   // ui::CATransactionCoordinator::PreCommitObserver:
   bool ShouldWaitInPreCommit() override;
   base::TimeDelta PreCommitTimeout() override;
+  bool IsWindowInLiveResize() override;
 
   // remote_cocoa::mojom::NativeWidgetNSWindow:
   void CreateWindow(mojom::CreateWindowParamsPtr params) override;
@@ -280,6 +300,7 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   void SetTransitionsToAnimate(
       remote_cocoa::mojom::VisibilityTransition transitions) override;
   void SetVisibleOnAllSpaces(bool always_visible) override;
+  void MoveToActiveFullscreenSpace() override;
   void SetZoomed(bool zoomed) override;
   void EnterFullscreen(int64_t target_display_id) override;
   void ExitFullscreen() override;
@@ -295,7 +316,7 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   void SetActivationIndependence(bool independence) override;
   void SetAspectRatio(const gfx::SizeF& aspect_ratio,
                       const gfx::Size& excluded_margin) override;
-  void SetCALayerParams(const gfx::CALayerParams& ca_layer_params) override;
+  void SetCALayerParams(gfx::CALayerParams ca_layer_params) override;
   void SetWindowTitle(const std::u16string& title) override;
   void SetIgnoresMouseEvents(bool ignores_mouse_events) override;
   void MakeFirstResponder() override;
@@ -324,6 +345,8 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
                           mojo::PendingReceiver<mojom::Menu> receiver) override;
   void SetAllowScreenshots(bool allow) override;
   void SetColorMode(ui::ColorProviderKey::ColorMode color_mode) override;
+  void BeginFileDrag(mojom::FileDragDataPtr file_drag_data,
+                     const gfx::PointF& mouse_location) override;
 
   // Return true if [NSApp updateWindows] needs to be called after updating the
   // TextInputClient.
@@ -354,6 +377,15 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
 
   base::WeakPtr<NativeWidgetNSWindowBridge> GetWeakPtr();
 
+  // Called by the NSWindowDelegate to cause a live-resize step to the specified
+  // frame.
+  void OnLiveResizeToFrame(NSRect new_window_frame);
+
+  // Update `host_` and its compositor with a new NSWindow frame size. This
+  // can be done in response to the -[NSWindow frame] attribute changing, or
+  // in anticipation of a live-resize step.
+  void SendWindowFrameChangeToHost(NSRect new_window_frame);
+
  private:
   friend class views::test::BridgedNativeWidgetTestApi;
 
@@ -370,6 +402,10 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   // Check if the window's zoomed state has changed. If changes happen, notify
   // the clients.
   void CheckAndNotifyZoomedStateChanged();
+
+  // Check if the window's "visible on all workspaces" state has changed. If
+  // changes happen, notify the host.
+  void CheckAndNotifyAllWorkspacesStateChanged();
 
   // Notify descendants of a visibility change.
   void NotifyVisibilityChangeDown();
@@ -390,6 +426,10 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
 
   // Returns true if window restoration data exists from session restore.
   bool HasWindowRestorationData();
+
+  // Restores the initial collection behavior after temporarily changing it in
+  // `MoveToActiveFullscreenSpace()`.
+  void RestoreCollectionBehavior();
 
   // CocoaMouseCaptureDelegate:
   bool PostCapturedEvent(NSEvent* event) override;
@@ -448,16 +488,28 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   // changes.
   bool window_visible_ = false;
 
-  // Stores the value last read from -[NSWindow isOnActiveSpace].
-  bool window_on_active_space_ = false;
-
-  // Stores the value last read from -[NSWindow isZoomed], to detect zoomed
-  // state changes.
-  bool window_zoomed_ = false;
-
   // If true, the window is either visible, or wants to be visible but is
   // currently hidden due to having a hidden parent.
   bool wants_to_be_visible_ = false;
+
+  // State for live resize.
+  struct LiveResizeState {
+    // If non-nullopt, then this is the frame that the window is being
+    // live-resized to. Once a compositor frame of this size arrives, we will
+    // call -[NSWindow setFrame:] with this frame.
+    std::optional<NSRect> pending_window_frame;
+
+    // This can only be non-nullopt if `pending_window_frame` is also
+    // non-nullopt. It is the next requested window frame for live-resize. It
+    // has not been sent to the compositor yet. It will be sent to the
+    // compositor only once the compositor has produced a frame for the size of
+    // `pending_window_frame`.
+    std::optional<NSRect> queued_pending_window_frame;
+  };
+  LiveResizeState live_resize_;
+
+  // If true, the window is currently being moved by the user.
+  bool in_move_ = false;
 
   // If true, then ignore interactions with CATransactionCoordinator until the
   // first frame arrives.
@@ -467,27 +519,25 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   // shadow needs to be invalidated when a frame is received for the new shape.
   bool invalidate_shadow_on_frame_swap_ = false;
 
-  // A blob representing the window's saved state, which is applied and cleared
-  // on the first call to SetVisibilityState().
-  std::vector<uint8_t> pending_restoration_data_;
+  // The window's saved state, which is applied and cleared on the first call to
+  // SetVisibilityState().
+  remote_cocoa::mojom::StateRestorationDataPtr pending_restoration_data_;
 
   // Manages immersive mode when in fullscreen.
   std::unique_ptr<ImmersiveModeControllerCocoa> immersive_mode_controller_;
 
-  // This tracks headless window visibility and fullscreen states.
-  // In headless mode the platform window is never made visible or change its
-  // state, so this structure holds the requested state for reporting.
-  struct HeadlessModeWindow {
-    bool visibility_state = false;
-    bool fullscreen_state = false;
-  };
-
-  // This is present iff the window has been created in headless mode.
-  std::optional<HeadlessModeWindow> headless_mode_window_;
+  // When `window_` is made visible, its `alphaValue` is forced to 0 to avoid
+  // flashing a blank window. The value to restore it to when the compositor
+  // frame is received is stored here.
+  std::optional<float> pending_alpha_value_;
 
   // This tracks whether current window can go back or go forward.
   bool can_go_back_ = false;
   bool can_go_forward_ = false;
+
+  base::RepeatingCallback<void(NSWindow*, bool)>
+      capture_exclusion_applier_for_testing_;
+  bool allow_screenshots_ = true;
 
   display::ScopedDisplayObserver display_observer_{this};
 
@@ -498,6 +548,10 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   // ImmersiveFullscreenRevealUnlock() calls so locks can persist across
   // immersive_mode_controller_ resets.
   int immersive_fullscreen_reveal_lock_count_ = 0;
+
+  // Tracks the initial collection behavior to restore to when we temporarily
+  // change it to move to the active fullscreen space.
+  std::optional<NSWindowCollectionBehavior> collection_behavior_to_restore_;
 
   base::OnceCallback<void(NativeWidgetMacNSWindow*)> window_set_callback_;
 

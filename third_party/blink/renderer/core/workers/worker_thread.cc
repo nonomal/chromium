@@ -32,6 +32,7 @@
 #include <thread>
 #include <utility>
 
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
@@ -149,7 +150,8 @@ class WorkerThread::InterruptData {
   bool is_in_back_forward_cache() const { return is_in_back_forward_cache_; }
 
  private:
-  WorkerThread* worker_thread_;
+  raw_ptr<WorkerThread, UnprotectedInRelease | DanglingUntriaged>
+      worker_thread_;
   mojom::blink::FrameLifecycleState state_;
   bool is_in_back_forward_cache_;
   bool seen_interrupt_ = false;
@@ -283,15 +285,6 @@ void WorkerThread::Terminate() {
       *task_runner, FROM_HERE,
       CrossThreadBindOnce(&WorkerThread::PrepareForShutdownOnWorkerThread,
                           CrossThreadUnretained(this)));
-
-  if (!base::FeatureList::IsEnabled(
-          blink::features::kWorkerThreadSequentialShutdown)) {
-    PostCrossThreadTask(
-        *task_runner, FROM_HERE,
-        CrossThreadBindOnce(&WorkerThread::PerformShutdownOnWorkerThread,
-                            CrossThreadUnretained(this)));
-    return;
-  }
 
   bool perform_shutdown = false;
   {
@@ -450,19 +443,14 @@ void WorkerThread::ChildThreadStartedOnWorkerThreadLegacy(WorkerThread* child) {
   {
     base::AutoLock locker(lock_);
     DCHECK_EQ(ThreadState::kRunning, thread_state_);
-    if (base::FeatureList::IsEnabled(
-            blink::features::kWorkerThreadSequentialShutdown)) {
-      CHECK_EQ(TerminationProgress::kNotRequested, termination_progress_);
-      ++num_child_threads_;
-      CHECK_EQ(child_threads_.size(), num_child_threads_);
-    }
+    CHECK_EQ(TerminationProgress::kNotRequested, termination_progress_);
+    ++num_child_threads_;
+    CHECK_EQ(child_threads_.size(), num_child_threads_);
   }
 }
 
 bool WorkerThread::ChildThreadStartedOnWorkerThread(WorkerThread* child) {
   DCHECK(IsCurrentThread());
-  CHECK(base::FeatureList::IsEnabled(
-      blink::features::kWorkerThreadSequentialShutdown));
   CHECK(base::FeatureList::IsEnabled(
       blink::features::kWorkerThreadRespectTermRequest));
   {
@@ -483,13 +471,6 @@ bool WorkerThread::ChildThreadStartedOnWorkerThread(WorkerThread* child) {
 void WorkerThread::ChildThreadTerminatedOnWorkerThread(WorkerThread* child) {
   DCHECK(IsCurrentThread());
   child_threads_.erase(child);
-  if (!base::FeatureList::IsEnabled(
-          blink::features::kWorkerThreadSequentialShutdown)) {
-    if (child_threads_.empty() && IsRequestedToTerminate()) {
-      PerformShutdownOnWorkerThread();
-    }
-    return;
-  }
 
   bool perform_shutdown = false;
   {
@@ -666,7 +647,7 @@ void WorkerThread::InitializeOnWorkerThread(
   base::ElapsedTimer timer;
   DCHECK(IsCurrentThread());
   backing_thread_weak_factory_.emplace(this);
-  worker_reporting_proxy_.WillInitializeWorkerContext();
+  worker_reporting_proxy_->WillInitializeWorkerContext();
   {
     TRACE_EVENT0("blink.worker", "WorkerThread::InitializeWorkerContext");
     base::AutoLock locker(lock_);
@@ -696,11 +677,16 @@ void WorkerThread::InitializeOnWorkerThread(
     global_scope_ =
         CreateWorkerGlobalScope(std::move(global_scope_creation_params));
     worker_scheduler_->InitializeOnWorkerThread(global_scope_);
-    worker_reporting_proxy_.DidCreateWorkerGlobalScope(GlobalScope());
+    worker_reporting_proxy_->DidCreateWorkerGlobalScope(GlobalScope());
 
     worker_inspector_controller_ = WorkerInspectorController::Create(
         this, url_for_debugger, inspector_task_runner_,
         std::move(devtools_params));
+
+    if (auto* worker_global_scope =
+            DynamicTo<WorkerGlobalScope>(GlobalScope())) {
+      worker_global_scope->CreateAnimationFrameTimingMonitor();
+    }
 
     // Since context initialization below may fail, we should notify debugger
     // about the new worker thread separately, so that it can resolve it by id
@@ -836,7 +822,8 @@ void WorkerThread::PrepareForShutdownOnWorkerThread() {
   // are observer of the |GlobalScope()| (see the DedicatedWorker class) and
   // they initiate thread termination on destruction of the parent context.
   GlobalScope()->NotifyContextDestroyed();
-  GetIsolate()->ContextDisposedNotification(/*dependant_context=*/false);
+  GetIsolate()->ContextDisposedNotification(
+      v8::ContextDependants::kNoDependants);
 
   worker_scheduler_->Dispose();
 
@@ -848,32 +835,16 @@ void WorkerThread::PerformShutdownOnWorkerThread() {
   DCHECK(IsCurrentThread());
   {
     base::AutoLock locker(lock_);
-    if (!base::FeatureList::IsEnabled(
-            blink::features::kWorkerThreadSequentialShutdown)) {
-      DCHECK_NE(TerminationProgress::kNotRequested, termination_progress_);
-    } else {
-      DCHECK_EQ(TerminationProgress::kPerforming, termination_progress_);
-    }
+    DCHECK_EQ(TerminationProgress::kPerforming, termination_progress_);
     DCHECK_EQ(ThreadState::kReadyToShutdown, thread_state_);
     if (exit_code_ == ExitCode::kNotTerminated)
       SetExitCode(ExitCode::kGracefullyTerminated);
   }
 
-  if (!base::FeatureList::IsEnabled(
-          blink::features::kWorkerThreadSequentialShutdown)) {
-    // When child workers are present, wait for them to shutdown before shutting
-    // down this thread. ChildThreadTerminatedOnWorkerThread() is responsible
-    // for completing shutdown on the worker thread after the last child shuts
-    // down.
-    if (!child_threads_.empty()) {
-      return;
-    }
-  } else {
-    // Child workers must not exist when `PerformShutdownOnWorkerThread()`
-    // is called because it has already been checked before calling the
-    // function.
-    CHECK(child_threads_.empty());
-  }
+  // Child workers must not exist when `PerformShutdownOnWorkerThread()`
+  // is called because it has already been checked before calling the
+  // function.
+  CHECK(child_threads_.empty());
 
   inspector_task_runner_->Dispose();
   if (worker_inspector_controller_) {

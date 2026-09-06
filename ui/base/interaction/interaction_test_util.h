@@ -46,7 +46,9 @@ enum class [[nodiscard]] ActionResult {
   //
   // No further attempts at performing the action should be made. Should be
   // treated as failure by default.
-  kKnownIncompatible
+  kKnownIncompatible,
+
+  kMaxValue = kKnownIncompatible
 };
 
 // Platform- and framework-independent utility for delegating specific common
@@ -87,6 +89,7 @@ enum class [[nodiscard]] ActionResult {
 //
 class InteractionTestUtil {
  public:
+  // LINT.IfChange(InputType)
   // Indicates the type of input we want to apply to an element. Default in most
   // cases is `kDontCare` which will use the most reliable form of input (or may
   // even call code that directly simulates e.g. a button press).
@@ -108,6 +111,7 @@ class InteractionTestUtil {
     // If values are added to the enumeration, update this value.
     kMaxValue = kTouch
   };
+  // LINT.ThenChange(//ui/webui/resources/js/tracked_element/tracked_element.mojom:InputType)
 
   // How should text be sent to a text input?
   enum class TextEntryMode {
@@ -295,8 +299,10 @@ class InteractionTestUtil {
   std::vector<std::unique_ptr<Simulator>> simulators_;
 };
 
+void PrintTo(ActionResult action_result, std::ostream* os);
 void PrintTo(InteractionTestUtil::InputType input_type, std::ostream* os);
 
+std::ostream& operator<<(std::ostream& os, ActionResult action_result);
 std::ostream& operator<<(std::ostream& os,
                          InteractionTestUtil::InputType input_type);
 

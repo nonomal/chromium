@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/containers/contains.h"
 
 namespace content {
 
@@ -67,7 +66,7 @@ bool PosixFileDescriptorInfoImpl::HasID(int id) const {
 }
 
 bool PosixFileDescriptorInfoImpl::OwnsFD(base::PlatformFile file) {
-  return base::Contains(owned_descriptors_, file, &base::ScopedFD::get);
+  return std::ranges::contains(owned_descriptors_, file, &base::ScopedFD::get);
 }
 
 base::ScopedFD PosixFileDescriptorInfoImpl::ReleaseFD(base::PlatformFile file) {
@@ -86,7 +85,7 @@ void PosixFileDescriptorInfoImpl::AddToMapping(
     int id,
     base::PlatformFile fd,
     const base::MemoryMappedFile::Region& region) {
-  DCHECK(!HasID(id));
+  CHECK(!HasID(id), base::NotFatalUntil::M159);
   mapping_.push_back(std::make_pair(fd, id));
   if (region != base::MemoryMappedFile::Region::kWholeFile)
     ids_to_regions_[id] = region;

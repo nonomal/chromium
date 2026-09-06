@@ -5,10 +5,10 @@
 #ifndef COMPONENTS_WEBAPPS_ISOLATED_WEB_APPS_TEST_SUPPORT_TEST_IWA_CLIENT_H_
 #define COMPONENTS_WEBAPPS_ISOLATED_WEB_APPS_TEST_SUPPORT_TEST_IWA_CLIENT_H_
 
+#include "base/memory/raw_ptr.h"
 #include "base/notreached.h"
 #include "components/web_package/signed_web_bundles/signed_web_bundle_id.h"
 #include "components/webapps/isolated_web_apps/client.h"
-#include "testing/gmock/include/gmock/gmock.h"
 
 namespace web_app::test {
 
@@ -23,23 +23,14 @@ class TestIwaClient : public IwaClient {
       const web_package::SignedWebBundleId& web_bundle_id,
       const network::ResourceRequest& request,
       const std::optional<content::FrameTreeNodeId>& frame_tree_node,
-      base::OnceCallback<void(
-          base::expected<IwaSourceWithModeOrGeneratedResponse, std::string>)>
-          callback) override;
+      base::OnceCallback<
+          void(base::expected<IwaSourceWithModeOrGeneratedResponse,
+                              SourceRequestError>)> callback) override;
+  void SetRuntimeDataProvider(IwaRuntimeDataProvider* provider);
   IwaRuntimeDataProvider* GetRuntimeDataProvider() override;
-};
 
-class MockIwaClient : public TestIwaClient {
- public:
-  MockIwaClient();
-  ~MockIwaClient() override;
-
-  MOCK_METHOD((base::expected<void, std::string>),
-              ValidateTrust,
-              (content::BrowserContext*,
-               const web_package::SignedWebBundleId&,
-               bool),
-              (override));
+ private:
+  raw_ptr<IwaRuntimeDataProvider> provider_ = nullptr;
 };
 
 }  // namespace web_app::test

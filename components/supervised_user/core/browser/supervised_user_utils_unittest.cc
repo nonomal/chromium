@@ -19,7 +19,7 @@ namespace {
 class SupervisedUserUtilsTest : public ::testing::Test {
  protected:
   SupervisedUserUtilsTest() {
-    EnableParentalControls(*supervised_user_test_environment_.pref_service());
+    supervised_user_test_environment_.EnableSupervisedAccount();
   }
   ~SupervisedUserUtilsTest() override {
     supervised_user_test_environment_.Shutdown();
@@ -33,44 +33,6 @@ class SupervisedUserUtilsTest : public ::testing::Test {
   base::test::TaskEnvironment task_environment_;
   SupervisedUserTestEnvironment supervised_user_test_environment_;
 };
-
-TEST_F(SupervisedUserUtilsTest, StripOnDefaultFilteringBehaviour) {
-  FilteringBehaviorReason reason = FilteringBehaviorReason::DEFAULT;
-  UrlFormatter url_formatter(*supervised_user_test_environment().url_filter(),
-                             reason);
-
-  GURL full_url("http://www.example.com");
-  GURL stripped_url("http://example.com");
-
-  EXPECT_EQ(stripped_url, url_formatter.FormatUrl(full_url));
-}
-
-TEST_F(SupervisedUserUtilsTest,
-       StripOnManualFilteringBehaviourWithoutConflict) {
-  FilteringBehaviorReason reason = FilteringBehaviorReason::MANUAL;
-  UrlFormatter url_formatter(*supervised_user_test_environment().url_filter(),
-                             reason);
-
-  GURL full_url("http://www.example.com");
-  GURL stripped_url("http://example.com");
-
-  EXPECT_EQ(stripped_url, url_formatter.FormatUrl(full_url));
-}
-
-TEST_F(SupervisedUserUtilsTest,
-       SkipStripOnManualFilteringBehaviourWithConflict) {
-  FilteringBehaviorReason reason = FilteringBehaviorReason::MANUAL;
-  GURL full_url("http://www.example.com");
-
-  // Add an conflicting entry in the blocklist.
-  supervised_user_test_environment().SetManualFilterForHost(full_url.GetHost(),
-                                                            false);
-
-  UrlFormatter url_formatter(*supervised_user_test_environment().url_filter(),
-                             reason);
-
-  EXPECT_EQ(full_url, url_formatter.FormatUrl(full_url));
-}
 
 TEST_F(SupervisedUserUtilsTest, ParseParentAccessCallbackDecodingError) {
   std::string invalid_base64_message = "*INVALID*CHARS";

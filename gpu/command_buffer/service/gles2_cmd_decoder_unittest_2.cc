@@ -4,8 +4,12 @@
 
 #include <stdint.h>
 
+#include <string_view>
+
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/containers/span.h"
+#include "base/strings/string_view_util.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/context_group.h"
@@ -690,20 +694,6 @@ void GLES2DecoderTestBase::SpecializedSetup<
 }
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::GetProgramiv, 0>(bool valid) {
-  if (valid) {
-    // GetProgramiv calls ClearGLError then GetError to make sure
-    // it actually got a value so it can report correctly to the client.
-    EXPECT_CALL(*gl_, GetError())
-        .WillOnce(Return(GL_NO_ERROR))
-        .RetiresOnSaturation();
-    EXPECT_CALL(*gl_, GetError())
-        .WillOnce(Return(GL_NO_ERROR))
-        .RetiresOnSaturation();
-  }
-}
-
-template <>
 void GLES2DecoderTestBase::SpecializedSetup<cmds::RenderbufferStorage, 0>(
     bool valid) {
   DoBindRenderbuffer(GL_RENDERBUFFER, client_renderbuffer_id_,
@@ -942,6 +932,12 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::GetVertexAttribIuiv, 0>(
         .WillOnce(Return(GL_NO_ERROR))
         .RetiresOnSaturation();
   }
+}
+
+template <>
+void GLES2DecoderTestBase::SpecializedSetup<cmds::Uniform4f, 0>(
+    bool /* valid */) {
+  SetupShaderForUniform(GL_FLOAT_VEC4);
 }
 
 #include "gpu/command_buffer/service/gles2_cmd_decoder_unittest_2_autogen.h"

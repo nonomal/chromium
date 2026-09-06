@@ -30,12 +30,9 @@ struct BLINK_COMMON_EXPORT
       const blink::IndexedDBDatabaseMetadata& metadata) {
     return metadata.max_object_store_id;
   }
-  static std::map<int64_t, blink::IndexedDBObjectStoreMetadata> object_stores(
-      const blink::IndexedDBDatabaseMetadata& metadata) {
+  static const std::map<int64_t, blink::IndexedDBObjectStoreMetadata>&
+  object_stores(const blink::IndexedDBDatabaseMetadata& metadata) {
     return metadata.object_stores;
-  }
-  static bool was_cold_open(const blink::IndexedDBDatabaseMetadata& metadata) {
-    return metadata.was_cold_open;
   }
   static bool is_sqlite(const blink::IndexedDBDatabaseMetadata& metadata) {
     return metadata.is_sqlite;
@@ -161,7 +158,7 @@ struct BLINK_COMMON_EXPORT
       const blink::IndexedDBObjectStoreMetadata& metadata) {
     return metadata.max_index_id;
   }
-  static std::map<int64_t, blink::IndexedDBIndexMetadata> indexes(
+  static const std::map<int64_t, blink::IndexedDBIndexMetadata>& indexes(
       const blink::IndexedDBObjectStoreMetadata& metadata) {
     return metadata.indexes;
   }

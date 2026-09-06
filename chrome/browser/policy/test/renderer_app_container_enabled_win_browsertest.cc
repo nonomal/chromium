@@ -11,7 +11,6 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/values.h"
 #include "chrome/browser/policy/chrome_browser_policy_connector.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -19,7 +18,6 @@
 #include "components/policy/core/common/policy_map.h"
 #include "components/policy/core/common/policy_types.h"
 #include "components/policy/policy_constants.h"
-#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
@@ -110,12 +108,12 @@ IN_PROC_BROWSER_TEST_P(RendererAppContainerEnabledTest, IsRespected) {
       }));
   run_loop.Run();
 
-  const base::Value::List* process_list = out_args.GetIfList();
+  const base::ListValue* process_list = out_args.GetIfList();
   ASSERT_TRUE(process_list);
   bool found_renderer = false;
   bool found_lowbox_renderer = false;
   for (const base::Value& process_value : *process_list) {
-    const base::Value::Dict* process = process_value.GetIfDict();
+    const base::DictValue* process = process_value.GetIfDict();
     ASSERT_TRUE(process);
     std::optional<double> pid = process->FindDouble("processId");
     ASSERT_TRUE(pid.has_value());

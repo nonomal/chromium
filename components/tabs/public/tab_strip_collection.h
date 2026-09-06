@@ -11,9 +11,9 @@
 #include <unordered_map>
 
 #include "base/types/pass_key.h"
+#include "components/split_tabs/split_tab_id.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "components/tabs/public/split_tab_data.h"
-#include "components/tabs/public/split_tab_id.h"
 #include "components/tabs/public/tab_collection.h"
 
 class TabStripModel;
@@ -41,10 +41,19 @@ class TabStripCollection : public TabCollection {
 
   size_t IndexOfFirstNonPinnedTab() const;
 
-  void AddTabRecursive(std::unique_ptr<TabInterface> tab,
+  void AddTabRecursive(ScopedTab tab,
                        size_t index,
                        std::optional<tab_groups::TabGroupId> new_group_id,
                        bool new_pinned_state);
+  template <typename T>
+    requires std::derived_from<T, TabInterface>
+  void AddTabRecursive(std::unique_ptr<T> tab,
+                       size_t index,
+                       std::optional<tab_groups::TabGroupId> new_group_id,
+                       bool new_pinned_state) {
+    AddTabRecursive(ScopedTab(tab.release()), index, new_group_id,
+                    new_pinned_state);
+  }
 
   void MoveTabRecursive(size_t initial_index,
                         size_t final_index,
@@ -55,17 +64,17 @@ class TabStripCollection : public TabCollection {
       size_t destination_index,
       std::optional<tab_groups::TabGroupId> new_group_id,
       bool new_pinned_state,
-      const std::set<TabCollection::Type>& retain_collection_types);
+      const TabCollection::TypeEnumSet retain_collection_types);
 
   // Removes the tab present at a recursive index in the collection and
   // returns the unique_ptr to the tab model. If there is no tab present
   // due to bad input then CHECK.
-  std::unique_ptr<TabInterface> RemoveTabAtIndexRecursive(size_t index);
+  ScopedTab RemoveTabAtIndexRecursive(size_t index);
 
   // TabCollection:
   // Tabs and Collections are not allowed to be removed from TabStripCollection.
   // `MaybeRemoveTab` and `MaybeRemoveCollection` will return nullptr.
-  std::unique_ptr<TabInterface> MaybeRemoveTab(TabInterface* tab) override;
+  ScopedTab MaybeRemoveTab(TabInterface* tab) override;
   std::unique_ptr<TabCollection> MaybeRemoveCollection(
       TabCollection* collection) override;
 
@@ -138,7 +147,7 @@ class TabStripCollection : public TabCollection {
   // in the collection.
   ChildrenPtrs GetTabsAndCollectionsForMove(
       const std::vector<int>& tab_indices,
-      const std::set<TabCollection::Type>& retain_collection_types);
+      const TabCollection::TypeEnumSet retain_collection_types);
 
   // Helper to centralize updates to `group_mapping_` and `split_mapping_`. If
   // `root_collection` is a group, the appropriate splits need to group need to
@@ -154,8 +163,7 @@ class TabStripCollection : public TabCollection {
   // index.
   // TODO(crbug.com/457463822): Look into combining these to single node
   // methods.
-  void AddTabImpl(std::unique_ptr<TabInterface> tab,
-                  const TabCollection::Position& position);
+  void AddTabImpl(ScopedTab tab, const TabCollection::Position& position);
   void AddTabCollectionImpl(std::unique_ptr<TabCollection> collection,
                             const TabCollection::Position& position);
 
@@ -164,7 +172,7 @@ class TabStripCollection : public TabCollection {
   // 1. Removing the node to the target collection at the specified direct
   // index.
   // 2. Notifying observers that a node has been removed.
-  std::unique_ptr<TabInterface> RemoveTabImpl(TabInterface* tab);
+  ScopedTab RemoveTabImpl(TabInterface* tab);
   std::unique_ptr<TabCollection> RemoveTabCollectionImpl(
       TabCollection* collection);
 

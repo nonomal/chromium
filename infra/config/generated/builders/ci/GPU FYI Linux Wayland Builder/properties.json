@@ -55,36 +55,8 @@
                 "builder": "GPU FYI Linux Wayland Builder",
                 "project": "chromium"
               },
-              "run_tests_serially": true
-            }
-          },
-          {
-            "builder_id": {
-              "bucket": "ci",
-              "builder": "Linux Wayland FYI Release (Intel)",
-              "project": "chromium"
-            },
-            "builder_spec": {
-              "builder_group": "chromium.gpu.fyi",
-              "execution_mode": "TEST",
-              "legacy_chromium_config": {
-                "apply_configs": [
-                  "mb"
-                ],
-                "build_config": "Release",
-                "config": "chromium",
-                "target_bits": 64,
-                "target_platform": "linux"
-              },
-              "legacy_gclient_config": {
-                "config": "chromium"
-              },
-              "parent": {
-                "bucket": "ci",
-                "builder": "GPU FYI Linux Wayland Builder",
-                "project": "chromium"
-              },
-              "run_tests_serially": true
+              "run_tests_serially": true,
+              "use_test_trigger_cas": true
             }
           }
         ]
@@ -101,25 +73,15 @@
           "bucket": "ci",
           "builder": "Linux Wayland FYI Release (AMD)",
           "project": "chromium"
-        },
-        {
-          "bucket": "ci",
-          "builder": "Linux Wayland FYI Release (Intel)",
-          "project": "chromium"
         }
       ],
       "mirroring_builder_group_and_names": [
         {
           "builder": "gpu-fyi-try-linux-wayland-amd-rel",
           "group": "tryserver.chromium.linux"
-        },
-        {
-          "builder": "gpu-fyi-try-linux-wayland-intel-rel",
-          "group": "tryserver.chromium.linux"
         }
       ],
-      "targets_spec_directory": "infra/config/generated/builders/ci/GPU FYI Linux Wayland Builder/targets",
-      "targets_spec_directory_relative_to_source_dir": true
+      "targets_spec_directory": "infra/config/generated/builders/ci/GPU FYI Linux Wayland Builder/targets"
     }
   },
   "$build/siso": {
@@ -127,10 +89,9 @@
       "builder"
     ],
     "enable_cloud_monitoring": true,
-    "enable_cloud_profiler": true,
     "enable_cloud_trace": true,
     "experiments": [],
-    "metrics_project": "chromium-reclient-metrics",
+    "profile_mode": "cloud",
     "project": "rbe-chromium-trusted",
     "remote_jobs": 500
   },

@@ -22,32 +22,23 @@ try:
 finally:
   sys.path.pop(0)
 
-sys.path.insert(
-    0,
-    os.path.normpath(_script_path + "/../../../components/variations/service"))
-try:
-  import generate_ui_string_overrider
-finally:
-  sys.path.pop(0)
-
 _platforms = [
-    'android',
-    'android_weblayer',
-    'android_webview',
-    'chromeos',
-    'chromeos_lacros',
-    'fuchsia',
-    'ios',
-    'linux',
-    'mac',
-    'windows',
+  'android',
+  'android_webview',
+  'chromeos',
+  'fuchsia',
+  'ios',
+  'linux',
+  'mac',
+  'windows',
 ]
 
 _form_factors = [
-    'desktop',
-    'phone',
-    'tablet',
+  'desktop',
+  'phone',
+  'tablet',
 ]
+
 
 # Convert a platform argument to the matching Platform enum value in
 # components/variations/proto/study.proto.
@@ -55,9 +46,11 @@ def _PlatformEnumValue(platform):
   assert platform in _platforms
   return 'Study::PLATFORM_' + platform.upper()
 
+
 def _FormFactorEnumValue(form_factor):
   assert form_factor in _form_factors
   return 'Study::' + form_factor.upper()
+
 
 def _Load(filename):
   """Loads a JSON file into a Python object and return this object."""
@@ -73,19 +66,9 @@ def _LoadFieldTrialConfig(filename, platforms):
   return _FieldTrialConfigToDescription(_Load(filename), platforms)
 
 
-def _ConvertOverrideUIStrings(override_ui_strings):
-  """Converts override_ui_strings to formatted dicts."""
-  overrides = []
-  for ui_string, override in override_ui_strings.items():
-    overrides.append({
-        'name_hash': generate_ui_string_overrider.HashName(ui_string),
-        'value': override
-    })
-  return overrides
-
-
-def _CreateExperiment(experiment_data, platforms, form_factors,
-                      is_low_end_device):
+def _CreateExperiment(
+  experiment_data, platforms, form_factors, is_low_end_device
+):
   """Creates an experiment dictionary with all necessary information.
 
   Args:
@@ -120,23 +103,32 @@ def _CreateExperiment(experiment_data, platforms, form_factors,
   if hardware_classes_data:
     experiment['hardware_classes'] = hardware_classes_data
   exclude_hardware_classes_data = experiment_data.get(
-      'exclude_hardware_classes')
+    'exclude_hardware_classes'
+  )
   if exclude_hardware_classes_data:
     experiment['exclude_hardware_classes'] = exclude_hardware_classes_data
+  hardware_manufacturers_data = experiment_data.get('hardware_manufacturers')
+  if hardware_manufacturers_data:
+    experiment['hardware_manufacturers'] = hardware_manufacturers_data
+  exclude_hardware_manufacturers_data = experiment_data.get(
+    'exclude_hardware_manufacturers'
+  )
+  if exclude_hardware_manufacturers_data:
+    experiment['exclude_hardware_manufacturers'] = (
+      exclude_hardware_manufacturers_data
+    )
   params_data = experiment_data.get('params')
-  if (params_data):
-    experiment['params'] = [{'key': param, 'value': params_data[param]}
-                          for param in sorted(params_data.keys())];
+  if params_data:
+    experiment['params'] = [
+      {'key': param, 'value': params_data[param]}
+      for param in sorted(params_data.keys())
+    ]
   enable_features_data = experiment_data.get('enable_features')
   if enable_features_data:
     experiment['enable_features'] = enable_features_data
   disable_features_data = experiment_data.get('disable_features')
   if disable_features_data:
     experiment['disable_features'] = disable_features_data
-  override_ui_strings = experiment_data.get('override_ui_strings')
-  if override_ui_strings:
-    experiment['override_ui_string'] = _ConvertOverrideUIStrings(
-        override_ui_strings)
   return experiment
 
 
@@ -153,10 +145,13 @@ def _CreateTrial(study_name, experiment_configs, platforms):
 
     if platform_intersection:
       experiments += [
-          _CreateExperiment(e, platform_intersection,
-                            config.get('form_factors', []),
-                            config.get('is_low_end_device'))
-          for e in config['experiments']
+        _CreateExperiment(
+          e,
+          platform_intersection,
+          config.get('form_factors', []),
+          config.get('is_low_end_device'),
+        )
+        for e in config['experiments']
       ]
   return {
     'name': study_name,
@@ -181,35 +176,48 @@ def ConfigToStudies(config, platforms):
 
 def _FieldTrialConfigToDescription(config, platforms):
   return {
-      'elements': {
-          'kFieldTrialConfig': {
-              'studies': ConfigToStudies(config, platforms)
-          }
-      }
+    'elements': {
+      'kFieldTrialConfig': {'studies': ConfigToStudies(config, platforms)}
+    }
   }
+
 
 def main(arguments):
   parser = optparse.OptionParser(
-      description='Generates a struct from a JSON description.',
-      usage='usage: %prog [option] -s schema -p platform description')
-  parser.add_option('-b', '--destbase',
-      help='base directory of generated files.')
-  parser.add_option('-d', '--destdir',
-      help='directory to output generated files, relative to destbase.')
-  parser.add_option('-n', '--namespace',
-      help='C++ namespace for generated files. e.g search_providers.')
-  parser.add_option('-p', '--platform', action='append', choices=_platforms,
-      help='target platform for the field trial, mandatory.')
-  parser.add_option('-s', '--schema', help='path to the schema file, '
-      'mandatory.')
-  parser.add_option('-o', '--output', help='output filename, '
-      'mandatory.')
-  parser.add_option('-j',
-                    '--java',
-                    action='store_true',
-                    help='specify this flag to generate a java class.')
-  parser.add_option('-y', '--year',
-      help='year to put in the copy-right.')
+    description='Generates a struct from a JSON description.',
+    usage='usage: %prog [option] -s schema -p platform description',
+  )
+  parser.add_option(
+    '-b', '--destbase', help='base directory of generated files.'
+  )
+  parser.add_option(
+    '-d',
+    '--destdir',
+    help='directory to output generated files, relative to destbase.',
+  )
+  parser.add_option(
+    '-n',
+    '--namespace',
+    help='C++ namespace for generated files. e.g search_providers.',
+  )
+  parser.add_option(
+    '-p',
+    '--platform',
+    action='append',
+    choices=_platforms,
+    help='target platform for the field trial, mandatory.',
+  )
+  parser.add_option(
+    '-s', '--schema', help='path to the schema file, mandatory.'
+  )
+  parser.add_option('-o', '--output', help='output filename, mandatory.')
+  parser.add_option(
+    '-j',
+    '--java',
+    action='store_true',
+    help='specify this flag to generate a java class.',
+  )
+  parser.add_option('-y', '--year', help='year to put in the copy-right.')
   (opts, args) = parser.parse_args(args=arguments)
 
   if not opts.schema:
@@ -233,16 +241,28 @@ def main(arguments):
   schema = _Load(opts.schema)
   description = _LoadFieldTrialConfig(description_filename, opts.platform)
   json_to_struct.GenerateStruct(
-      basepath, output_root, opts.namespace, schema, description,
-      os.path.split(description_filename)[1], os.path.split(opts.schema)[1],
-      opts.year)
+    basepath,
+    output_root,
+    opts.namespace,
+    schema,
+    description,
+    os.path.split(description_filename)[1],
+    os.path.split(opts.schema)[1],
+    opts.year,
+  )
 
   # TODO(peilinwang) filter the schema by platform, form_factor, etc.
   if opts.java:
-    json_to_struct.GenerateClass(basepath, output_root, opts.namespace, schema,
-                                 description,
-                                 os.path.split(description_filename)[1],
-                                 os.path.split(opts.schema)[1], opts.year)
+    json_to_struct.GenerateClass(
+      basepath,
+      output_root,
+      opts.namespace,
+      schema,
+      description,
+      os.path.split(description_filename)[1],
+      os.path.split(opts.schema)[1],
+      opts.year,
+    )
 
 
 if __name__ == '__main__':

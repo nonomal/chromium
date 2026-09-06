@@ -22,6 +22,7 @@
 #include "base/sequence_checker.h"
 #include "base/strings/strcat.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/sequence_bound.h"
 #include "base/types/expected.h"
@@ -180,7 +181,7 @@ base::expected<base::FilePath, UnpackerError> CrxCacheImpl::Put(
   }
 
   // Update metadata.
-  base::Value::Dict data;
+  base::DictValue data;
   data.Set("appid", app_id);
   metadata_->SetValue(base::StrCat({"hashes.", hash}),
                       base::Value(std::move(data)), 0);
@@ -262,10 +263,13 @@ class CrxCacheError : public CrxCacheSynchronous {
 CrxCache::CrxCache(std::optional<base::FilePath> path) {
   if (path) {
     delegate_ = base::SequenceBound<CrxCacheImpl>(
-        base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()}), *path);
+        base::ThreadPool::CreateSequencedTaskRunner(
+            {base::MayBlock(), base::TaskPriority::USER_VISIBLE}),
+        *path);
   } else {
     delegate_ = base::SequenceBound<CrxCacheError>(
-        base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()}));
+        base::ThreadPool::CreateSequencedTaskRunner(
+            {base::MayBlock(), base::TaskPriority::USER_VISIBLE}));
   }
 }
 

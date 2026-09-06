@@ -13,7 +13,7 @@
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/process_util.h"
 #include "extensions/buildflags/buildflags.h"
-#include "third_party/blink/public/common/input/web_input_event.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
 static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
@@ -42,6 +42,8 @@ ExtensionViewHost::ExtensionViewHost(
   // in TabHelpers::AttachTabHelpers, but popups don't.
   // TODO(kalman): How much of TabHelpers::AttachTabHelpers should be here?
   autofill::ChromeAutofillClient::CreateForWebContents(host_contents());
+
+  host_contents()->SetIgnoreZoomGestures(true);
 }
 
 ExtensionViewHost::~ExtensionViewHost() = default;
@@ -67,8 +69,11 @@ void ExtensionViewHost::LoadInitialURL() {
   }
 
 #if !BUILDFLAG(IS_ANDROID)
-  // Popups may spawn modal dialogs, which need positioning information.
-  if (extension_host_type() == mojom::ViewType::kExtensionPopup) {
+  // Popups and side panels may spawn modal dialogs (e.g. the directory upload
+  // confirmation for <input webkitdirectory>), which need positioning
+  // information.
+  if (extension_host_type() == mojom::ViewType::kExtensionPopup ||
+      extension_host_type() == mojom::ViewType::kExtensionSidePanel) {
     web_modal_handler_ = std::make_unique<ExtensionViewHostWebModalHandler>(
         host_contents(), view_->GetNativeView());
   }
@@ -145,17 +150,13 @@ bool ExtensionViewHost::HandleKeyboardEvent(
     content::WebContents* source,
     const input::NativeWebKeyboardEvent& event) {
   if (IsEscapeInPopup(event)) {
-    Close();
+    if (event.GetType() == input::NativeWebKeyboardEvent::Type::kRawKeyDown ||
+        event.GetType() == input::NativeWebKeyboardEvent::Type::kKeyDown) {
+      Close();
+    }
     return true;
   }
   return UnhandledKeyboardEvent(source, event);
-}
-
-bool ExtensionViewHost::PreHandleGestureEvent(
-    content::WebContents* source,
-    const blink::WebGestureEvent& event) {
-  // Disable pinch zooming.
-  return blink::WebInputEvent::IsPinchGestureEventType(event.GetType());
 }
 
 void ExtensionViewHost::RunFileChooser(
@@ -166,6 +167,13 @@ void ExtensionViewHost::RunFileChooser(
   // element to click on, so this code only exists for extensions with a view.
   FileSelectHelper::RunFileChooser(render_frame_host, std::move(listener),
                                    params);
+}
+
+void ExtensionViewHost::EnumerateDirectory(
+    content::WebContents* web_contents,
+    scoped_refptr<content::FileSelectListener> listener,
+    const base::FilePath& path) {
+  FileSelectHelper::EnumerateDirectory(web_contents, std::move(listener), path);
 }
 
 std::unique_ptr<content::EyeDropper> ExtensionViewHost::OpenEyeDropper(
@@ -211,7 +219,6 @@ void ExtensionViewHost::OnExtensionHostDocumentElementAvailable(
 bool ExtensionViewHost::IsEscapeInPopup(
     const input::NativeWebKeyboardEvent& event) const {
   return extension_host_type() == mojom::ViewType::kExtensionPopup &&
-         event.GetType() == input::NativeWebKeyboardEvent::Type::kRawKeyDown &&
          event.windows_key_code == ui::VKEY_ESCAPE;
 }
 

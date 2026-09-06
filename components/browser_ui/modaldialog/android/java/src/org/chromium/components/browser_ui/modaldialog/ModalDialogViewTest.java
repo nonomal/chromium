@@ -30,16 +30,17 @@ import android.app.Activity;
 import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
-import android.os.Build;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.style.ForegroundColorSpan;
 import android.view.ContextThemeWrapper;
+import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.RelativeLayout;
@@ -70,10 +71,7 @@ import org.chromium.base.test.BaseActivityTestRule;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CallbackHelper;
-import org.chromium.base.test.util.DisableIf;
-import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
-import org.chromium.components.browser_ui.modaldialog.test.R;
 import org.chromium.components.browser_ui.styles.SemanticColorUtils;
 import org.chromium.components.browser_ui.widget.DualControlLayout;
 import org.chromium.components.browser_ui.widget.ModalDialogViewUtils;
@@ -245,9 +243,7 @@ public class ModalDialogViewTest {
         PropertyModel model =
                 createModel(
                         mModelBuilder.with(
-                                ModalDialogProperties.TITLE_ICON,
-                                sActivity,
-                                R.drawable.ic_business));
+                                ModalDialogProperties.TITLE_ICON, sActivity, R.drawable.ic_domain));
         onView(allOf(withId(R.id.title), withParent(withId(R.id.title_container))))
                 .check(matches(not(isDisplayed())));
         onView(allOf(withId(R.id.title_icon), withParent(withId(R.id.title_container))))
@@ -263,6 +259,76 @@ public class ModalDialogViewTest {
                 .check(matches(not(isDisplayed())));
         onView(withId(R.id.title_container)).check(matches(not(isDisplayed())));
         onView(withId(R.id.scrollable_title_container)).check(matches(not(isDisplayed())));
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"ModalDialog"})
+    public void testTitleEndIcon() {
+        // Verify that the end icon set from builder is displayed.
+        PropertyModel model =
+                createModel(
+                        mModelBuilder.with(
+                                ModalDialogProperties.TITLE_END_ICON,
+                                sActivity,
+                                R.drawable.ic_domain));
+        onView(allOf(withId(R.id.title), withParent(withId(R.id.title_container))))
+                .check(matches(not(isDisplayed())));
+        onView(allOf(withId(R.id.title_end_icon), withParent(withId(R.id.title_container))))
+                .check(matches(isDisplayed()));
+        onView(withId(R.id.title_container)).check(matches(isDisplayed()));
+        onView(withId(R.id.scrollable_title_container)).check(matches(not(isDisplayed())));
+
+        // Set icon to null and verify that icon is not shown.
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> model.set(ModalDialogProperties.TITLE_END_ICON, null));
+        onView(allOf(withId(R.id.title), withParent(withId(R.id.title_container))))
+                .check(matches(not(isDisplayed())));
+        onView(allOf(withId(R.id.title_end_icon), withParent(withId(R.id.title_container))))
+                .check(matches(not(isDisplayed())));
+        onView(withId(R.id.title_container)).check(matches(not(isDisplayed())));
+        onView(withId(R.id.scrollable_title_container)).check(matches(not(isDisplayed())));
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"ModalDialog"})
+    public void testTitleEndIcon_Gravity() {
+        PropertyModel model =
+                createModel(
+                        mModelBuilder
+                                .with(ModalDialogProperties.TITLE, "Test Title")
+                                .with(
+                                        ModalDialogProperties.TITLE_END_ICON,
+                                        sActivity,
+                                        R.drawable.ic_domain)
+                                .with(ModalDialogProperties.TITLE_END_ICON_GRAVITY, Gravity.TOP));
+        onView(allOf(withId(R.id.title_end_icon), withParent(withId(R.id.title_container))))
+                .check(matches(isDisplayed()));
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    ImageView titleEndIcon = mModalDialogView.findViewById(R.id.title_end_icon);
+                    TextView titleView = mModalDialogView.findViewById(R.id.title);
+                    var params =
+                            (LinearLayout.LayoutParams)
+                                    titleEndIcon.getLayoutParams();
+                    int startMarginResId =
+                            R.dimen.modal_dialog_title_end_icon_start_margin;
+                    int expectedStartMargin =
+                            sActivity.getResources().getDimensionPixelSize(startMarginResId);
+                    int iconHeight = titleEndIcon.getDrawable().getIntrinsicHeight();
+                    int lineHeight = titleView.getLineHeight();
+                    int expectedTopMargin = Math.max(0, (lineHeight - iconHeight) / 2);
+                    Assert.assertEquals(Gravity.TOP, params.gravity);
+                    Assert.assertEquals(expectedStartMargin, params.getMarginStart());
+                    Assert.assertEquals(expectedTopMargin, params.topMargin);
+
+                    model.set(
+                            ModalDialogProperties.TITLE_END_ICON_GRAVITY, Gravity.CENTER_VERTICAL);
+                    Assert.assertEquals(Gravity.CENTER_VERTICAL, params.gravity);
+                    Assert.assertEquals(0, params.getMarginStart());
+                    Assert.assertEquals(0, params.topMargin);
+                });
     }
 
     @Test
@@ -305,6 +371,45 @@ public class ModalDialogViewTest {
                                 (v) -> callbackHelper.notifyCalled()));
 
         onView(allOf(withId(R.id.title_back), isDisplayed())).perform(click());
+        callbackHelper.waitForCallback(0);
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"ModalDialog"})
+    public void testTitleCloseButton_Visibility() {
+        PropertyModel model =
+                createModel(
+                        mModelBuilder
+                                .with(ModalDialogProperties.TITLE, "Test Title")
+                                .with(ModalDialogProperties.TITLE_CLOSE_BUTTON_VISIBLE, true));
+
+        onView(allOf(withId(R.id.title_close_button), isDisplayed())).check(matches(isDisplayed()));
+
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    model.set(ModalDialogProperties.TITLE_CLOSE_BUTTON_VISIBLE, false);
+                });
+
+        onView(allOf(withId(R.id.title_close_button), withParent(withId(R.id.title_container))))
+                .check(matches(not(isDisplayed())));
+    }
+
+    @Test
+    @MediumTest
+    @Feature({"ModalDialog"})
+    public void testTitleCloseButton_ClickListener() throws Exception {
+        final CallbackHelper callbackHelper = new CallbackHelper();
+        createModel(
+                mModelBuilder
+                        .with(ModalDialogProperties.TITLE, "Test Title")
+                        .with(ModalDialogProperties.TITLE_CLOSE_BUTTON_VISIBLE, true)
+                        .with(
+                                ModalDialogProperties.TITLE_CLOSE_BUTTON_CLICK_LISTENER,
+                                (v) -> callbackHelper.notifyCalled()));
+
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> mModalDialogView.findViewById(R.id.title_close_button).performClick());
         callbackHelper.waitForCallback(0);
     }
 
@@ -365,45 +470,45 @@ public class ModalDialogViewTest {
     public void testMessageParagraphs() {
         ArrayList<CharSequence> paragraphs = new ArrayList<>();
         String p1 = "This is the first paragraph.";
-        String p2_original = "This is the original second paragraph.";
+        String p2Original = "This is the original second paragraph.";
         paragraphs.add(p1);
-        paragraphs.add(p2_original);
+        paragraphs.add(p2Original);
 
         ThreadUtils.runOnUiThreadBlocking(() -> mModalDialogView.setMessageParagraphs(paragraphs));
 
         // Replace the second paragraph in the ArrayList
-        String p2_updated = "This is the updated second paragraph.";
-        paragraphs.set(1, p2_updated);
+        String p2Updated = "This is the updated second paragraph.";
+        paragraphs.set(1, p2Updated);
 
         // Verify the views are correct.
         onView(withId(R.id.message_paragraphs_container)).check(matches(isDisplayed()));
         onView(withText(p1)).check(matches(isDisplayed()));
-        onView(withText(p2_original)).check(matches(isDisplayed()));
+        onView(withText(p2Original)).check(matches(isDisplayed()));
         Assert.assertEquals(
                 "Initial paragraph 0 has wrong text.",
                 p1,
                 mModalDialogView.getMessageParagraphAtIndexForTesting(0).getText().toString());
         Assert.assertEquals(
                 "Initial paragraph 1 has wrong text.",
-                p2_original,
+                p2Original,
                 mModalDialogView.getMessageParagraphAtIndexForTesting(1).getText().toString());
 
         // Replace the 2nd paragraph in the view.
         ThreadUtils.runOnUiThreadBlocking(() -> mModalDialogView.setMessageParagraphs(paragraphs));
 
         // Verify only the 2nd paragraph changed.
-        onView(withText(p2_original)).check(doesNotExist());
+        onView(withText(p2Original)).check(doesNotExist());
 
         onView(withId(R.id.message_paragraphs_container)).check(matches(isDisplayed()));
         onView(withText(p1)).check(matches(isDisplayed()));
-        onView(withText(p2_updated)).check(matches(isDisplayed()));
+        onView(withText(p2Updated)).check(matches(isDisplayed()));
         Assert.assertEquals(
                 "Updated paragraph 0 has wrong text.",
                 p1,
                 mModalDialogView.getMessageParagraphAtIndexForTesting(0).getText().toString());
         Assert.assertEquals(
                 "Updated paragraph 1 has wrong text.",
-                p2_updated,
+                p2Updated,
                 mModalDialogView.getMessageParagraphAtIndexForTesting(1).getText().toString());
     }
 
@@ -597,7 +702,8 @@ public class ModalDialogViewTest {
                 model.get(ModalDialogProperties.CHECKBOX_CHECKED));
 
         // Perform a click to check the box.
-        onView(withId(R.id.modal_dialog_checkbox)).perform(click());
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> mModalDialogView.findViewById(R.id.modal_dialog_checkbox).performClick());
 
         // Verify that the view is now checked AND the model property has been updated.
         onView(withId(R.id.modal_dialog_checkbox)).check(matches(isChecked()));
@@ -607,7 +713,8 @@ public class ModalDialogViewTest {
         Mockito.verify(mMockController, times(1)).onCheckboxChecked(true);
 
         // Perform another click to uncheck the box.
-        onView(withId(R.id.modal_dialog_checkbox)).perform(click());
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> mModalDialogView.findViewById(R.id.modal_dialog_checkbox).performClick());
 
         // Verify that the view is now unchecked AND the model property has been updated.
         onView(withId(R.id.modal_dialog_checkbox)).check(matches(isNotChecked()));
@@ -701,12 +808,11 @@ public class ModalDialogViewTest {
     @Test
     @MediumTest
     @Feature({"ModalDialog"})
-    @DisabledTest(message = "crbug.com/329163841")
     public void testButtonGroupIsScrollable() throws InterruptedException {
-        ModalDialogProperties.ModalDialogButtonSpec[] button_spec_list =
+        ModalDialogProperties.ModalDialogButtonSpec[] buttonSpecList =
                 new ModalDialogButtonSpec[20];
-        for (int i = 0; i < button_spec_list.length; i++) {
-            button_spec_list[i] =
+        for (int i = 0; i < buttonSpecList.length; i++) {
+            buttonSpecList[i] =
                     new ModalDialogProperties.ModalDialogButtonSpec(
                             1000 + i, // ModalDialogProperties.ButtonType defines a button enum.
                             // Choose values outside the defined range.
@@ -715,14 +821,14 @@ public class ModalDialogViewTest {
 
         createModel(
                 mModelBuilder.with(
-                        ModalDialogProperties.BUTTON_GROUP_BUTTON_SPEC_LIST, button_spec_list));
+                        ModalDialogProperties.BUTTON_GROUP_BUTTON_SPEC_LIST, buttonSpecList));
 
         // Check that the first button is visible.
         onView(
                         withTagValue(
                                 is(
                                         ModalDialogView.getTagForButtonType(
-                                                button_spec_list[0].getButtonType()))))
+                                                buttonSpecList[0].getButtonType()))))
                 .check(matches(isDisplayed()));
 
         // Swipe up a few times.
@@ -731,7 +837,7 @@ public class ModalDialogViewTest {
                             withTagValue(
                                     is(
                                             ModalDialogView.getTagForButtonType(
-                                                    button_spec_list[3].getButtonType()))))
+                                                    buttonSpecList[3].getButtonType()))))
                     .perform(ViewActions.swipeUp());
         }
 
@@ -740,7 +846,7 @@ public class ModalDialogViewTest {
                         withTagValue(
                                 is(
                                         ModalDialogView.getTagForButtonType(
-                                                button_spec_list[0].getButtonType()))))
+                                                buttonSpecList[0].getButtonType()))))
                 .check(matches(not(isDisplayed())));
     }
 
@@ -1148,7 +1254,7 @@ public class ModalDialogViewTest {
     @Feature({"ModalDialog"})
     public void testMenuItem_Basic() {
         final String text1 = "Menu Item 1";
-        final Drawable icon1 = sActivity.getDrawable(R.drawable.ic_business);
+        final Drawable icon1 = sActivity.getDrawable(R.drawable.ic_domain);
         ArrayList<ModalDialogMenuItem> menuItems = new ArrayList<>();
         menuItems.add(new ModalDialogMenuItem(icon1, text1));
 
@@ -1172,9 +1278,9 @@ public class ModalDialogViewTest {
     @Feature({"ModalDialog"})
     public void testMenuItems_Dynamic() {
         final String text1 = "First Menu Item";
-        final Drawable icon1 = sActivity.getDrawable(R.drawable.ic_business);
+        final Drawable icon1 = sActivity.getDrawable(R.drawable.ic_domain);
         final String text2 = "Second Menu Item";
-        final Drawable icon2 = sActivity.getDrawable(R.drawable.ic_business);
+        final Drawable icon2 = sActivity.getDrawable(R.drawable.ic_domain);
         ArrayList<ModalDialogMenuItem> menuItems = new ArrayList<>();
         menuItems.add(new ModalDialogMenuItem(icon1, text1));
         menuItems.add(new ModalDialogMenuItem(icon2, text2));
@@ -1238,19 +1344,21 @@ public class ModalDialogViewTest {
     @Test
     @MediumTest
     @Feature({"ModalDialog"})
-    @DisableIf.Build(
-            sdk_is_greater_than = Build.VERSION_CODES.VANILLA_ICE_CREAM,
-            message = "https://crbug.com/437920264")
     public void testMenuItem_Callback() throws Exception {
         final CallbackHelper callbackHelper = new CallbackHelper();
         final String text = "Menu Item with Callback";
-        final Drawable icon = sActivity.getDrawable(R.drawable.ic_business);
+        final Drawable icon = sActivity.getDrawable(R.drawable.ic_domain);
         ArrayList<ModalDialogMenuItem> menuItems = new ArrayList<>();
         menuItems.add(new ModalDialogMenuItem(icon, text, callbackHelper::notifyCalled));
 
         createModel(mModelBuilder.with(ModalDialogProperties.MENU_ITEMS, menuItems));
 
-        onView(withText(text)).perform(click());
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    LinearLayout menuItemsContainer =
+                            mModalDialogView.findViewById(R.id.menu_items_container);
+                    menuItemsContainer.getChildAt(0).performClick();
+                });
         callbackHelper.waitForCallback(0);
     }
 

@@ -6,22 +6,36 @@
 
 #include <algorithm>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
-#include "base/hash/sha1.h"
+#include "base/check.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "components/component_updater/component_updater_paths.h"
+#include "base/values.h"
+#include "components/account_id/account_id.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "crypto/obsolete/sha1.h"
 
 namespace component_updater {
+
+// Converts username to a hashed string.
+//
+// The result is converted to lowercase to stay compatible with
+// CryptoLib::HexEncodeToBuffer().
+//
+// Public so it can be friended by crypto/obsolete/sha1.
+std::string HashUsername(std::string_view username) {
+  return base::HexEncodeLower(
+      crypto::obsolete::Sha1::Hash(base::ToLowerASCII(username)));
+}
 
 namespace {
 
@@ -53,15 +67,6 @@ const user_manager::User* GetActiveUser() {
   DCHECK(user_manager::UserManager::Get());
 
   return user_manager::UserManager::Get()->GetActiveUser();
-}
-
-// Converts username to a hashed string.
-//
-// The result is converted to lowercase to stay compatible with
-// CryptoLib::HexEncodeToBuffer().
-std::string HashUsername(std::string_view username) {
-  return base::HexEncodeLower(
-      base::SHA1Hash(base::as_byte_span(base::ToLowerASCII(username))));
 }
 
 const std::string& GetRequiredStringFromDict(const base::Value& dict,
@@ -144,8 +149,8 @@ void MetadataTable::Load() {
   DCHECK(pref_service_);
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  const base::Value::Dict& dict = pref_service_->GetDict(kMetadataPrefPath);
-  const base::Value::List* installed_items = dict.FindList(kMetadataContentKey);
+  const base::DictValue& dict = pref_service_->GetDict(kMetadataPrefPath);
+  const base::ListValue* installed_items = dict.FindList(kMetadataContentKey);
   if (installed_items) {
     installed_items_ = installed_items->Clone();
     return;
@@ -168,7 +173,7 @@ void MetadataTable::AddItem(const std::string& hashed_user_id,
     return;
   }
 
-  base::Value::Dict item;
+  base::DictValue item;
   item.Set(kMetadataContentItemHashedUserIdKey, hashed_user_id);
   item.Set(kMetadataContentItemComponentKey, component_name);
   installed_items_.Append(std::move(item));

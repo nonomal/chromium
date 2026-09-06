@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 
@@ -43,6 +44,10 @@ class Statement;
 class Transaction;
 }  // namespace sql
 
+namespace base::trace_event {
+class ProcessMemoryDump;
+}
+
 namespace content::indexed_db {
 struct IndexedDBValue;
 
@@ -66,8 +71,10 @@ class CONTENT_EXPORT DatabaseConnection {
       base::FilePath path,
       BackingStoreImpl& backing_store);
 
-  // Destroys the DatabaseConnection pointed to by `db`, if appropriate, i.e. if
-  // `db` is the last weak pointer.
+  // Called by the `BackingStoreDatabaseImpl` to release its reference. This may
+  // allow `this` to close ("self-destruct") if there are no active blobs. Note
+  // that the actual self-destruction is delayed as a performance optimization,
+  // as the page may re-open the DB soon.
   static void Release(base::WeakPtr<DatabaseConnection> db);
 
   DatabaseConnection(const DatabaseConnection&) = delete;
@@ -78,6 +85,17 @@ class CONTENT_EXPORT DatabaseConnection {
   const IndexedDBDataLossInfo& data_loss_info() const {
     return data_loss_info_;
   }
+  std::list<std::pair<base::FilePath, base::FilePath>>&
+  legacy_blob_files_to_move() {
+    return legacy_blob_files_to_move_;
+  }
+
+  // Prepares the connection for destruction by moving out the `sql::Database`.
+  // Returns a callback that performs cleanup (close, vacuum, recovery, etc.).
+  // Callers are free to run the callback synchronously or on a background
+  // thread as appropriate. Some "optional" cleanup steps are skipped if the
+  // backing store is `force_closing` when the callback is run.
+  base::OnceCallback<void(bool force_closing)> GetCleanupTask() &&;
 
   // Gets the version of the database that is actually committed. This can be
   // different from the version in `metadata_` during a version change
@@ -91,8 +109,21 @@ class CONTENT_EXPORT DatabaseConnection {
   // corresponding to active blobs, but no object stores, records, etc.
   bool IsZygotic() const;
 
-  // Get the size of the database opened in-memory.
-  uint64_t GetInMemorySize() const;
+  // Get the size of the database, calculated as the number of pages in use
+  // (i.e., excluding free pages) multiplied by the page size.
+  uint64_t GetSize() const;
+
+  // Creates a memory dump for this connection at `dump_name`, suballocated to
+  // the canonical `sqlite/IndexedDB_connection/0x?` dump owned by the
+  // underlying `sql::Database`. Returns whether the dump was created.
+  bool ReportMemoryUsage(base::trace_event::ProcessMemoryDump* pmd,
+                         const std::string& dump_name);
+
+  // Called when `BucketContext` is not currently serving requests. `long_idle`
+  // is true if the `BucketContext` has been idle for a relatively long time,
+  // in which case more expensive maintenance such as vacuuming is performed.
+  // Note that "idle time" is shared by all open `DatabaseConnection` instances.
+  void PerformIdleMaintenance(bool long_idle);
 
   std::unique_ptr<BackingStoreDatabaseImpl> CreateDatabaseWrapper();
 
@@ -217,7 +248,8 @@ class CONTENT_EXPORT DatabaseConnection {
   // Called when the IDB database associated with this connection is deleted.
   // This should drop all data with the exception of active blobs, which may
   // keep `this` alive.
-  void DeleteIdbDatabase(base::PassKey<BackingStoreDatabaseImpl>);
+  void DeleteIdbDatabase(base::PassKey<BackingStoreDatabaseImpl>,
+                         std::vector<PartitionedLock> locks);
 
   // These are exposed for cursors to access `Statement` resources associated
   // with `db_`.
@@ -256,18 +288,39 @@ class CONTENT_EXPORT DatabaseConnection {
   // Changes the size at which blobs are chunked.
   static void OverrideMaxBlobSizeForTesting(base::ByteSize size);
 
+  // Overrides the VFS used for databases.
+  static void OverrideVfsNameForTesting(const char* vfs_name);
+
+  // Returns the delay before a released `DatabaseConnection` destructs.
+  static base::TimeDelta GetDestructionGracePeriodForTesting();
+
  private:
   friend class BackingStoreSqliteTest;
+  friend class DatabaseConnectionOpenCorruptionTest;
   FRIEND_TEST_ALL_PREFIXES(DatabaseConnectionTest, TooNew);
+
+  // Destroys the DatabaseConnection pointed to by `db`, if appropriate, i.e. if
+  // `db` is the last weak pointer.
+  static void MaybeSelfDestruct(base::WeakPtr<DatabaseConnection> db);
+
+  static void CloseDatabase(
+      std::unique_ptr<sql::Database> db,
+      const base::FilePath& db_path,
+      const base::FilePath& legacy_blob_directory,
+      bool should_delete,
+      bool should_attempt_recovery,
+      bool should_vacuum,
+      std::optional<std::set<int64_t>> known_legacy_blob_ids,
+      bool force_closing);
 
   DatabaseConnection(base::FilePath path, BackingStoreImpl& backing_store);
 
   bool in_memory() const { return path_.empty(); }
 
   // All startup/initialization tasks that can error are performed here. Will
-  // return Status::OK() on success. `name` must be provided if the database is
-  // new. If the database is pre-existing, `name` may not be provided, but if it
-  // is, it must match the database's stored name.
+  // return Status::OK() on success. A new database is created only if `name` is
+  // provided. If the database is pre-existing, `name` may not be provided, but
+  // if it is, it must match the database's stored name.
   Status Init(std::optional<std::u16string_view> name);
 
   bool HasActiveVersionChangeTransaction() const {
@@ -297,7 +350,9 @@ class CONTENT_EXPORT DatabaseConnection {
 
   // Called when a blob that was opened for reading stops being "active", i.e.
   // when `ActiveBlobStreamer` in `active_blobs_` no longer has connections.
-  void OnBlobBecameInactive(int64_t blob_number);
+  // In the case of legacy blobs that are standalone files, the second argument
+  // will be true.
+  void OnBlobBecameInactive(int64_t blob_number, bool is_legacy_blob);
 
   // This method adds a row to the `blob_references` table. The row corresponds
   // to an active blob, i.e. the `record_row_id` will be null. These updates are
@@ -315,6 +370,23 @@ class CONTENT_EXPORT DatabaseConnection {
   // Attempts to read metadata from the SQLite DB for storing in memory (in
   // `metadata_`).
   StatusOr<blink::IndexedDBDatabaseMetadata> GenerateIndexedDbMetadata();
+
+  // `sql::Database` error callback. Records the error in `sql_error_` so it
+  // survives a later successful op (e.g. an aborted transaction's rollback)
+  // that would otherwise reset the last-error code.
+  void OnSqlError(int error, sql::Statement* statement);
+
+  // Serves as the checkpoint callback. This is static because it may be
+  // called on a different thread, and it's not possible to check the validity
+  // of a WeakPtr-bound callback on a different sequence.
+  static void OnWalFileWritten(base::WeakPtr<DatabaseConnection> db,
+                               int wal_file_page_count);
+
+  // Executes a checkpoint. This needs to first drop resources that would block
+  // a complete checkpoint. Returns true if the checkpoint finished
+  // successfully, i.e. all frames in the WAL file were written to the main DB
+  // file.
+  bool Checkpoint(bool truncate);
 
   // This enum is used to track various events of interest, mostly errors.
   //
@@ -336,7 +408,7 @@ class CONTENT_EXPORT DatabaseConnection {
     kAddActiveBlobReferenceFailed = 4,
     kRemoveActiveBlobReferenceFailed = 5,
     kPragmaPageCountFailed = 6,
-    kPragmaPageSizeFailed = 7,
+    kPragmaPageSizeFailed = 7,  // Not logged currently.
 
     // Events associated with various callers of `Fatal()`.
     kMissingMetadataTable = 8,
@@ -350,7 +422,19 @@ class CONTENT_EXPORT DatabaseConnection {
     kUtf16StringUnreadable = 16,
     kDecompressionFailure = 17,
 
-    kMaxValue = kDecompressionFailure,
+    // Other errors.
+    kLegacyBlobFileDeletionFailed = 18,
+
+    // Another mode of fatal corruption where the `sql::MetaTable` is missing in
+    // a file that looks like a valid database.
+    kMissingMetaTable = 19,
+
+    kDatabaseIdbVersionInvalid = 20,
+
+    // Failure to delete a SQLite database file.
+    kDatabaseDeletionFailed = 21,
+
+    kMaxValue = kDatabaseDeletionFailed,
   };
   // LINT.ThenChange(//tools/metrics/histograms/metadata/storage/enums.xml:IndexedDbSqliteSpecificEvent)
 
@@ -371,10 +455,27 @@ class CONTENT_EXPORT DatabaseConnection {
   // Makes sure the given IDs exist in `metadata_`.
   void ValidateInputs(int64_t object_store_id, int64_t index_id);
 
+  // Returns true if there's a row in the `blobs` table with the given row id.
+  bool RowExistsInBlobTable(int64_t blob_row_id) const;
+
+  // Creates a snapshot of the current legacy blob files stored in the database.
+  std::set<int64_t> SnapshotLegacyBlobFiles();
+
+  // Gets the absolute file path for the directory containing legacy blob files.
+  base::FilePath GetLegacyBlobDirectory() const;
+
+  // Gets the absolute file path for the blob with `blob_id`.
+  base::FilePath GetBlobFilePath(int64_t blob_id) const;
+
   // The expected path for `db_`, or empty for in-memory DBs.
   const base::FilePath path_;
 
   std::unique_ptr<sql::Database> db_;
+
+  // Stores the error code reported by `db_`. See `OnSqlError()` for specifics
+  // on when this is updated.
+  std::optional<int> sql_error_;
+
   std::unique_ptr<sql::MetaTable> meta_table_;
   blink::IndexedDBDatabaseMetadata metadata_;
   raw_ref<BackingStoreImpl> backing_store_;
@@ -407,15 +508,25 @@ class CONTENT_EXPORT DatabaseConnection {
   // Only set while a version change transaction is active.
   std::optional<blink::IndexedDBDatabaseMetadata> metadata_snapshot_;
 
-  // blob_row_id to blob metadata. These are collected over the lifetime of a
-  // single transaction as records with associated blobs are inserted into the
-  // database. The contents of the blobs are not written until commit time. The
-  // objects in this map are also used to vend bytes (via their connected mojo
-  // remote) if the client reads a value after writing but before committing.
-  // ("Pending" blobs.) Note that some of these blobs may be associated with
-  // records that were added and later deleted (or replaced) in the same commit.
-  // A check to verify the blobs are still needed is performed at commit time.
+  // blob_row_id to blob metadata. For normal, persisted databases, these are
+  // collected over the lifetime of a single transaction as records with
+  // associated blobs are inserted into the database. The contents of the blobs
+  // are not written until commit time. The objects in this map are also used to
+  // vend bytes (via their connected mojo remote) if the client reads a value
+  // after writing but before committing. ("Pending" blobs.) Note that some of
+  // these blobs may be associated with records that were added and later
+  // deleted (or replaced) in the same commit. A check to verify the blobs are
+  // still needed is performed at commit time.
   std::map<int64_t, IndexedDBExternalObject> blobs_staged_for_commit_;
+
+  // For in-memory databases, `blobs_staged_for_commit_` are moved to this map
+  // instead of being copied into the database. In this way, the blob doesn't
+  // need to be stored in memory twice (once in the database, and once in Blob
+  // storage). They will be deleted from this map if they are obsolete following
+  // any successful write commit, which is controlled by
+  // `sweep_unused_in_memory_blobs_`.
+  std::map<int64_t, IndexedDBExternalObject> in_memory_blob_references_;
+  bool sweep_unused_in_memory_blobs_ = false;
 
   // This map will be empty until `CommitTransactionPhaseOne()` is called, at
   // which point it will be populated with helper objects that feed the blob
@@ -439,7 +550,7 @@ class CONTENT_EXPORT DatabaseConnection {
   // A blob is active when there's a live reference in some client. Every active
   // blob has a corresponding entry in this map. These blobs must keep `this`
   // alive since they're backed by the SQLite database.
-  std::map<int64_t, std::unique_ptr<ActiveBlobStreamer>> active_blobs_;
+  std::map<int64_t, std::unique_ptr<BlobEndpoint>> active_blobs_;
 
   // Used to track when rolling back a transaction necessitates updating
   // `blob_references`. Transaction rollback will affect `blob_references`
@@ -447,6 +558,26 @@ class CONTENT_EXPORT DatabaseConnection {
   // table to stay in sync with `active_blobs_` regardless of whether the
   // transaction is ultimately committed or rolled back.
   bool sync_active_blobs_after_transaction_ = false;
+
+  // Set from `OnWalFileWritten()`; used to avoid no-op checkpointing on idle.
+  bool is_wal_dirty_ = false;
+
+  // A snapshot of the set of legacy blobs that are stored as standalone files
+  // on disk. This is used to track which standalone files need to be deleted
+  // from disk. This is lazily initialized the first time a r/w txn is created.
+  // After that point, it's updated on the completion of each r/w txn and each
+  // time a blob file is deleted from disk as a result of becoming inactive.
+  // Note that this set should never grow because new blobs are always written
+  // directly to the DB.
+  std::optional<std::set<int64_t>> legacy_blob_files_;
+
+  // Only used during migration. This holds the paths to legacy blob files that
+  // must be moved IFF the database portion of the migration succeeds. The first
+  // element of the pair is the source path, and the second is the target path.
+  // The act of moving the files is executed by
+  // `BackingStoreImpl::MigrateFrom()`.
+  std::list<std::pair<base::FilePath, base::FilePath>>
+      legacy_blob_files_to_move_;
 
   // True once `DeleteIdbDatabase` has been called, or if a fatal error occurred
   // that we can't recover from.
@@ -456,8 +587,6 @@ class CONTENT_EXPORT DatabaseConnection {
   // attempting to open this database.
   IndexedDBDataLossInfo data_loss_info_;
 
-  // TODO(crbug.com/419203257): this should invalidate its weak pointers when
-  // `db_` is closed.
   base::WeakPtrFactory<DatabaseConnection> cursor_weak_factory_{this};
 
   // Only used for the callbacks passed to `blob_writers_`.
@@ -466,6 +595,8 @@ class CONTENT_EXPORT DatabaseConnection {
   // Used to vend pointers to the interfaces within `BackingStore`.
   base::WeakPtrFactory<DatabaseConnection> interface_wrapper_weak_factory_{
       this};
+
+  base::WeakPtrFactory<DatabaseConnection> wal_checkpoint_weak_factory_{this};
 };
 
 }  // namespace sqlite

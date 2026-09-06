@@ -16,6 +16,7 @@
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "crypto/hash.h"
+#include "crypto/openssl_util.h"
 #include "net/base/trace_constants.h"
 #include "third_party/boringssl/src/include/openssl/bytestring.h"
 #include "third_party/boringssl/src/include/openssl/mem.h"
@@ -74,7 +75,7 @@ std::optional<base::Value> ReadHeader(std::string_view* data) {
   const std::string_view header_bytes = data->substr(0, header_len);
   data->remove_prefix(header_len);
 
-  std::optional<base::Value::Dict> header = base::JSONReader::ReadDict(
+  std::optional<base::DictValue> header = base::JSONReader::ReadDict(
       header_bytes, base::JSON_ALLOW_TRAILING_COMMAS);
   if (!header) {
     return std::nullopt;
@@ -132,10 +133,10 @@ bool ReadCRL(std::string_view* data,
 // the given |key| (without path expansion) in |header_dict| and sets |*out|
 // to the decoded values. It's not an error if |key| is not found in
 // |header_dict|.
-bool CopyHashListFromHeader(const base::Value::Dict& header_dict,
+bool CopyHashListFromHeader(const base::DictValue& header_dict,
                             const char* key,
                             std::vector<std::string>* out) {
-  const base::Value::List* list = header_dict.FindList(key);
+  const base::ListValue* list = header_dict.FindList(key);
   if (!list) {
     // Hash lists are optional so it's not an error if not present.
     return true;
@@ -167,12 +168,12 @@ bool CopyHashListFromHeader(const base::Value::Dict& header_dict,
 // hashes to lists of the same, from the given |key| in |header_dict|. It
 // copies the map data into |out| (after base64-decoding).
 bool CopyHashToHashesMapFromHeader(
-    const base::Value::Dict& header_dict,
+    const base::DictValue& header_dict,
     const char* key,
     std::unordered_map<std::string, std::vector<std::string>>* out) {
   out->clear();
 
-  const base::Value::Dict* dict = header_dict.FindDict(key);
+  const base::DictValue* dict = header_dict.FindDict(key);
   if (dict == nullptr) {
     // Maps are optional so it's not an error if not present.
     return true;
@@ -227,7 +228,7 @@ bool CRLSet::Parse(std::string_view data, scoped_refptr<CRLSet>* out_crl_set) {
     return false;
   }
 
-  const base::Value::Dict& header_dict = header_value->GetDict();
+  const base::DictValue& header_dict = header_value->GetDict();
 
   const std::string* contents = header_dict.FindString("ContentType");
   if (!contents || (*contents != "CRLSet"))
@@ -406,15 +407,12 @@ scoped_refptr<CRLSet> CRLSet::ForTesting(
     const std::vector<std::string>& acceptable_spki_hashes_for_cn) {
   std::string subject_hash;
   if (!utf8_common_name.empty()) {
-    CBB cbb, top_level, set, inner_seq, oid, cn;
-    uint8_t* x501_data;
-    size_t x501_len;
+    bssl::ScopedCBB cbb;
+    CBB top_level, set, inner_seq, oid, cn;
     static const uint8_t kCommonNameOID[] = {0x55, 0x04, 0x03};  // 2.5.4.3
 
-    CBB_zero(&cbb);
-
-    if (!CBB_init(&cbb, 32) ||
-        !CBB_add_asn1(&cbb, &top_level, CBS_ASN1_SEQUENCE) ||
+    if (!CBB_init(cbb.get(), 32) ||
+        !CBB_add_asn1(cbb.get(), &top_level, CBS_ASN1_SEQUENCE) ||
         !CBB_add_asn1(&top_level, &set, CBS_ASN1_SET) ||
         !CBB_add_asn1(&set, &inner_seq, CBS_ASN1_SEQUENCE) ||
         !CBB_add_asn1(&inner_seq, &oid, CBS_ASN1_OBJECT) ||
@@ -423,15 +421,13 @@ scoped_refptr<CRLSet> CRLSet::ForTesting(
         !CBB_add_bytes(
             &cn, reinterpret_cast<const uint8_t*>(utf8_common_name.data()),
             utf8_common_name.size()) ||
-        !CBB_finish(&cbb, &x501_data, &x501_len)) {
-      CBB_cleanup(&cbb);
+        !CBB_flush(cbb.get())) {
       return nullptr;
     }
 
     // SAFETY: x501_data is a pointer to data that is x501_len bytes in length
     subject_hash.assign(base::as_string_view(
-        crypto::hash::Sha256(UNSAFE_BUFFERS(base::span(x501_data, x501_len)))));
-    OPENSSL_free(x501_data);
+        crypto::hash::Sha256(crypto::CbbAsSpan(cbb.get()))));
   }
 
   auto crl_set = base::WrapRefCounted(new CRLSet());

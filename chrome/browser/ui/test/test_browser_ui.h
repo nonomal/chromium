@@ -15,6 +15,10 @@
 #include "ui/base/test/skia_gold_matching_algorithm.h"
 #include "ui/gfx/geometry/rect.h"
 
+namespace ui {
+class TrackedElement;
+}
+
 namespace views {
 class Widget;
 class View;
@@ -134,6 +138,16 @@ class TestBrowserUi {
                                        const std::string& screenshot_prefix,
                                        const std::string& screenshot_name);
 
+  // Can be called by VerifyUi() to ensure pixel correctness for a tracked
+  // element (e.g. Views or WebUI element).
+  ui::test::ActionResult VerifyPixelUi(ui::TrackedElement* element,
+                                       const std::string& screenshot_prefix,
+                                       const std::string& screenshot_name);
+  ui::test::ActionResult VerifyPixelUi(ui::TrackedElement* element,
+                                       const ScreenshotOptions& options,
+                                       const std::string& screenshot_prefix,
+                                       const std::string& screenshot_name);
+
   // Own |algorithm|.
   void SetPixelMatchAlgorithm(
       std::unique_ptr<ui::test::SkiaGoldMatchingAlgorithm> algorithm);
@@ -158,6 +172,11 @@ class TestBrowserUi {
   // Returns whether or not the test was invoked with the interactive ui flag.
   // This is useful for some SetUp() calls that may be interested in that state.
   bool IsInteractiveUi() const;
+
+  // Extracts the |name| argument for ShowUi() from the current test case name.
+  // E.g. for InvokeUi_name, DISABLED_InvokeUi_name, or parameterized test
+  // InvokeUi_name/value all return "name".
+  static std::string NameFromTestCase();
 
  private:
   std::unique_ptr<ui::test::SkiaGoldMatchingAlgorithm> algorithm_;

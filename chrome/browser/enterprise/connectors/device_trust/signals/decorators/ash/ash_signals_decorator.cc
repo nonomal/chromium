@@ -11,8 +11,6 @@
 #include "chrome/browser/ash/policy/core/browser_policy_connector_ash.h"
 #include "chrome/browser/ash/policy/core/device_attributes_impl.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/enterprise/connectors/device_trust/signals/decorators/common/metrics_utils.h"
-#include "chrome/browser/enterprise/connectors/device_trust/signals/decorators/common/signals_decorator.h"
 #include "chrome/browser/enterprise/connectors/device_trust/signals/decorators/common/signals_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -24,6 +22,8 @@
 #include "components/device_signals/core/browser/signals_types.h"
 #include "components/device_signals/core/common/common_types.h"
 #include "components/device_signals/core/common/signals_constants.h"
+#include "components/enterprise/device_trust/core/metrics_utils.h"
+#include "components/enterprise/device_trust/core/signals/decorators/common/signals_decorator.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/user.h"
@@ -107,14 +107,15 @@ AshSignalsDecorator::AshSignalsDecorator(
     Profile* profile)
     : browser_policy_connector_(browser_policy_connector),
       profile_(profile),
-      attributes_(std::make_unique<policy::DeviceAttributesImpl>()) {
+      attributes_(std::make_unique<policy::DeviceAttributesImpl>(
+          browser_policy_connector_)) {
   DCHECK(browser_policy_connector_);
   DCHECK(profile_);
 }
 
 AshSignalsDecorator::~AshSignalsDecorator() = default;
 
-void AshSignalsDecorator::Decorate(base::Value::Dict& signals,
+void AshSignalsDecorator::Decorate(base::DictValue& signals,
                                    base::OnceClosure done_closure) {
   auto start_time = base::TimeTicks::Now();
 
@@ -139,8 +140,8 @@ void AshSignalsDecorator::Decorate(base::Value::Dict& signals,
   signals.Set(device_signals::names::kScreenLockSecured,
               static_cast<int32_t>(device_signals::SettingValue::ENABLED));
 
-  base::Value::List imei_list;
-  base::Value::List meid_list;
+  base::ListValue imei_list;
+  base::ListValue meid_list;
   ash::NetworkStateHandler::DeviceStateList device_list;
   GetNetworkDeviceStates(profile_, &device_list);
   for (auto* device_state : device_list) {

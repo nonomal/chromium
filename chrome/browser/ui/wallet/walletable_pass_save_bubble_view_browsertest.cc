@@ -8,9 +8,10 @@
 #include <utility>
 
 #include "base/functional/callback_helpers.h"
+#include "base/i18n/rtl.h"
+#include "base/i18n/test/scoped_rtl_for_testing.h"
 #include "base/strings/strcat.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/test/test_browser_ui.h"
@@ -36,6 +37,14 @@ using ::testing::Bool;
 using ::testing::Combine;
 using TestParameterType = std::tuple<bool, bool>;
 
+base::Time ParseTime(const std::string& time_string) {
+  base::Time time;
+  if (base::Time::FromUTCString(time_string.c_str(), &time)) {
+    return time;
+  }
+  return base::Time();
+}
+
 class MockWalletablePassSaveBubbleController
     : public WalletablePassSaveBubbleController {
  public:
@@ -57,19 +66,20 @@ class WalletablePassSaveBubbleViewBrowserTest
   void SetUpOnMainThread() override {
     UiBrowserTest::SetUpOnMainThread();
 
-    base::i18n::SetRTLForTesting(IsBrowserLanguageRTL(this->GetParam()));
+    scoped_rtl_.emplace(IsBrowserLanguageRTL(this->GetParam()));
     mock_controller_ = std::make_unique<
         testing::NiceMock<MockWalletablePassSaveBubbleController>>(
         browser()->tab_strip_model()->GetTabAtIndex(0));
 
     signin::IdentityManager* identity_manager =
-        IdentityManagerFactory::GetForProfile(browser()->profile());
+        IdentityManagerFactory::GetForProfile(browser()->GetProfile());
     signin::MakePrimaryAccountAvailable(identity_manager, "test@gmail.com",
                                         signin::ConsentLevel::kSignin);
   }
 
   void TearDownOnMainThread() override {
     mock_controller_.reset();
+    scoped_rtl_.reset();
     UiBrowserTest::TearDownOnMainThread();
   }
 
@@ -121,10 +131,11 @@ class WalletablePassSaveBubbleViewBrowserTest
   raw_ptr<WalletablePassSaveBubbleView> bubble_ = nullptr;
   std::unique_ptr<testing::NiceMock<MockWalletablePassSaveBubbleController>>
       mock_controller_ = nullptr;
+  std::optional<base::i18n::ScopedRTLForTesting> scoped_rtl_;
 };
 
 IN_PROC_BROWSER_TEST_P(WalletablePassSaveBubbleViewBrowserTest, LoyaltyCard) {
-  wallet::WalletablePass pass;
+  wallet::WalletPass pass;
   wallet::LoyaltyCard loyalty_card;
   loyalty_card.plan_name = "Walgreens Rewards";
   loyalty_card.issuer_name = "Walgreens";
@@ -136,10 +147,10 @@ IN_PROC_BROWSER_TEST_P(WalletablePassSaveBubbleViewBrowserTest, LoyaltyCard) {
 }
 
 IN_PROC_BROWSER_TEST_P(WalletablePassSaveBubbleViewBrowserTest, EventTicket) {
-  wallet::WalletablePass pass;
+  wallet::WalletPass pass;
   wallet::EventPass event_pass;
   event_pass.event_name = "LA Dodgers at SF Giants";
-  event_pass.event_start_date = "2020-01-01";
+  event_pass.event_start_time = ParseTime("2020-01-01");
   event_pass.issuer_name = "MLB";
   event_pass.venue = "AT&T Park";
   event_pass.issuer_name = "Ticketmaster";
@@ -150,12 +161,12 @@ IN_PROC_BROWSER_TEST_P(WalletablePassSaveBubbleViewBrowserTest, EventTicket) {
 }
 
 IN_PROC_BROWSER_TEST_P(WalletablePassSaveBubbleViewBrowserTest, TransitTicket) {
-  wallet::WalletablePass pass;
+  wallet::WalletPass pass;
   wallet::TransitTicket transit_ticket;
   transit_ticket.agency_name = "Metro Transit";
   transit_ticket.origin = "KGX";
   transit_ticket.destination = "YRK";
-  transit_ticket.date_of_travel = "2025-12-25";
+  transit_ticket.travel_time = ParseTime("2025-12-25");
   pass.pass_data = std::move(transit_ticket);
 
   mock_controller()->SetUpAndShowSaveBubble(pass, base::DoNothing());
@@ -163,13 +174,13 @@ IN_PROC_BROWSER_TEST_P(WalletablePassSaveBubbleViewBrowserTest, TransitTicket) {
 }
 
 IN_PROC_BROWSER_TEST_P(WalletablePassSaveBubbleViewBrowserTest, BoardingPass) {
-  wallet::WalletablePass pass;
+  wallet::WalletPass pass;
   wallet::BoardingPass boarding_pass;
   boarding_pass.airline = "United Airlines";
   boarding_pass.flight_code = "UA123";
   boarding_pass.origin = "SFO";
   boarding_pass.destination = "JFK";
-  boarding_pass.date = "2025-12-25";
+  boarding_pass.date = ParseTime("2025-12-25");
   pass.pass_data = std::move(boarding_pass);
 
   mock_controller()->SetUpAndShowSaveBubble(pass, base::DoNothing());

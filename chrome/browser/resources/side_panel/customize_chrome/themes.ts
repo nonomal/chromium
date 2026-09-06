@@ -6,12 +6,14 @@ import 'chrome://customize-chrome-side-panel.top-chrome/shared/sp_heading.js';
 import 'chrome://resources/cr_elements/cr_auto_img/cr_auto_img.js';
 import 'chrome://resources/cr_elements/cr_grid/cr_grid.js';
 import 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
+import 'chrome://resources/cr_elements/cr_tooltip/cr_tooltip.js';
 import './check_mark_wrapper.js';
 import '/strings.m.js';
 
 import type {SpHeadingElement} from 'chrome://customize-chrome-side-panel.top-chrome/shared/sp_heading.js';
 import {HelpBubbleMixinLit} from 'chrome://resources/cr_components/help_bubble/help_bubble_mixin_lit.js';
 import type {CrToggleElement} from 'chrome://resources/cr_elements/cr_toggle/cr_toggle.js';
+import type {CrTooltipElement} from 'chrome://resources/cr_elements/cr_tooltip/cr_tooltip.js';
 import {assert} from 'chrome://resources/js/assert.js';
 import {FocusOutlineManager} from 'chrome://resources/js/focus_outline_manager.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
@@ -19,7 +21,7 @@ import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 
 import {CustomizeChromeAction, NtpImageType, recordCustomizeChromeAction, recordCustomizeChromeImageError} from './common.js';
-import type {BackgroundCollection, CollectionImage, CustomizeChromePageCallbackRouter, CustomizeChromePageHandlerInterface, Theme} from './customize_chrome.mojom-webui.js';
+import type {BackgroundCollection, CollectionImage, Theme} from './customize_chrome.mojom-webui.js';
 import {CustomizeChromeApiProxy} from './customize_chrome_api_proxy.js';
 import {getCss} from './themes.css.js';
 import {getHtml} from './themes.html.js';
@@ -36,6 +38,7 @@ export interface ThemesElement {
   $: {
     refreshDailyToggle: CrToggleElement,
     heading: SpHeadingElement,
+    themeTooltip: CrTooltipElement,
   };
 }
 
@@ -72,31 +75,25 @@ export class ThemesElement extends ThemesElementBase {
   private accessor theme_: Theme|undefined;
   protected accessor themes_: CollectionImage[] = [];
 
-  private callbackRouter_: CustomizeChromePageCallbackRouter;
-  private pageHandler_: CustomizeChromePageHandlerInterface;
+  private apiProxy_: CustomizeChromeApiProxy =
+      CustomizeChromeApiProxy.getInstance();
   private previewImageLoadStartEpoch_: number = -1;
   private setThemeListenerId_: number|null = null;
-
-  constructor() {
-    super();
-    this.pageHandler_ = CustomizeChromeApiProxy.getInstance().handler;
-    this.callbackRouter_ = CustomizeChromeApiProxy.getInstance().callbackRouter;
-  }
 
   override connectedCallback() {
     super.connectedCallback();
     this.setThemeListenerId_ =
-        this.callbackRouter_.setTheme.addListener((theme: Theme) => {
+        this.apiProxy_.callbackRouter.setTheme.addListener(theme => {
           this.theme_ = theme;
         });
-    this.pageHandler_.updateTheme();
+    this.apiProxy_.handler.updateTheme();
     FocusOutlineManager.forDocument(document);
   }
 
   override disconnectedCallback() {
     super.disconnectedCallback();
     assert(this.setThemeListenerId_);
-    this.callbackRouter_.removeListener(this.setThemeListenerId_);
+    this.apiProxy_.callbackRouter.removeListener(this.setThemeListenerId_);
   }
 
   override willUpdate(changedProperties: PropertyValues<this>) {
@@ -115,6 +112,11 @@ export class ThemesElement extends ThemesElementBase {
     }
   }
 
+  override firstUpdated() {
+    this.registerHelpBubble(
+        CHROME_THEME_BACK_ELEMENT_ID, this.$.heading.getBackButton());
+  }
+
   override updated(changedProperties: PropertyValues<this>) {
     super.updated(changedProperties);
 
@@ -124,11 +126,6 @@ export class ThemesElement extends ThemesElementBase {
     if (changedPrivateProperties.has('themes_') && this.themes_.length > 0) {
       this.onThemesRendered_();
     }
-  }
-
-  override firstUpdated() {
-    this.registerHelpBubble(
-        CHROME_THEME_BACK_ELEMENT_ID, this.$.heading.getBackButton());
   }
 
   focusOnBackButton() {
@@ -178,7 +175,7 @@ export class ThemesElement extends ThemesElementBase {
     this.themes_ = [];
     if (this.selectedCollection) {
       this.previewImageLoadStartEpoch_ = WindowProxy.getInstance().now();
-      this.pageHandler_.getBackgroundImages(this.selectedCollection.id)
+      this.apiProxy_.handler.getBackgroundImages(this.selectedCollection.id)
           .then(({images}) => {
             this.themes_ = images;
           });
@@ -186,11 +183,11 @@ export class ThemesElement extends ThemesElementBase {
     }
   }
 
-  protected onBackClick_() {
+  protected onBackButtonClick_() {
     this.dispatchEvent(new Event('back-click'));
   }
 
-  protected onSelectTheme_(e: Event) {
+  protected onThemeClick_(e: Event) {
     const index = Number((e.currentTarget as HTMLElement).dataset['index']);
     const theme = this.themes_[index]!;
 
@@ -204,7 +201,7 @@ export class ThemesElement extends ThemesElementBase {
       previewImageUrl,
       collectionId,
     } = theme;
-    this.pageHandler_.setBackgroundImage(
+    this.apiProxy_.handler.setBackgroundImage(
         attribution1, attribution2, attributionUrl, imageUrl, previewImageUrl,
         collectionId);
   }
@@ -219,15 +216,31 @@ export class ThemesElement extends ThemesElementBase {
   }
 
   protected onRefreshDailyToggleChange_(e: CustomEvent<boolean>) {
-    this.pageHandler_.setDailyRefreshCollectionId(
+    this.apiProxy_.handler.setDailyRefreshCollectionId(
         e.detail ? this.selectedCollection!.id : '');
   }
 
   protected isThemeSelected_(url: string): boolean {
     return !!this.theme_ && !this.theme_.thirdPartyThemeInfo &&
         !!this.theme_.backgroundImage &&
-        this.theme_?.backgroundImage.url.url === url &&
+        this.theme_?.backgroundImage.url === url &&
         !this.isRefreshToggleChecked_;
+  }
+
+  protected onThemeFocus_(e: Event) {
+    const tile = e.currentTarget as HTMLElement;
+    const index = Number(tile.dataset['index']);
+    const theme = this.themes_[index];
+    if (!theme) {
+      return;
+    }
+    this.$.themeTooltip.textContent = theme.attribution1;
+    this.$.themeTooltip.target = tile;
+    this.$.themeTooltip.show();
+  }
+
+  protected onThemeBlur_() {
+    this.$.themeTooltip.hide();
   }
 }
 

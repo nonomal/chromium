@@ -18,7 +18,15 @@ D3D12VideoProcessorWrapper::D3D12VideoProcessorWrapper(
   CHECK_EQ(video_device.As(&device_), S_OK);
 }
 
-D3D12VideoProcessorWrapper::~D3D12VideoProcessorWrapper() = default;
+D3D12VideoProcessorWrapper::~D3D12VideoProcessorWrapper() {
+  // Ensure any in-flight video processing work has completed before releasing
+  // resources that may still be referenced by the GPU.
+  if (auto status = WaitForInFlightWorkImpl(); !status.is_ok()) {
+    DLOG(ERROR) << "Waiting for in-flight video processing during teardown "
+                   "failed: "
+                << static_cast<int>(status.code());
+  }
+}
 
 bool D3D12VideoProcessorWrapper::Init() {
   D3D12_COMMAND_QUEUE_DESC command_queue_desc{
@@ -64,7 +72,61 @@ bool D3D12VideoProcessorWrapper::Init() {
   return true;
 }
 
-bool D3D12VideoProcessorWrapper::ProcessFrames(
+D3D11Status D3D12VideoProcessorWrapper::WaitForInFlightWork() {
+  return WaitForInFlightWorkImpl();
+}
+
+D3D11Status D3D12VideoProcessorWrapper::WaitForInFlightWorkImpl() {
+  if (!fence_ || fence_->GetCompletedValue() >= fence_->Value()) {
+    return D3D11StatusCode::kOk;
+  }
+  return fence_->WaitCPU(fence_->Value());
+}
+
+bool D3D12VideoProcessorWrapper::Wait(D3D12FenceAndValue fence_and_value) {
+  auto [fence, value] = fence_and_value;
+  CHECK(fence);
+  HRESULT hr = command_queue_->Wait(fence.Get(), value);
+  if (FAILED(hr)) {
+    DLOG(ERROR) << "D3D12 video process command queue wait failed: "
+                << logging::SystemErrorCodeToString(hr);
+    return false;
+  }
+  return true;
+}
+
+bool D3D12VideoProcessorWrapper::CheckVideoProcessorSupport(
+    UINT input_width,
+    UINT input_height,
+    DXGI_FORMAT input_format,
+    const gfx::ColorSpace& input_color_space,
+    DXGI_FORMAT output_format,
+    const gfx::ColorSpace& output_color_space) {
+  D3D12_FEATURE_DATA_VIDEO_PROCESS_SUPPORT support{
+      .InputSample = {.Width = input_width,
+                      .Height = input_height,
+                      .Format = {.Format = input_format,
+                                 .ColorSpace =
+                                     gfx::ColorSpaceWin::GetDXGIColorSpace(
+                                         input_color_space)}},
+      .InputFrameRate = {30, 1},
+      .OutputFormat = {.Format = output_format,
+                       .ColorSpace = gfx::ColorSpaceWin::GetDXGIColorSpace(
+                           output_color_space)},
+      .OutputFrameRate = {30, 1},
+  };
+  HRESULT hr = video_device_->CheckFeatureSupport(
+      D3D12_FEATURE_VIDEO_PROCESS_SUPPORT, &support, sizeof(support));
+  if (FAILED(hr)) {
+    DLOG(ERROR) << "CheckFeatureSupport for "
+                   "D3D12_FEATURE_VIDEO_PROCESS_SUPPORT failed: "
+                << logging::SystemErrorCodeToString(hr);
+    return false;
+  }
+  return support.SupportFlags == D3D12_VIDEO_PROCESS_SUPPORT_FLAG_SUPPORTED;
+}
+
+D3D12FenceAndValue D3D12VideoProcessorWrapper::ProcessFrames(
     ID3D12Resource* input_texture,
     UINT input_subresource,
     const gfx::ColorSpace& input_color_space,
@@ -74,11 +136,13 @@ bool D3D12VideoProcessorWrapper::ProcessFrames(
     const gfx::ColorSpace& output_color_space,
     const gfx::Rect& output_rectangle) {
   DCHECK(command_queue_ && command_allocator_ && command_list_ && fence_);
+  DCHECK(!input_rectangle.IsEmpty());
   D3D12_RESOURCE_DESC input_texture_desc = input_texture->GetDesc();
   D3D12_RESOURCE_DESC output_texture_desc = output_texture->GetDesc();
   D3D12_VIDEO_SIZE_RANGE source_size_range{
       static_cast<UINT>(input_texture_desc.Width), input_texture_desc.Height,
-      static_cast<UINT>(input_texture_desc.Width), input_texture_desc.Height};
+      static_cast<UINT>(input_rectangle.width()),
+      static_cast<UINT>(input_rectangle.height())};
   D3D12_VIDEO_SIZE_RANGE destination_size_range{
       static_cast<UINT>(output_texture_desc.Width), output_texture_desc.Height,
       static_cast<UINT>(output_texture_desc.Width), output_texture_desc.Height};
@@ -101,26 +165,16 @@ bool D3D12VideoProcessorWrapper::ProcessFrames(
       UNSAFE_TODO(memcmp(&output_stream_desc, &output_stream_desc_,
                          sizeof(D3D12_VIDEO_PROCESS_OUTPUT_STREAM_DESC))) !=
           0) {
-    D3D12_FEATURE_DATA_VIDEO_PROCESS_SUPPORT support{
-        .InputSample = {.Width = static_cast<UINT>(input_texture_desc.Width),
-                        .Height = input_texture_desc.Height,
-                        .Format = {.Format = input_texture_desc.Format,
-                                   .ColorSpace = input_stream_desc.ColorSpace}},
-        .InputFrameRate = {30, 1},
-        .OutputFormat = {.Format = output_texture_desc.Format,
-                         .ColorSpace = output_stream_desc.ColorSpace},
-        .OutputFrameRate = {30, 1},
-    };
-    hr = video_device_->CheckFeatureSupport(D3D12_FEATURE_VIDEO_PROCESS_SUPPORT,
-                                            &support, sizeof(support));
-    if (FAILED(hr)) {
-      DLOG(ERROR) << "CheckFeatureSupport for "
-                     "D3D12_FEATURE_VIDEO_PROCESS_SUPPORT failed: "
-                  << logging::SystemErrorCodeToString(hr);
-    }
-    if (support.SupportFlags != D3D12_VIDEO_PROCESS_SUPPORT_FLAG_SUPPORTED) {
+    // Query for the source rectangle rather than the whole input texture: that
+    // is the region ProcessFrames() below samples, and the driver's answer
+    // depends on the size it is asked to read and scale.
+    if (!CheckVideoProcessorSupport(
+            static_cast<UINT>(input_rectangle.width()),
+            static_cast<UINT>(input_rectangle.height()),
+            input_texture_desc.Format, input_color_space,
+            output_texture_desc.Format, output_color_space)) {
       DLOG(ERROR) << "D3D12 cannot support video processing.";
-      return false;
+      return {};
     }
 
     hr = video_device_->CreateVideoProcessor(0, &output_stream_desc, 1,
@@ -129,24 +183,35 @@ bool D3D12VideoProcessorWrapper::ProcessFrames(
     if (FAILED(hr)) {
       DLOG(ERROR) << "Create video processor failed: "
                   << logging::SystemErrorCodeToString(hr);
-      return false;
+      return {};
     }
     input_stream_desc_ = input_stream_desc;
     output_stream_desc_ = output_stream_desc;
+  }
+
+  // Ensure the GPU has finished executing previous commands before resetting
+  // the allocator. Without this guard, a downstream error could leave the
+  // allocator in use when Reset() is called.
+  // An alternative approach is to reuse the allocator without resetting it.
+  // However, this could potentially cause the allocator to grow unboundedly.
+  if (auto status = WaitForInFlightWork(); !status.is_ok()) {
+    DLOG(ERROR) << "Waiting for previous video processing failed: "
+                << static_cast<int>(status.code());
+    return {};
   }
 
   hr = command_allocator_->Reset();
   if (FAILED(hr)) {
     DLOG(ERROR) << "Reset video process command allocator failed:"
                 << logging::SystemErrorCodeToString(hr);
-    return false;
+    return {};
   }
 
   hr = command_list_->Reset(command_allocator_.Get());
   if (FAILED(hr)) {
     DLOG(ERROR) << "Reset video process command list failed:"
                 << logging::SystemErrorCodeToString(hr);
-    return false;
+    return {};
   }
 
   std::vector<D3D12_RESOURCE_BARRIER> resource_barriers;
@@ -185,14 +250,19 @@ bool D3D12VideoProcessorWrapper::ProcessFrames(
   if (FAILED(hr)) {
     DLOG(ERROR) << "Close video process command list failed:"
                 << logging::SystemErrorCodeToString(hr);
-    return false;
+    return {};
   }
 
   ID3D12CommandList* command_list = command_list_.Get();
   command_queue_->ExecuteCommandLists(1, &command_list);
 
-  return fence_->SignalAndWaitCPU(*command_queue_.Get()) ==
-         D3D11StatusCode::kOk;
+  auto value_or_error = fence_->Signal(*command_queue_.Get());
+  if (!value_or_error.has_value()) {
+    DLOG(ERROR) << "Failed to call Signal: "
+                << std::move(value_or_error).error().message();
+    return {};
+  }
+  return {fence_->Get(), std::move(value_or_error).value()};
 }
 
 }  // namespace media

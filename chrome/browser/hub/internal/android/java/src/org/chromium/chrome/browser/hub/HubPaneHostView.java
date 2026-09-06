@@ -5,42 +5,65 @@
 package org.chromium.chrome.browser.hub;
 
 import static org.chromium.chrome.browser.hub.HubAnimationConstants.PANE_COLOR_BLEND_ANIMATION_DURATION_MS;
-import static org.chromium.chrome.browser.hub.HubAnimationConstants.PANE_SLIDE_ANIMATION_DURATION_MS;
 
-import android.animation.Animator;
-import android.animation.AnimatorListenerAdapter;
-import android.animation.AnimatorSet;
-import android.animation.ObjectAnimator;
 import android.content.Context;
 import android.util.AttributeSet;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.ViewParent;
 import android.widget.FrameLayout;
 
 import androidx.annotation.ColorInt;
 
 import org.chromium.base.Callback;
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.NonNullObservableSupplier;
+import org.chromium.build.annotations.MonotonicNonNull;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
-import org.chromium.ui.animation.AnimationHandler;
-
-import java.util.Objects;
+import org.chromium.chrome.browser.hub.swipe.HubPaneSwipeCoordinator;
 
 /** Holds the current pane's {@link View}. */
 @NullMarked
 public class HubPaneHostView extends FrameLayout {
+    /** A provider of adjacent pane views during a swipe drag gesture. */
+    public interface PaneViewProvider {
+        /**
+         * Prepares the adjacent pane for display (warming resources) and returns its root view, or
+         * null if there is no adjacent pane to switch to.
+         */
+        @Nullable View prepareAndGetAdjacentPaneView(boolean isSwipeLeft);
+
+        /**
+         * Notifies that the swipe drag has completed successfully, indicating the Hub should switch
+         * focus to the adjacent pane.
+         */
+        void onSwipeSwitchComplete(boolean isSwipeLeft);
+
+        /** Notifies that the swipe drag was cancelled or settled back to the original pane. */
+        default void onSwipeSwitchCancel(boolean isSwipeLeft) {}
+
+        /** Notifies of the active drag displacement progress (fraction from 0.0 to 1.0). */
+        default void onSwipeDragProgress(float progress, boolean isSwipeLeft) {}
+    }
+
+    /** A checker to see if a touch is on an interactive element. */
+    public interface InteractiveElementChecker {
+        /**
+         * Returns whether the touch at (x, y) (relative to the pane's root view) is interactive.
+         */
+        boolean isTouchOnInteractiveElement(float x, float y);
+    }
+
+    private final HubColorMixerRegistrationHelper mColorMixerHelper =
+            new HubColorMixerRegistrationHelper();
     private FrameLayout mPaneFrame;
     private ViewGroup mSnackbarContainer;
-    private @Nullable View mCurrentViewRoot;
-    private final AnimationHandler mSlideAnimatorHandler;
-    private @Nullable ObservableSupplier<Boolean> mXrSpaceModeObservableSupplier;
+    private @Nullable NonNullObservableSupplier<Boolean> mXrSpaceModeObservableSupplier;
+    private @MonotonicNonNull HubPaneSwipeCoordinator mSwipeCoordinator;
 
     /** Default {@link FrameLayout} constructor called by inflation. */
     public HubPaneHostView(Context context, AttributeSet attributeSet) {
         super(context, attributeSet);
-        mSlideAnimatorHandler = new AnimationHandler();
     }
 
     @Override
@@ -49,6 +72,47 @@ public class HubPaneHostView extends FrameLayout {
 
         mPaneFrame = findViewById(R.id.pane_frame);
         mSnackbarContainer = findViewById(R.id.pane_host_view_snackbar_container);
+        mSwipeCoordinator = new HubPaneSwipeCoordinator(this, mPaneFrame);
+
+        Context context = getContext();
+        mColorMixerHelper.registerBlend(
+                new SingleHubViewColorBlend(
+                        PANE_COLOR_BLEND_ANIMATION_DURATION_MS,
+                        colorScheme -> getBackgroundColor(context, colorScheme),
+                        mPaneFrame::setBackgroundColor));
+    }
+
+    public void setPaneViewProvider(@Nullable PaneViewProvider provider) {
+        assert mSwipeCoordinator != null;
+        mSwipeCoordinator.setPaneViewProvider(provider);
+    }
+
+    public void setInteractiveElementChecker(@Nullable InteractiveElementChecker checker) {
+        assert mSwipeCoordinator != null;
+        mSwipeCoordinator.setInteractiveElementChecker(checker);
+    }
+
+    @Override
+    public boolean onInterceptTouchEvent(MotionEvent motionEvent) {
+        assert mSwipeCoordinator != null;
+        return mSwipeCoordinator.onInterceptTouchEvent(motionEvent);
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event) {
+        assert mSwipeCoordinator != null;
+        boolean handled = mSwipeCoordinator.onTouchEvent(event);
+        if (handled && event.getActionMasked() == MotionEvent.ACTION_UP) {
+            performClick();
+        }
+        return handled;
+    }
+
+    @Override
+    public boolean performClick() {
+        // This is a no-op, but we need to override it for accessibility.
+        super.performClick();
+        return true;
     }
 
     /**
@@ -60,88 +124,16 @@ public class HubPaneHostView extends FrameLayout {
      *     (true) or right-to-left (false), only when slide animation is enabled.
      */
     void setRootView(@Nullable View newRootView, boolean isSlideAnimationLeftToRight) {
-
-        final View oldRootView = mCurrentViewRoot;
-        mCurrentViewRoot = newRootView;
-
-        if (oldRootView != null && newRootView != null) {
-            // If width is not available, just swap views without animation.
-            if (mPaneFrame.getWidth() == 0) {
-                mPaneFrame.removeAllViews();
-                tryAddViewToFrame(newRootView);
-            } else {
-                animateSlideTransition(oldRootView, newRootView, isSlideAnimationLeftToRight);
-            }
-        } else if (newRootView == null) {
-            mPaneFrame.removeAllViews();
-        } else { // oldRootView == null
-            tryAddViewToFrame(newRootView);
-        }
-    }
-
-    private void animateSlideTransition(View oldRootView, View newRootView, boolean isLeftToRight) {
-        mSlideAnimatorHandler.forceFinishAnimation();
-        int containerWidth = mPaneFrame.getWidth();
-
-        // Determine start and end positions based on direction.
-        float oldViewEndTranslation = isLeftToRight ? containerWidth : -containerWidth;
-        float newViewStartTranslation = isLeftToRight ? -containerWidth : containerWidth;
-
-        // Ensure old view is at its starting position.
-        oldRootView.setTranslationX(0);
-        // Position new view off-screen.
-        newRootView.setTranslationX(newViewStartTranslation);
-
-        // Ensure new view is added before animation starts.
-        tryAddViewToFrame(newRootView);
-
-        Animator slideOut =
-                ObjectAnimator.ofFloat(oldRootView, View.TRANSLATION_X, 0, oldViewEndTranslation);
-        slideOut.setDuration(PANE_SLIDE_ANIMATION_DURATION_MS);
-
-        Animator slideIn =
-                ObjectAnimator.ofFloat(newRootView, View.TRANSLATION_X, newViewStartTranslation, 0);
-        slideIn.setDuration(PANE_SLIDE_ANIMATION_DURATION_MS);
-
-        AnimatorSet animatorSet = new AnimatorSet();
-        animatorSet.playTogether(slideOut, slideIn);
-        animatorSet.addListener(
-                new AnimatorListenerAdapter() {
-                    @Override
-                    public void onAnimationEnd(Animator animation) {
-                        mPaneFrame.removeView(oldRootView);
-                        oldRootView.setTranslationX(0);
-                        newRootView.setTranslationX(0);
-                    }
-                });
-        mSlideAnimatorHandler.startAnimation(animatorSet);
+        assert mSwipeCoordinator != null;
+        mSwipeCoordinator.setRootView(newRootView, isSlideAnimationLeftToRight);
     }
 
     void setColorMixer(HubColorMixer mixer) {
-        registerColorBlends(mixer);
-    }
-
-    private void registerColorBlends(HubColorMixer mixer) {
-        Context context = getContext();
-        mixer.registerBlend(
-                new SingleHubViewColorBlend(
-                        PANE_COLOR_BLEND_ANIMATION_DURATION_MS,
-                        colorScheme -> getBackgroundColor(context, colorScheme),
-                        mPaneFrame::setBackgroundColor));
+        mColorMixerHelper.setColorMixer(mixer);
     }
 
     void setSnackbarContainerConsumer(Callback<ViewGroup> consumer) {
         consumer.onResult(mSnackbarContainer);
-    }
-
-    private void tryAddViewToFrame(View rootView) {
-        ViewParent parent = rootView.getParent();
-        if (!Objects.equals(parent, mPaneFrame)) {
-            if (parent instanceof ViewGroup viewGroup) {
-                viewGroup.removeView(rootView);
-            }
-            mPaneFrame.addView(rootView);
-        }
     }
 
     private @ColorInt int getBackgroundColor(Context context, @HubColorScheme int colorScheme) {
@@ -151,7 +143,17 @@ public class HubPaneHostView extends FrameLayout {
     }
 
     public void setXrSpaceModeObservableSupplier(
-            @Nullable ObservableSupplier<Boolean> xrSpaceModeObservableSupplier) {
+            NonNullObservableSupplier<Boolean> xrSpaceModeObservableSupplier) {
         mXrSpaceModeObservableSupplier = xrSpaceModeObservableSupplier;
+    }
+
+    public void destroy() {
+        if (mSwipeCoordinator != null) {
+            mSwipeCoordinator.destroy();
+        }
+        mColorMixerHelper.destroy();
+        if (mPaneFrame != null) {
+            mPaneFrame.removeAllViews();
+        }
     }
 }

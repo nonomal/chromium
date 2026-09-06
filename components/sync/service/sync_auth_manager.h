@@ -7,12 +7,15 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "components/signin/public/identity_manager/access_token_info.h"
 #include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/account_managed_status_finder_outcome.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
@@ -23,7 +26,6 @@
 
 namespace signin {
 class AccessTokenFetcher;
-struct AccessTokenInfo;
 class AccountManagedStatusFinder;
 }  // namespace signin
 
@@ -66,7 +68,8 @@ class SyncAuthManager : public signin::IdentityManager::Observer {
   // but if non-null, must outlive this object. `delegate` must not be null and
   // must outlive this object.
   SyncAuthManager(signin::IdentityManager* identity_manager,
-                  Delegate* delegate);
+                  Delegate* delegate,
+                  base::TimeDelta account_managed_status_finder_timeout);
 
   SyncAuthManager(const SyncAuthManager&) = delete;
   SyncAuthManager& operator=(const SyncAuthManager&) = delete;
@@ -103,11 +106,14 @@ class SyncAuthManager : public signin::IdentityManager::Observer {
   // Returns the credentials to be passed to the SyncEngine.
   SyncCredentials GetCredentials() const;
 
-  const std::string& access_token() const { return access_token_; }
-
   // Returns the state of the access token and token request, for display in
   // internals UI.
   SyncTokenStatus GetSyncTokenStatus() const;
+
+  // Requests an access token. runs `callback` with the result (can be called
+  // synchronously or asynchronously).
+  void FetchAccessToken(
+      base::OnceCallback<void(signin::AccessTokenInfo)> callback);
 
   // Called by SyncServiceImpl when Sync starts up and will try talking to
   // the server soon. This initiates fetching an access token.
@@ -150,6 +156,7 @@ class SyncAuthManager : public signin::IdentityManager::Observer {
     // The `account_changed_callback` will be called whenever an account's
     // managed-ness is determined asynchronously.
     ActiveAccount(signin::IdentityManager* identity_manager,
+                  base::TimeDelta managed_status_finder_timeout,
                   base::RepeatingClosure account_changed_callback);
     ~ActiveAccount();
 
@@ -171,6 +178,7 @@ class SyncAuthManager : public signin::IdentityManager::Observer {
     void AccountTypeDeterminedAsynchronously();
 
     const raw_ptr<signin::IdentityManager> identity_manager_;
+    const base::TimeDelta managed_status_finder_timeout_;
     base::RepeatingClosure account_changed_callback_;
     SyncAccountInfo account_info_;
     std::unique_ptr<signin::AccountManagedStatusFinder> managed_status_finder_;
@@ -213,6 +221,8 @@ class SyncAuthManager : public signin::IdentityManager::Observer {
 
   void SetLastAuthError(const GoogleServiceAuthError& error);
 
+  void NotifyAccessTokenCallbacks(const signin::AccessTokenInfo& token);
+
   const raw_ptr<signin::IdentityManager> identity_manager_;
   base::ScopedObservation<signin::IdentityManager,
                           signin::IdentityManager::Observer>
@@ -242,7 +252,7 @@ class SyncAuthManager : public signin::IdentityManager::Observer {
   // `ongoing_access_token_fetch_` and `request_access_token_retry_timer_`:
   // We have at most one of a) an access token OR b) a pending request OR c) a
   // pending retry i.e. a scheduled request.
-  std::string access_token_;
+  signin::AccessTokenInfo access_token_info_;
 
   // Pending request for an access token. Non-null iff there is a request
   // ongoing.
@@ -263,6 +273,9 @@ class SyncAuthManager : public signin::IdentityManager::Observer {
   // happen once during browser startup, so it's sufficient to have a single
   // retry (i.e. not per request).
   bool access_token_retried_ = false;
+
+  std::vector<base::OnceCallback<void(signin::AccessTokenInfo)>>
+      access_token_callbacks_;
 
   base::WeakPtrFactory<SyncAuthManager> weak_ptr_factory_{this};
 };

@@ -4,11 +4,11 @@
 
 #include <set>
 
-#include "base/containers/contains.h"
 #include "base/run_loop.h"
 #include "base/scoped_observation.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/accessibility/live_caption/live_caption_speech_recognition_host_browsertest.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "components/soda/constants.h"
 #include "components/soda/soda_installer.h"
 #include "media/base/media_switches.h"
@@ -121,8 +121,8 @@ IN_PROC_BROWSER_TEST_F(LiveCaptionAutomaticLanguageDownloadTest,
 
   // The en-US language pack is downloaded by default. Only the fr-FR language
   // pack should be automatically downloaded.
-  ASSERT_TRUE(base::Contains(installed_languages, speech::LanguageCode::kEnUs));
-  ASSERT_TRUE(base::Contains(installed_languages, speech::LanguageCode::kFrFr));
+  ASSERT_TRUE(installed_languages.contains(speech::LanguageCode::kEnUs));
+  ASSERT_TRUE(installed_languages.contains(speech::LanguageCode::kFrFr));
 }
 
 }  // namespace captions

@@ -64,7 +64,7 @@ public class ReaderModeMetrics {
         RecordHistogram.recordEnumeratedHistogram(
                 READER_MODE_CONTEXTUAL_PAGE_ACTION_EVENT_HISTOGRAM,
                 action,
-                ReaderModeContextualPageActionEvent.MAX_VALUE);
+                ReaderModeContextualPageActionEvent.MAX_VALUE + 1);
     }
 
     /**
@@ -126,7 +126,7 @@ public class ReaderModeMetrics {
         RecordHistogram.recordEnumeratedHistogram(
                 "DomDistiller.Android.EntryPoint." + tabTypeString,
                 entryPoint,
-                EntryPoint.MAX_VALUE);
+                EntryPoint.MAX_VALUE + 1);
     }
 
     /** Record when a user enters Reading Mode. */
@@ -187,5 +187,15 @@ public class ReaderModeMetrics {
     public static void reportReaderModePrefsThemeChanged(@Theme.EnumType int theme) {
         RecordUserAction.record("DomDistiller.Android.ThemeChanged");
         RecordHistogram.recordCount100Histogram("DomDistiller.Android.ThemeSelected", theme);
+    }
+
+    /**
+     * Report the links enabled state in the prefs.
+     *
+     * @param enabled Whether links are enabled.
+     */
+    public static void reportReaderModePrefsLinksEnabled(boolean enabled) {
+        RecordUserAction.record("DomDistiller.Android.LinksEnabledChanged");
+        RecordHistogram.recordBooleanHistogram("DomDistiller.Android.LinksEnabled", enabled);
     }
 }

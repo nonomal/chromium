@@ -9,6 +9,7 @@
 #include <optional>
 #include <string_view>
 
+#include "base/byte_size.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/time/time.h"
 #include "components/page_load_metrics/browser/page_load_metrics_observer.h"
@@ -17,9 +18,19 @@
 #include "third_party/blink/public/common/loader/loading_behavior_flag.h"
 #include "url/gurl.h"
 
-// Up to 10 minutes, with 100 buckets.
+// LINT.IfChange(page_load_histogram)
+// 10 ms to 10 minutes, with 100 buckets.
 #define PAGE_LOAD_HISTOGRAM(name, sample)                             \
   base::UmaHistogramCustomTimes(name, sample, base::Milliseconds(10), \
+                                base::Minutes(10), 100)
+// LINT.ThenChange(/chrome/android/java/src/org/chromium/chrome/browser/ntp/NewTabPage.java:page_load_histogram)
+
+// 1 ms to 10 minutes, with 100 buckets.
+// Used for metrics where we want to avoid sub-10ms values being rounded
+// to zero (falling into the underflow bucket), which occurs in the
+// PAGE_LOAD_HISTOGRAM.
+#define PAGE_LOAD_HISTOGRAM2(name, sample)                           \
+  base::UmaHistogramCustomTimes(name, sample, base::Milliseconds(1), \
                                 base::Minutes(10), 100)
 
 // 1 ms to 1 minute, with 100 buckets.
@@ -47,6 +58,7 @@
 namespace page_load_metrics {
 
 class PageLoadMetricsObserverDelegate;
+struct SoftNavigationData;
 
 namespace mojom {
 class PageLoadTiming;
@@ -130,6 +142,14 @@ bool WasStartedInForegroundOptionalEventInForeground(
 
 // Returns true if:
 // - We have timing information for the event.
+// - The soft navigation started while the page was in the foreground.
+// - The event occurred prior to the page being moved to the background.
+bool WasSoftNavigationStartedInForegroundOptionalEventInForeground(
+    const std::optional<base::TimeDelta>& event,
+    const SoftNavigationData& soft_navigation_data);
+
+// Returns true if:
+// - We have timing information for the event.
 // - The page load was prerendered, and was later activated by a navigation that
 //   started in the foreground.
 // - The event occurred prior to the page being moved to the background.
@@ -176,10 +196,6 @@ std::optional<base::TimeDelta> GetNonPrerenderingBackgroundStartTiming(
 bool EventOccurredBeforeNonPrerenderingBackgroundStart(
     const PageLoadMetricsObserverDelegate& delegate,
     const base::TimeDelta& event);
-bool EventOccurredBeforeNonPrerenderingBackgroundStart(
-    const PageLoadMetricsObserverDelegate& delegate,
-    const page_load_metrics::mojom::PageLoadTiming& timing,
-    const base::TimeDelta& event);
 
 // Corrects an event with navigation start origin as navigation/activation
 // start origin.
@@ -189,10 +205,6 @@ bool EventOccurredBeforeNonPrerenderingBackgroundStart(
 // are truncated as zero.
 base::TimeDelta CorrectEventAsNavigationOrActivationOrigined(
     const PageLoadMetricsObserverDelegate& delegate,
-    const base::TimeDelta& event);
-base::TimeDelta CorrectEventAsNavigationOrActivationOrigined(
-    const PageLoadMetricsObserverDelegate& delegate,
-    const page_load_metrics::mojom::PageLoadTiming& timing,
     const base::TimeDelta& event);
 
 PageAbortInfo GetPageAbortInfo(const PageLoadMetricsObserverDelegate& delegate);
@@ -279,6 +291,9 @@ bool IsServiceWorkerSyntheticResponseEnabled(
 bool IsServiceWorkerControlledOrSyntheticResponseEnabled(
     const PageLoadMetricsObserverDelegate& delegate);
 
+// Buckets for recording PaintTiming_LargestContentfulPaintBPP; see
+// also BitsPerPixelExponential enum in //tools/metrics/histograms/enums.xml.
+int64_t CalculateLCPEntropyBucket(double bpp);
 }  // namespace page_load_metrics
 
 #endif  // COMPONENTS_PAGE_LOAD_METRICS_BROWSER_PAGE_LOAD_METRICS_UTIL_H_

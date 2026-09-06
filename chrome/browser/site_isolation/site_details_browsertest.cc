@@ -22,7 +22,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/metrics/metrics_memory_details.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -32,6 +31,7 @@
 #include "content/public/browser/spare_render_process_host_manager.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/process_type.h"
 #include "content/public/test/back_forward_cache_util.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -45,6 +45,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features.h"
+#include "ui/base/page_transition_types.h"
 
 using base::Bucket;
 using content::WebContents;
@@ -108,6 +109,14 @@ class TestMemoryDetails : public MetricsMemoryDetails {
   std::unique_ptr<base::HistogramTester> uma_;
   base::RunLoop loop_;
 };
+
+// Helper method to get the baseline page titles
+size_t GetGlobalPageTitleCount() {
+  scoped_refptr<TestMemoryDetails> details =
+      base::MakeRefCounted<TestMemoryDetails>();
+  details->StartFetchAndWait();
+  return details->CountPageTitles();
+}
 
 // This matcher takes three other matchers as arguments, and applies one of them
 // depending on the current site isolation mode. The first applies if no site
@@ -197,20 +206,20 @@ class SiteDetailsBrowserTest : public extensions::ExtensionBrowserTest {
                                    bool has_background_process) {
     TestExtensionDir dir;
 
-    auto manifest = base::Value::Dict()
+    auto manifest = base::DictValue()
                         .Set("name", name)
                         .Set("version", "1.0")
                         .Set("manifest_version", 2)
                         .Set("web_accessible_resources",
-                             base::Value::List()
+                             base::ListValue()
                                  .Append("blank_iframe.html")
                                  .Append("http_iframe.html")
                                  .Append("two_http_iframes.html"));
 
     if (has_background_process) {
       manifest.Set("background",
-                   base::Value::Dict().Set(
-                       "scripts", base::Value::List().Append("script.js")));
+                   base::DictValue().Set(
+                       "scripts", base::ListValue().Append("script.js")));
       dir.WriteFile(FILE_PATH_LITERAL("script.js"),
                     "console.log('" + name + " running');");
     }
@@ -254,15 +263,15 @@ class SiteDetailsBrowserTest : public extensions::ExtensionBrowserTest {
     TestExtensionDir dir;
 
     auto manifest =
-        base::Value::Dict()
+        base::DictValue()
             .Set("name", name)
             .Set("version", "1.0")
             .Set("manifest_version", 2)
             .Set("app",
-                 base::Value::Dict()
-                     .Set("urls", base::Value::List().Append(app_url.spec()))
+                 base::DictValue()
+                     .Set("urls", base::ListValue().Append(app_url.spec()))
                      .Set("launch",
-                          base::Value::Dict().Set("web_url", app_url.spec())));
+                          base::DictValue().Set("web_url", app_url.spec())));
     dir.WriteManifest(manifest);
 
     const Extension* extension = LoadExtension(dir.UnpackedPath());
@@ -296,7 +305,7 @@ class SiteDetailsBrowserTest : public extensions::ExtensionBrowserTest {
 // multiple iframes, navigation, multiple BrowsingInstances, and multiple tabs
 // in the same BrowsingInstance.
 //
-// Disabled since it's flaky: https://crbug.com/830318.
+// Disabled since it's flaky: https://crbug.com/41381593.
 IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_ManyIframes) {
   // Page with 14 nested oopifs across 9 sites (a.com through i.com).
   // None of these are https.
@@ -306,7 +315,8 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_ManyIframes) {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), abcdefghi_url));
 
   // Get the metrics.
-  scoped_refptr<TestMemoryDetails> details = new TestMemoryDetails();
+  scoped_refptr<TestMemoryDetails> details =
+      base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
 
   EXPECT_EQ(1U, details->CountPageTitles());
@@ -330,7 +340,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_ManyIframes) {
       "/cross_site_iframe_factory.html?p(q(r),r(s),s(t),t(q),u(u),v(p))");
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), pqrstuv_url));
 
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
 
   EXPECT_EQ(1U, details->CountPageTitles());
@@ -353,7 +363,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_ManyIframes) {
       "a.com", "/cross_site_iframe_factory.html?a(b(c(d())))");
   ASSERT_TRUE(AddTabAtIndex(1, abcd_url, ui::PAGE_TRANSITION_TYPED));
 
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
 
   EXPECT_EQ(2U, details->CountPageTitles());
@@ -376,7 +386,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_ManyIframes) {
   // Open a third tab (different BrowsingInstance) with the same 4 sites.
   ASSERT_TRUE(AddTabAtIndex(2, abcd_url, ui::PAGE_TRANSITION_TYPED));
 
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
 
   EXPECT_THAT(
@@ -388,7 +398,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_ManyIframes) {
   // For --site-per-process, the total process count will be 12 instead of 15,
   // because the third tab's subframes (b, c, d) will reuse matching subframe
   // processes from the second tab (across BrowsingInstances).  This subframe
-  // process consolidation was added as part of https://crbug.com/512560.  Note
+  // process consolidation was added as part of https://crbug.com/40427731. Note
   // that the a.com main frame in tab 3 won't reuse tab 2's main frame process,
   // so this is still one process higher than the lower bound.
   EXPECT_THAT(GetRenderProcessCount(), DependingOnPolicy(3, 3, 12));
@@ -418,7 +428,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_ManyIframes) {
   ASSERT_EQ(4, browser()->tab_strip_model()->count());
   load_complete.Wait();
 
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
 
   EXPECT_THAT(
@@ -442,7 +452,8 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_ManyIframes) {
 IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_IsolateExtensions) {
   // We start on "about:blank", which should be credited with a process in this
   // case.
-  scoped_refptr<TestMemoryDetails> details = new TestMemoryDetails();
+  scoped_refptr<TestMemoryDetails> details =
+      base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
@@ -466,7 +477,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_IsolateExtensions) {
   ASSERT_TRUE(AddTabAtIndex(1, tab2_url, ui::PAGE_TRANSITION_TYPED));
   WebContents* tab2 = browser()->tab_strip_model()->GetWebContentsAt(1);
 
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
@@ -482,7 +493,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_IsolateExtensions) {
   // background page).
   content::NavigateIframeToURL(tab1, "child-0",
                                extension1->GetResourceURL("blank_iframe.html"));
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
@@ -495,7 +506,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_IsolateExtensions) {
   // background page and the other iframe).
   content::NavigateIframeToURL(tab2, "child-0",
                                extension1->GetResourceURL("blank_iframe.html"));
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
@@ -507,7 +518,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_IsolateExtensions) {
   // result in a new process since extension2 had no existing process.
   content::NavigateIframeToURL(tab1, "child-1",
                                extension2->GetResourceURL("blank_iframe.html"));
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
@@ -519,7 +530,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_IsolateExtensions) {
   // share the existing extension2 process.
   content::NavigateIframeToURL(tab2, "child-1",
                                extension2->GetResourceURL("blank_iframe.html"));
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
@@ -536,7 +547,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_IsolateExtensions) {
   // used as an iframe in tab1, and extension3 is the top-level frame in tab2.
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), extension3->GetResourceURL("blank_iframe.html")));
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
@@ -549,7 +560,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_IsolateExtensions) {
   // in theory, the iframe could share a process with tab1's main frame.
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), extension3->GetResourceURL("http_iframe.html")));
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
@@ -565,7 +576,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_IsolateExtensions) {
              TabStripUserGestureDetails::GestureType::kOther));
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), extension3->GetResourceURL("blank_iframe.html")));
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
@@ -578,17 +589,17 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_IsolateExtensions) {
   // own process (the Estimate number).
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), extension3->GetResourceURL("http_iframe.html")));
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
 
   // There should be four total renderer processes: one for each of the two web
   // iframes, one for extension3, and one for extension 1's background page.
-  // Note that the optimization in https://crbug.com/512560, where subframes
+  // Note that the optimization in https://crbug.com/40427731, where subframes
   // that require a dedicated process reuse existing processes where possible,
   // does not apply to web iframes in extensions anymore -- see
-  // https://crbug.com/899418.
+  // https://crbug.com/40599941.
   EXPECT_THAT(GetRenderProcessCount(), DependingOnPolicy(2, 4, 4));
   EXPECT_THAT(details->GetOutOfProcessIframeCount(),
               DependingOnPolicy(0, 2, 2));
@@ -596,8 +607,16 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_IsolateExtensions) {
 
 // Exercises accounting in the case where an extension has two different-site
 // web iframes.
-IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, ExtensionWithTwoWebIframes) {
-  scoped_refptr<TestMemoryDetails> details = new TestMemoryDetails();
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_ExtensionWithTwoWebIframes DISABLED_ExtensionWithTwoWebIframes
+#else
+#define MAYBE_ExtensionWithTwoWebIframes ExtensionWithTwoWebIframes
+#endif
+IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest,
+                       MAYBE_ExtensionWithTwoWebIframes) {
+  size_t baseline_count = GetRenderProcessCount() - 1;
+  scoped_refptr<TestMemoryDetails> details =
+      base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
 
   // Install one script-injecting extension with background page, and an
@@ -607,16 +626,16 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, ExtensionWithTwoWebIframes) {
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), extension->GetResourceURL("two_http_iframes.html")));
 
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
-
+  int active_processes = GetRenderProcessCount() - baseline_count;
   if (content::AreAllSitesIsolatedForTesting()) {
-    EXPECT_THAT(GetRenderProcessCount(), DependingOnPolicy(1, 3, 3));
+    EXPECT_THAT(active_processes, DependingOnPolicy(1, 3, 3));
   } else {
     // When full isolation is not turned on, the 2 subframes share a process.
-    EXPECT_THAT(GetRenderProcessCount(), DependingOnPolicy(1, 2, 2));
+    EXPECT_THAT(active_processes, DependingOnPolicy(1, 2, 2));
   }
 
   EXPECT_THAT(details->GetOutOfProcessIframeCount(),
@@ -625,7 +644,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, ExtensionWithTwoWebIframes) {
 
 // Verifies that --isolate-extensions doesn't isolate hosted apps.
 //
-// Disabled since it's flaky: https://crbug.com/830318.
+// Disabled since it's flaky: https://crbug.com/41381593.
 IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest,
                        DISABLED_IsolateExtensionsHostedApps) {
   GURL app_with_web_iframe_url = embedded_test_server()->GetURL(
@@ -635,7 +654,8 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest,
 
   // No hosted app is installed: app.org just behaves like a normal domain.
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), app_with_web_iframe_url));
-  scoped_refptr<TestMemoryDetails> details = new TestMemoryDetails();
+  scoped_refptr<TestMemoryDetails> details =
+      base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
@@ -644,7 +664,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest,
               DependingOnPolicy(0, 0, 1));
 
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), app_in_web_iframe_url));
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
@@ -658,7 +678,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest,
   // Reload the same two pages, and verify that the hosted app still is not
   // isolated by --isolate-extensions, but is isolated by --site-per-process.
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), app_with_web_iframe_url));
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
@@ -667,7 +687,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest,
               DependingOnPolicy(0, 0, 1));
 
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), app_in_web_iframe_url));
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_EQ(GetRenderProcessCountFromUma(details->uma()),
             GetRenderProcessCount());
@@ -679,7 +699,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest,
 // Verifies that the UMA counter for SiteInstances in a BrowsingInstance is
 // correct when using tabs with web pages.
 //
-// Disabled since it's flaky. https://crbug.com/934900
+// Disabled since it's flaky. https://crbug.com/41442957
 IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest,
                        DISABLED_VerifySiteInstanceCountInBrowsingInstance) {
   // Page with 14 nested oopifs across 9 sites (a.com through i.com).
@@ -689,7 +709,8 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest,
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), abcdefghi_url));
 
   // Get the metrics.
-  scoped_refptr<TestMemoryDetails> details = new TestMemoryDetails();
+  scoped_refptr<TestMemoryDetails> details =
+      base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
 
   // Since there are no extensions involved, the results in the default case
@@ -715,7 +736,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest,
   ASSERT_EQ(2, browser()->tab_strip_model()->count());
   load_complete.Wait();
 
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_THAT(details->uma()->GetAllSamples(
                   "SiteIsolation.SiteInstancesPerBrowsingInstance"),
@@ -731,7 +752,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest,
       "a.com", "/cross_site_iframe_factory.html?a(b(c(d())))");
   ASSERT_TRUE(AddTabAtIndex(1, abcd_url, ui::PAGE_TRANSITION_TYPED));
 
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_THAT(
       details->uma()->GetAllSamples(
@@ -750,7 +771,7 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest,
 // Verifies that the UMA counter for SiteInstances in a BrowsingInstance is
 // correct when extensions and web pages are mixed together.
 //
-// Disabled since it's flaky: https://crbug.com/830318.
+// Disabled since it's flaky: https://crbug.com/41381593.
 IN_PROC_BROWSER_TEST_F(
     SiteDetailsBrowserTest,
     DISABLED_VerifySiteInstanceCountInBrowsingInstanceWithExtensions) {
@@ -761,7 +782,8 @@ IN_PROC_BROWSER_TEST_F(
       "a.com", "/cross_site_iframe_factory.html?a(b,c,d(e))");
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), tab_url));
   WebContents* tab = browser()->tab_strip_model()->GetWebContentsAt(0);
-  scoped_refptr<TestMemoryDetails> details = new TestMemoryDetails();
+  scoped_refptr<TestMemoryDetails> details =
+      base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
 
   // Since there are no extensions loaded yet, the results in the default case
@@ -779,7 +801,7 @@ IN_PROC_BROWSER_TEST_F(
   // of the frame tree.
   content::NavigateIframeToURL(tab, "child-0",
                                extension1->GetResourceURL("blank_iframe.html"));
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_THAT(details->uma()->GetAllSamples(
                   "SiteIsolation.SiteInstancesPerBrowsingInstance"),
@@ -788,7 +810,7 @@ IN_PROC_BROWSER_TEST_F(
   // Now load an extension with a background page. This will result in a
   // BrowsingInstance for the background page.
   const Extension* extension2 = CreateExtension("Extension Two", true);
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_THAT(details->uma()->GetAllSamples(
                   "SiteIsolation.SiteInstancesPerBrowsingInstance"),
@@ -800,7 +822,7 @@ IN_PROC_BROWSER_TEST_F(
   // stay in the same BrowsingInstance as the page.
   content::NavigateIframeToURL(tab, "child-1",
                                extension2->GetResourceURL("blank_iframe.html"));
-  details = new TestMemoryDetails();
+  details = base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   EXPECT_THAT(details->uma()->GetAllSamples(
                   "SiteIsolation.SiteInstancesPerBrowsingInstance"),
@@ -842,18 +864,17 @@ IN_PROC_BROWSER_TEST_F(PrerenderSiteDetailsBrowserTest,
   // Navigate to an initial page.
   auto initial_url = embedded_test_server()->GetURL("/empty.html");
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  size_t baseline_count = GetGlobalPageTitleCount();
 
   // Load a page in the prerender.
   GURL prerender_url = embedded_test_server()->GetURL("/title2.html");
-  content::FrameTreeNodeId host_id =
+  content::PrerenderHostId host_id =
       prerender_helper_.AddPrerender(prerender_url);
   content::test::PrerenderHostObserver host_observer(*web_contents(), host_id);
   EXPECT_FALSE(host_observer.was_activated());
 
-  scoped_refptr<TestMemoryDetails> details = new TestMemoryDetails();
-  details->StartFetchAndWait();
   // Currently we don't collect the title of the prerendering page.
-  EXPECT_EQ(1U, details->CountPageTitles());
+  EXPECT_EQ(baseline_count, GetGlobalPageTitleCount());
 }
 
 class FencedFrameSiteDetailsBrowserTest : public InProcessBrowserTest {
@@ -888,6 +909,7 @@ IN_PROC_BROWSER_TEST_F(FencedFrameSiteDetailsBrowserTest,
   content::IsolateAllSitesForTesting(base::CommandLine::ForCurrentProcess());
   auto initial_url = embedded_test_server()->GetURL("a.com", "/empty.html");
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  size_t baseline_count = GetGlobalPageTitleCount();
 
   // Load a fenced frame.
   GURL fenced_frame_url =
@@ -897,10 +919,11 @@ IN_PROC_BROWSER_TEST_F(FencedFrameSiteDetailsBrowserTest,
           web_contents()->GetPrimaryMainFrame(), fenced_frame_url);
   ASSERT_TRUE(fenced_frame_host);
 
-  scoped_refptr<TestMemoryDetails> details = new TestMemoryDetails();
+  scoped_refptr<TestMemoryDetails> details =
+      base::MakeRefCounted<TestMemoryDetails>();
   details->StartFetchAndWait();
   // Currently we don't collect the title of the fenced frame.
-  EXPECT_EQ(1U, details->CountPageTitles());
+  EXPECT_EQ(baseline_count, details->CountPageTitles());
 
   // Expect we encountered one fenced frame.
   EXPECT_EQ(1, details->GetOutOfProcessInnerFrameTreesCount());
@@ -942,6 +965,7 @@ IN_PROC_BROWSER_TEST_F(BackForwardCacheSiteDetailsBrowserTest,
   const GURL url_b(embedded_test_server()->GetURL("b.com", "/title1.html"));
 
   EXPECT_EQ(web_contents()->GetVisibility(), content::Visibility::VISIBLE);
+  size_t baseline_count = GetGlobalPageTitleCount();
 
   // Navigate to A.
   EXPECT_TRUE(ui_test_utils::NavigateToURL(browser(), url_a));
@@ -949,8 +973,6 @@ IN_PROC_BROWSER_TEST_F(BackForwardCacheSiteDetailsBrowserTest,
   // Navigate to B.
   EXPECT_TRUE(ui_test_utils::NavigateToURL(browser(), url_b));
 
-  scoped_refptr<TestMemoryDetails> details = new TestMemoryDetails();
-  details->StartFetchAndWait();
   // Currently we don't collect the title of the back forward cache.
-  EXPECT_EQ(1U, details->CountPageTitles());
+  EXPECT_EQ(baseline_count, GetGlobalPageTitleCount());
 }

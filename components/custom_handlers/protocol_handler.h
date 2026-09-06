@@ -52,13 +52,16 @@ class ProtocolHandler {
   static ProtocolHandler CreateExtensionProtocolHandler(
       const std::string& protocol,
       const GURL& url,
-      const std::string& extension_id);
+      const std::string& extension_id,
+      bool is_allowed_in_incognito = false);
 
   ProtocolHandler(const std::string& protocol,
                   const GURL& url,
                   std::optional<std::string> app_id,
                   std::optional<std::string> extension_id,
                   base::Time last_modified,
+                  bool is_confirmed,
+                  bool is_allowed_in_incognito,
                   blink::ProtocolHandlerSecurityLevel security_level);
 
   ProtocolHandler(const ProtocolHandler& other);
@@ -66,17 +69,23 @@ class ProtocolHandler {
 
   // Creates a ProtocolHandler with fields from the dictionary. Returns an
   // empty ProtocolHandler if the input is invalid.
-  static ProtocolHandler CreateProtocolHandler(const base::Value::Dict& value);
+  static ProtocolHandler CreateProtocolHandler(const base::DictValue& value);
 
   // Returns true if the dictionary value has all the necessary fields to
   // define a ProtocolHandler.
-  static bool IsValidDict(const base::Value::Dict& value);
+  static bool IsValidDict(const base::DictValue& value);
 
   // Return true if the protocol handler meets security constraints.
   // Verify custom handler URLs security and syntax as well as the schemes
   // safelist as described in steps 1, 2, 6 and 7 (except same origin).
   // https://html.spec.whatwg.org/multipage/system-state.html#custom-handlers.
   bool IsValid() const;
+
+  // Extra security check, separate from the HTML-spec validity of IsValid():
+  // a handler using extension-level privileges (kExtensionFeatures) must be
+  // associated with an extension, otherwise extension cleanup can never remove
+  // it. Returns true for handlers that do not use extension privileges.
+  bool IsAllowedExtensionHandler() const;
 
   // Returns true if this handler's url has the same origin as the given one.
   bool IsSameOrigin(const ProtocolHandler& handler) const;
@@ -95,8 +104,8 @@ class ProtocolHandler {
   // ignored.
   bool IsEquivalent(const ProtocolHandler& other) const;
 
-  // Encodes this protocol handler as a `base::Value::Dict`.
-  base::Value::Dict Encode() const;
+  // Encodes this protocol handler as a `base::DictValue`.
+  base::DictValue Encode() const;
 
   // Returns a friendly name for |protocol| if one is available, otherwise
   // this function returns |protocol|.
@@ -106,6 +115,9 @@ class ProtocolHandler {
   // this function returns |this.protocol_|.
   std::u16string GetProtocolDisplayName() const;
 
+  // Mark the protocol handler as confirmed by the user.
+  void Confirm() { is_confirmed_ = true; }
+
   const std::string& protocol() const { return protocol_; }
   const GURL& url() const { return url_; }
   const std::optional<std::string>& web_app_id() const { return web_app_id_; }
@@ -113,6 +125,16 @@ class ProtocolHandler {
     return extension_id_;
   }
   const base::Time& last_modified() const { return last_modified_; }
+
+  // Returns true if the user has granted permission explicitly to use this
+  // protocol handler. Unconfirmed protocol handlers can be registered by Web
+  // Extensions, through the 'protocol_handlers' Manifest key.
+  bool is_confirmed() const { return is_confirmed_; }
+
+  bool is_allowed_in_incognito() const { return is_allowed_in_incognito_; }
+  void set_is_allowed_in_incognito(bool is_allowed_in_incognito) {
+    is_allowed_in_incognito_ = is_allowed_in_incognito;
+  }
 
   bool IsEmpty() const { return protocol_.empty(); }
   bool IsExtensionHandler() const { return extension_id_.has_value(); }
@@ -133,6 +155,8 @@ class ProtocolHandler {
   std::optional<std::string> web_app_id_;
   std::optional<std::string> extension_id_;
   base::Time last_modified_;
+  bool is_confirmed_{true};
+  bool is_allowed_in_incognito_{false};
   blink::ProtocolHandlerSecurityLevel security_level_;
 };
 
